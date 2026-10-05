@@ -21,6 +21,7 @@ import { isKernelTerminalError } from "./errors.js";
 import { clampToolOutput } from "./tool-output-guard.js";
 import { missionSatisfied } from "./mission-satisfaction.js";
 import { redactInternalPaths } from "./founder-text.js";
+import { stripFalsePromises } from "./promise-guard.js";
 import { writeTaskOutcome } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { HITL_GATED_TOOLS } from "../infra/hitl.js";
@@ -180,7 +181,7 @@ export function makeSynthesizeNode(model: KernelChatModel) {
 
     return {
       mission: { ...state.mission, status: "done" },
-      reply: redactInternalPaths(text.trim()) + founderReceiptsBlock(state.results),
+      reply: stripFalsePromises(redactInternalPaths(text.trim()), state.results) + founderReceiptsBlock(state.results),
     };
   };
 }
