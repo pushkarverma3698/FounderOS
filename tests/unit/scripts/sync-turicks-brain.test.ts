@@ -21,6 +21,9 @@ import {
   projectForSource,
   resolveSyncTarget,
   BRAIN_HOSTNAME,
+  needsEntryEmbedding,
+  entryEmbeddingText,
+  tryEmbedEntry,
 } from "../../../scripts/sync-turicks-brain.js";
 import { missingEnvFileMessage, missingVarMessage } from "../../../scripts/lib/require-env.js";
 
@@ -324,5 +327,39 @@ describe("declaredDocStatus", () => {
 
   it("is ACTIVE for empty content", () => {
     expect(declaredDocStatus("")).toBe("ACTIVE");
+  });
+});
+
+describe("knowledge_entries doc-level embedding", () => {
+  it("needs an embedding when the stored one is null, missing or empty", () => {
+    expect(needsEntryEmbedding({ embedding: null })).toBe(true);
+    expect(needsEntryEmbedding({ embedding: undefined })).toBe(true);
+    expect(needsEntryEmbedding({ embedding: [] })).toBe(true);
+  });
+
+  it("does not need one when a vector is already stored", () => {
+    expect(needsEntryEmbedding({ embedding: [0.1, 0.2] })).toBe(false);
+  });
+
+  it("embeds the title plus the first chunk, never the whole doc", () => {
+    const content = "# Heading\n" + "word ".repeat(2000);
+    const text = entryEmbeddingText("My Title", content);
+
+    expect(text.startsWith("My Title\n\n")).toBe(true);
+    expect(text.length).toBeLessThan(2100);
+  });
+
+  it("returns the vector from the injected embedder", async () => {
+    const embed = async () => [0.5, 0.25];
+
+    expect(await tryEmbedEntry("T", "body", embed)).toEqual({ ok: true, vector: [0.5, 0.25] });
+  });
+
+  it("reports a failure instead of throwing when the embedder rejects", async () => {
+    const embed = async () => {
+      throw new Error("ollama down");
+    };
+
+    expect(await tryEmbedEntry("T", "body", embed)).toEqual({ ok: false, error: "ollama down" });
   });
 });
