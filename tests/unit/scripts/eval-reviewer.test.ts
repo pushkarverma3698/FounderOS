@@ -262,7 +262,7 @@ describe("fixtures", () => {
   });
 
   it("the diff is small enough to read in one prompt", () => {
-    for (const c of cases) expect(c.diff.split("\n").length, c.id).toBeLessThanOrEqual(c.expect === "APPROVE" ? 200 : 130);
+    for (const c of cases) expect(c.diff.split("\n").length, c.id).toBeLessThan(c.expect === "APPROVE" ? 200 : 131);
   });
 
   it("dry run with the scripted runner catches every defect (wiring check, not a model measurement)", async () => {

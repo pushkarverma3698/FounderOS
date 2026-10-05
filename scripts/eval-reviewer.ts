@@ -11,7 +11,14 @@
  * A defect is CAUGHT when the verdict is REQUEST_CHANGES (after parseReviewVerdict) and a finding
  * names the defect's file and has its keyword in the claim or evidence. A finding under APPROVE is
  * only "mentioned": it does not stop a merge. Unparseable output, a wrong head, or a thrown runner
- * is a miss. In a dry run the scripted runner answers from the answer key, so 100% there only
+ * is a miss.
+ *
+ * Catch rate alone is gameable: a reviewer that always answers REQUEST_CHANGES and lists every
+ * keyword scores 100%. So the set also holds CLEAN cases (expect "APPROVE", planted_defects []):
+ * real merged diffs with no follow-up fix. A clean case passes only on APPROVE; REQUEST_CHANGES or
+ * UNKNOWN is a false block, reported as "False blocks: x/n" under the catch rate. Read both numbers.
+ *
+ * In a dry run the scripted runner answers from the answer key, so 100% there only
  * proves the fixtures and the scorer are wired; it says nothing about any model.
  *
  * --live pipes each prompt to the command's stdin and reads its stdout. It costs money (~$50 for
@@ -34,15 +41,22 @@ const PlantedDefectSchema = z.object({
   keyword: z.string().min(1),
 });
 
-export const EvalCaseSchema = z.object({
-  id: z.string().min(1),
-  source: z.enum(["historical", "planted"]),
-  pr: z.number().int().positive().optional(),
-  /** What the reviewer is told besides the diff: PR title, contract excerpt, repo rule. Never the answer. */
-  context: z.string().optional(),
-  diff: z.string().min(1),
-  planted_defects: z.array(PlantedDefectSchema).min(1),
-});
+export const EvalCaseSchema = z
+  .object({
+    id: z.string().min(1),
+    source: z.enum(["historical", "planted"]),
+    pr: z.number().int().positive().optional(),
+    /** What the reviewer is told besides the diff: PR title, contract excerpt, repo rule. Never the answer. */
+    context: z.string().optional(),
+    diff: z.string().min(1),
+    planted_defects: z.array(PlantedDefectSchema),
+    /** "APPROVE" marks a clean case: a real merged diff with no known defect. Only APPROVE passes it. */
+    expect: z.literal("APPROVE").optional(),
+  })
+  .refine((c) => (c.expect === "APPROVE" ? c.planted_defects.length === 0 : c.planted_defects.length >= 1), {
+    message: 'a case needs at least one planted defect, unless it is clean (expect "APPROVE", no defects)',
+    path: ["planted_defects"],
+  });
 
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 export type PlantedDefect = z.infer<typeof PlantedDefectSchema>;
@@ -65,6 +79,10 @@ export interface CaseScore {
   defects: DefectResult[];
   caught: number;
   total: number;
+  /** A clean case: no known defect, the only passing decision is APPROVE. */
+  clean: boolean;
+  /** Clean case answered with REQUEST_CHANGES or UNKNOWN (including a runner error): the gate would block good work. */
+  falseBlock: boolean;
   /** Findings that match no planted defect (noise or unplanted bugs; read them, do not trust the count). */
   extraFindings: number;
   error?: string;
@@ -75,6 +93,9 @@ export interface EvalReport {
   totalDefects: number;
   caughtDefects: number;
   catchRate: number;
+  cleanCases: number;
+  /** Clean cases the reviewer blocked (or failed to answer). Read with the catch rate: a reviewer that blocks everything catches 100%. */
+  falseBlocks: number;
 }
 
 export function loadCases(dir: string): EvalCase[] {
@@ -124,6 +145,7 @@ function hasKeyword(text: string, keyword: string): boolean {
 export function scoreCase(c: EvalCase, output: string): CaseScore {
   const verdict = parseReviewVerdict(output, caseHead(c.id));
   const blocking = verdict.decision === "REQUEST_CHANGES";
+  const clean = c.expect === "APPROVE";
   const usedFindings = new Set<number>();
 
   const defects = c.planted_defects.map((defect): DefectResult => {
@@ -148,6 +170,8 @@ export function scoreCase(c: EvalCase, output: string): CaseScore {
     defects,
     caught: defects.filter((d) => d.caught).length,
     total: defects.length,
+    clean,
+    falseBlock: clean && verdict.decision !== "APPROVE",
     extraFindings: Math.max(0, reviewerFindings - coercionNotes - usedFindings.size),
   };
 }
@@ -166,6 +190,8 @@ export async function runEval(cases: EvalCase[], runReviewer: RunReviewer, proto
         defects: c.planted_defects.map((defect) => ({ defect, mentioned: false, caught: false })),
         caught: 0,
         total: c.planted_defects.length,
+        clean: c.expect === "APPROVE",
+        falseBlock: c.expect === "APPROVE",
         extraFindings: 0,
         error: (e as Error).message,
       });
@@ -173,7 +199,14 @@ export async function runEval(cases: EvalCase[], runReviewer: RunReviewer, proto
   }
   const totalDefects = scores.reduce((n, s) => n + s.total, 0);
   const caughtDefects = scores.reduce((n, s) => n + s.caught, 0);
-  return { cases: scores, totalDefects, caughtDefects, catchRate: totalDefects === 0 ? 0 : caughtDefects / totalDefects };
+  return {
+    cases: scores,
+    totalDefects,
+    caughtDefects,
+    catchRate: totalDefects === 0 ? 0 : caughtDefects / totalDefects,
+    cleanCases: scores.filter((s) => s.clean).length,
+    falseBlocks: scores.filter((s) => s.falseBlock).length,
+  };
 }
 
 export function renderTable(report: EvalReport): string {
@@ -183,10 +216,12 @@ export function renderTable(report: EvalReport): string {
   const lines = [row("case", "source", "decision", "caught", "extra"), row("-".repeat(idW), "-".repeat(10), "-".repeat(15), "-".repeat(6), "-----")];
   for (const c of report.cases) {
     const note = c.error ? ` (runner error: ${c.error})` : c.parsed ? "" : " (no valid verdict)";
-    lines.push(row(c.id, c.source, c.decision, `${c.caught}/${c.total}`, `${c.extraFindings}${note}`));
+    const got = c.clean ? (c.falseBlock ? "BLOCK" : "clean") : `${c.caught}/${c.total}`;
+    lines.push(row(c.id, c.source, c.decision, got, `${c.extraFindings}${note}`));
   }
   const pct = Math.round(report.catchRate * 100);
   lines.push("", `Catch rate: ${report.caughtDefects}/${report.totalDefects} defects (${pct}%)`);
+  lines.push(`False blocks: ${report.falseBlocks}/${report.cleanCases}`);
   return lines.join("\n");
 }
 
@@ -195,6 +230,9 @@ export function scriptedRunner(cases: EvalCase[]): RunReviewer {
   return async (prompt) => {
     const c = cases.find((x) => prompt.includes(caseHead(x.id)));
     if (!c) return "no matching case";
+    if (c.expect === "APPROVE") {
+      return "Scripted answer.\n```json\n" + JSON.stringify({ version: 1, head_sha: caseHead(c.id), decision: "APPROVE", findings: [] }) + "\n```\n";
+    }
     const findings = c.planted_defects.map((d) => ({
       severity: "blocker",
       file: alternatives(d.file)[0] ?? d.file,
@@ -273,7 +311,7 @@ async function main(): Promise<void> {
     const report = await runEval(cases, scriptedRunner(cases), protocol);
     console.log(renderTable(report));
     console.log("\nA dry run answers from the answer key: it checks the fixtures and scorer, not a reviewer.");
-    process.exitCode = report.caughtDefects === report.totalDefects ? 0 : 1;
+    process.exitCode = report.caughtDefects === report.totalDefects && report.falseBlocks === 0 ? 0 : 1;
     return;
   }
 
