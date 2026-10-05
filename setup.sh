@@ -19,7 +19,7 @@ if [ ! -f .env ]; then
   cp .env.example .env
   echo ".env created from .env.example — fill in your API keys before continuing"
   echo "   Required: GOOGLE_GENERATIVE_AI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID"
-  echo "   Optional: ANTHROPIC_API_KEY, COMPOSIO_API_KEY, FIRECRAWL_API_KEY, GITHUB_TOKEN"
+  echo "   Optional: ANTHROPIC_API_KEY, FIRECRAWL_API_KEY, GITHUB_TOKEN"
   exit 0
 fi
 

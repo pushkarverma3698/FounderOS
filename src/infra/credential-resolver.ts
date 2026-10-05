@@ -13,7 +13,7 @@ import {
   defaultGwsProfileDir,
 } from "../core/accounts.js";
 
-/** Read a key from the .env file, bypassing shell env overrides (composio pattern). */
+/** Read a key from the .env file, bypassing shell env overrides. */
 export function readEnvValue(key: string): string | undefined {
   const fromProcess = process.env[key];
   try {
@@ -58,7 +58,7 @@ export interface ResolvedMetaCredentials {
 export function defaultCredentialRefs(
   platform: Platform,
   accountKey: AccountKey,
-  authBackend: "gws" | "direct" | "meta_graph" | "composio" | "pat",
+  authBackend: "gws" | "direct" | "meta_graph" | "pat",
 ): CredentialRefs {
   switch (platform) {
     case "google":
@@ -68,10 +68,6 @@ export function defaultCredentialRefs(
         // (domain-wide delegation), with a per-account impersonation subject.
         google_sa_path_env: "GOOGLE_APPLICATION_CREDENTIALS",
         google_subject_env: `GOOGLE_SUBJECT_${accountKey.toUpperCase()}`,
-        composio_connection_id_env:
-          accountKey === "turicks" ? "COMPOSIO_GMAIL_CONN_ID" : `COMPOSIO_GMAIL_CONN_ID_${accountKey.toUpperCase()}`,
-        composio_user_id_env:
-          accountKey === "turicks" ? "COMPOSIO_GMAIL_USER_ID" : `COMPOSIO_GMAIL_USER_ID_${accountKey.toUpperCase()}`,
       };
     case "linkedin":
       return {
@@ -79,14 +75,6 @@ export function defaultCredentialRefs(
           accountKey === "turicks" ? "LINKEDIN_ACCESS_TOKEN" : defaultEnvKey("linkedin", "ACCESS_TOKEN", accountKey),
         author_urn_env:
           accountKey === "turicks" ? "LINKEDIN_AUTHOR_URN" : defaultEnvKey("linkedin", "AUTHOR_URN", accountKey),
-        composio_connection_id_env:
-          accountKey === "turicks"
-            ? "COMPOSIO_LINKEDIN_CONN_ID"
-            : `COMPOSIO_LINKEDIN_CONN_ID_${accountKey.toUpperCase()}`,
-        composio_user_id_env:
-          accountKey === "turicks"
-            ? "COMPOSIO_LINKEDIN_USER_ID"
-            : `COMPOSIO_LINKEDIN_USER_ID_${accountKey.toUpperCase()}`,
       };
     case "instagram":
     case "facebook":
@@ -139,17 +127,5 @@ export function resolveMetaCredentials(refs: CredentialRefs): ResolvedMetaCreden
     access_token: tokenKey ? readEnvValue(tokenKey) : undefined,
     page_id: pageKey ? readEnvValue(pageKey) : undefined,
     app_id: appKey ? readEnvValue(appKey) : undefined,
-  };
-}
-
-export function resolveComposioConnection(refs: CredentialRefs): {
-  connection_id?: string;
-  user_id?: string;
-} {
-  const connKey = refs.composio_connection_id_env;
-  const userKey = refs.composio_user_id_env;
-  return {
-    connection_id: connKey ? readEnvValue(connKey) : undefined,
-    user_id: userKey ? readEnvValue(userKey) : undefined,
   };
 }

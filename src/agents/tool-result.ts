@@ -25,7 +25,7 @@ export type ToolFailureStage =
   | "network" // transient connectivity / timeout
   | "auth" // missing or invalid API key / credential
   | "validation" // bad input that failed a boundary check
-  | "external_api" // Composio / Gmail / GitHub / LinkedIn upstream
+  | "external_api" // Gmail / GitHub / LinkedIn upstream
   | "unknown";
 
 /** Stable marker — must never change once shipped (the gateway greps for it). */

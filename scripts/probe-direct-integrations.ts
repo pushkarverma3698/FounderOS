@@ -27,9 +27,6 @@ const tag = (s: string) => (s === "up" ? "✅" : s === "down" ? "❌" : "⚪");
   console.log("── Google Workspace (gws) ──");
   console.log(`${tag(report.gws_gmail.status)} gws Gmail: ${report.gws_gmail.detail}`);
 
-  console.log("\n── Legacy Composio (rollback) ──");
-  console.log(`${tag(report.composio_gmail.status)} Composio Gmail: ${report.composio_gmail.detail}`);
-
   console.log("\n── Active backends ──");
   console.log(`${tag(report.active_gmail.status)} Gmail (${report.gmail_backend}): ${report.active_gmail.detail}`);
   console.log(
@@ -48,7 +45,6 @@ const tag = (s: string) => (s === "up" ? "✅" : s === "down" ? "❌" : "⚪");
     console.log("\n❌ One or more active providers are DOWN. Fix before prod cutover.");
     console.log("   Google:  npm install -g @googleworkspace/cli && gws auth login");
     console.log("   LinkedIn: set LINKEDIN_ACCESS_TOKEN + LINKEDIN_AUTHOR_URN in .env");
-    console.log("   Rollback: GMAIL_BACKEND=composio LINKEDIN_BACKEND=composio + COMPOSIO_API_KEY");
     process.exit(1);
   }
 

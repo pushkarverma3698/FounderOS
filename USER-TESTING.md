@@ -129,7 +129,7 @@ Valid departments: `research` · `comms` · `engineering` · `marketing` · `sal
 - **Browser control = macOS only.** Safari AppleScript automation requires the bot to be running on a Mac with Automation permissions granted. "Open X in my browser" may not work remotely.
 - **PDF / image files:** use "send me [filename]" to receive the file as a Telegram attachment, or "read [filename]" to get the text content.
 - **LinkedIn media:** text posts only. Image attachments via the bot are not supported.
-- **Google Calendar:** requires a Google Calendar connection set up via Composio (Pushkar configures this). If not connected, calendar events will fail with a clear error.
+- **Google Calendar:** requires the gws Calendar login on the host (Pushkar configures this). If not connected, calendar events will fail with a clear error.
 - **Job-Hunt CV features:** require the personal-rag service to be running locally. If it's down, CV reading falls back to a summary wiki.
 - **File size limit:** files over 50 MB cannot be sent via the "send me" command.
 - **Secrets are always blocked:** the bot will refuse to read files like `~/.ssh/id_rsa`, `.env`, AWS credentials, or keychains — by design.

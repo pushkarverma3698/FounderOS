@@ -21,9 +21,6 @@ function checkRefs(refs: CredentialRefs): string[] {
   if (refs.github_token_env && !readEnvValue(refs.github_token_env)) {
     missing.push(refs.github_token_env);
   }
-  if (refs.composio_connection_id_env && !readEnvValue(refs.composio_connection_id_env)) {
-    missing.push(refs.composio_connection_id_env);
-  }
   return missing;
 }
 

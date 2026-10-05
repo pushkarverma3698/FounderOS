@@ -11,7 +11,7 @@
  * same rows, and on 2026-09-26 was called for the same query in the same turn.
  *
  * Content types stored:
- *   adr            — Architecture Decision Records (e.g. ADR-002: Use Composio)
+ *   adr            — Architecture Decision Records (e.g. ADR-029: Direct Platform Integrations)
  *   brand          — Brand guidelines, voice rules, content pillars
  *   case_study     — Past client work and results
  *   strategic_pillar — 6 pillars of the business strategy
@@ -73,7 +73,7 @@ export const searchKnowledge = tool(
   {
     name: "search_knowledge",
     description:
-      "Search the turicks-brain knowledge base — architectural decisions (ADRs), brand rules, past case studies, strategic pillars, and phase notes. Use when you need company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', 'what we decided about Composio', 'FinTech client case studies'.",
+      "Search the turicks-brain knowledge base — architectural decisions (ADRs), brand rules, past case studies, strategic pillars, and phase notes. Use when you need company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', 'what we decided about direct integrations', 'FinTech client case studies'.",
     schema: z.object({
       query: z.string().describe("Keyword search query — what to look for"),
       entry_type: z
