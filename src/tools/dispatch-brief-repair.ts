@@ -134,6 +134,60 @@ export function withFounderRequestProblem(input: AntigravityTaskInput, founderRe
   return { ...input, problem: `The founder described it as:\n\n${quoted}` };
 }
 
+/** The sections {@link withFounderRequestBrief} can fill, as the founder reads them on the approval card. */
+export type FilledSection = "Goal" | "Expected" | "Verification";
+
+/** Verification when the planner gave none: the repo's own checks, no command invented for a repo nobody here has seen. No backticks: the lint reads a backticked token as a path. */
+export const VERIFICATION_REPO_CHECKS =
+  "Run the repository's own checks, the ones its CLAUDE.md, AGENTS.md, package.json scripts or CI workflow name " +
+  "(tests, lint, type check, build), and paste their raw output into the PR description. Then exercise the changed " +
+  "behavior once through its real entry point and paste that output too. Anything you could not run goes under " +
+  "NOT VERIFIED, with the reason.";
+
+const isBlank = (value: string | undefined | null): boolean => !value || value.trim() === "";
+
+const quoteLines = (text: string): string =>
+  text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+
+/**
+ * C-P0-2: `/task` writes the brief. A founder at a phone sends one sentence, and the cheap planner that expands it
+ * sometimes omits Goal, Expected or Verification; the tool used to bounce on that before any approval card existed.
+ * His own words are what was asked for, so a blank section is filled from them, quoted and labelled, and the card
+ * says which sections were filled. Verification is the repository's own checks, never a command guessed for it.
+ * Anything the planner DID supply is kept. Without a founder request nothing is invented: the blank stays blank and
+ * the caller refuses.
+ */
+export function withFounderRequestBrief(
+  input: AntigravityTaskInput,
+  founderRequest: string | undefined | null,
+): { readonly input: AntigravityTaskInput; readonly filled: readonly FilledSection[] } {
+  const request = founderRequest?.trim();
+  const filled: FilledSection[] = [];
+  if (!request) return { input, filled };
+
+  const quoted = quoteLines(request);
+  const next = { ...input };
+  if (isBlank(input.goal)) {
+    next.goal = `Do what the founder asked, in his words:\n\n${quoted}\n\nDone means the request is satisfied as worded, by the smallest change that does it, with the repository's checks passing.`;
+    filled.push("Goal");
+  }
+  if (isBlank(input.expected)) {
+    next.expected =
+      `The behavior the founder asked for, in his words:\n\n${quoted}\n\n` +
+      "The request is short. Where it leaves a detail open, choose the smallest change that satisfies it and state each choice in the PR description.";
+    filled.push("Expected");
+  }
+  if (isBlank(input.verification)) {
+    next.verification = VERIFICATION_REPO_CHECKS;
+    filled.push("Verification");
+  }
+  return filled.length === 0 ? { input, filled } : { input: next, filled };
+}
+
 /**
  * What an empty scope is filed as. The first line is the label the founder sees on the card ("Files: paths: agent to
  * locate"). No path-like token: plain text in the scope section is scanned by the lint.
@@ -163,6 +217,8 @@ export type PreparedBrief =
       readonly lint: BriefLintResult;
       /** Paths that were not found and were filed as unverified hints. Empty for a brief that needed no repair. */
       readonly demoted: readonly string[];
+      /** Sections filled from the founder's own sentence because the planner left them blank (the card names them). */
+      readonly filled: readonly FilledSection[];
       /** What the founder is told on the approval card and in the reply: lint warnings plus the demotion. */
       readonly warnings: readonly string[];
     }
@@ -195,15 +251,17 @@ export async function prepareDispatchBrief(
 ): Promise<PreparedBrief> {
   const scopeUnknown = isBlankScope(input.scope);
   const withScope = scopeUnknown ? { ...input, scope: SCOPE_UNKNOWN } : input;
-  const withEvidence = withFounderRequestEvidence(withFounderRequestProblem(withScope, founderRequest), founderRequest);
+  const { input: withSections, filled } = withFounderRequestBrief(withScope, founderRequest);
+  const withEvidence = withFounderRequestEvidence(withFounderRequestProblem(withSections, founderRequest), founderRequest);
   const prepared = await prepare(withEvidence, deps.format(withEvidence), deps);
+  if (!prepared.ok) return prepared;
   // First, so it is the line the approval card quotes: it is the one thing the founder has not seen in the brief.
-  return scopeUnknown && prepared.ok ? { ...prepared, warnings: [SCOPE_UNKNOWN_WARNING, ...prepared.warnings] } : prepared;
+  return { ...prepared, filled, warnings: scopeUnknown ? [SCOPE_UNKNOWN_WARNING, ...prepared.warnings] : prepared.warnings };
 }
 
 async function prepare(withEvidence: AntigravityTaskInput, body: string, deps: PrepareDeps): Promise<PreparedBrief> {
   const lint = await deps.lint(body);
-  if (lint.ok) return { ok: true, input: withEvidence, body, lint, demoted: [], warnings: lint.warnings };
+  if (lint.ok) return { ok: true, input: withEvidence, body, lint, demoted: [], filled: [], warnings: lint.warnings };
 
   if (lint.missingPaths.length === 0) return { ok: false, input: withEvidence, body, lint };
 
@@ -219,6 +277,7 @@ async function prepare(withEvidence: AntigravityTaskInput, body: string, deps: P
     body: repairedBody,
     lint: repairedLint,
     demoted,
+    filled: [],
     warnings: [
       `Not found in the repository, so filed as unverified hints, not facts: ${shown}. Antigravity locates the real files itself.`,
       ...repairedLint.warnings,

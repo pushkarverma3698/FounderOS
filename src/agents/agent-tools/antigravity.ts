@@ -20,7 +20,7 @@ import {
   resolveDispatchRepo,
   type AntigravityTaskInput,
 } from "../../tools/dispatch-antigravity.js";
-import { prepareDispatchBrief } from "../../tools/dispatch-brief-repair.js";
+import { prepareDispatchBrief, type PreparedBrief } from "../../tools/dispatch-brief-repair.js";
 import { renderCardPreview } from "../../tools/dispatch-brief-preview.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../../tools/dispatch-repos.js";
 import { ENGINES, engineDisplay, engineLabel, parseEngine, readDefaultEngine } from "../../tools/coding-engine.js";
@@ -31,11 +31,32 @@ import { TENANT } from "../../core/config.js";
 
 const log = childLogger({ module: "agent-tools:antigravity" });
 
+/** The model's own input for the card, except the sections that were blank and were filled from the founder's sentence. */
+function cardInput(input: AntigravityTaskInput, prepared: Extract<PreparedBrief, { ok: true }>): AntigravityTaskInput {
+  return {
+    ...input,
+    goal: prepared.filled.includes("Goal") ? prepared.input.goal : input.goal,
+    expected: prepared.filled.includes("Expected") ? prepared.input.expected : input.expected,
+    verification: prepared.filled.includes("Verification") ? prepared.input.verification : input.verification,
+  };
+}
+
 export const dispatchAntigravityTask = tool(
   async (
     { title, goal, scope: givenScope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine },
     config,
   ) => {
+    // goal, expected and verification are optional in the schema: a cheap planner that omits one must not bounce
+    // before the founder sees a card. They are filled from his sentence below (withFounderRequestBrief); without
+    // the sentence there is nothing to fill them from, and this refuses as text to the model, never as a question.
+    const request = founder_request?.trim() ?? "";
+    if (!request && [goal, expected, verification].some((v) => !v?.trim())) {
+      return (
+        "❌ Cannot dispatch: goal, expected and verification are missing and founder_request was not passed. " +
+        "Pass the founder's message, copied verbatim, as founder_request: the missing sections are filled from it. " +
+        "Do not ask the founder for them, for a file path or for a command."
+      );
+    }
     // No file named is normal for a one-line request: the brief files it as "paths: agent to locate" (dispatch-brief-repair.ts).
     const scope = givenScope ?? "";
     // Resolve BEFORE the gate, and refuse rather than fall back.
@@ -66,10 +87,10 @@ export const dispatchAntigravityTask = tool(
 
     const input: AntigravityTaskInput = {
       title,
-      goal,
+      goal: goal ?? "",
       scope,
-      expected,
-      verification,
+      expected: expected ?? "",
+      verification: verification ?? "",
       acceptance: acceptance ?? undefined,
       forbidden: forbidden ?? undefined,
       problem: problem ?? undefined,
@@ -103,7 +124,8 @@ export const dispatchAntigravityTask = tool(
         // body would lose Verification and Acceptance first (see dispatch-brief-preview.ts).
         // The model's own scope is shown, not the repaired one (whose hint block would fill the field): the
         // demotion is named on the "Not verified" line instead.
-        preview: renderCardPreview(input, { bodyChars: prepared.body.length, warnings: prepared.warnings }),
+        // A section filled from his sentence is shown as filled (the model's own blank would render an empty line).
+        preview: renderCardPreview(cardInput(input, prepared), { bodyChars: prepared.body.length, warnings: prepared.warnings, filled: prepared.filled }),
         args: { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine: executor },
       },
       config,
@@ -112,10 +134,10 @@ export const dispatchAntigravityTask = tool(
 
     const res = await dispatchAntigravityTool.execute({
       title,
-      goal,
+      ...(goal ? { goal } : {}),
       scope,
-      expected,
-      verification,
+      ...(expected ? { expected } : {}),
+      ...(verification ? { verification } : {}),
       engine: executor,
       ...(acceptance ? { acceptance } : {}),
       ...(forbidden ? { forbidden } : {}),
@@ -157,21 +179,28 @@ export const dispatchAntigravityTask = tool(
       "Dispatch an engineering or coding task to a coding CLI on the VPS (Google Antigravity or Claude Code, see engine) via GitHub issue (requires founder approval). " +
       "Use when asked to hand off or dispatch work to Google Antigravity, or when engineering tasks involve modifying FounderOS itself. " +
       "Formats a complete self-contained ticket conforming to .github/ISSUE_TEMPLATE/agent-task.md and opens an issue with the 'agent:ready' label. " +
-      "ALWAYS pass founder_request (his own words, verbatim). Do not guess file paths: name a path only if you saw it in a tool result, " +
+      "ALWAYS pass founder_request (his own words, verbatim): goal, expected and verification you leave out are filled from it, so a one-line request is enough. Never ask the founder for a file path or a command. Do not guess file paths: name a path only if you saw it in a tool result, " +
       "otherwise describe the subsystem in words and Antigravity, which reads the whole repository, finds the files. " +
       "The brief is checked before approval: every section filled; if it names exactly what is missing, fix that and call this tool again in the same turn, " +
       "and ask the founder only for a fact that only he knows. " +
       "The VPS agent-dispatch daemon claims it within a minute, implements it in an isolated workspace, and submits a draft PR to beta; an independent reviewer (pr-brain) then reviews it.",
     schema: z.object({
       title: z.string().describe("Concise task title with conventional commit prefix (e.g. 'feat: 13k ATS scaling with per-domain rate limiting')."),
-      goal: z.string().describe("What 'done' means in 1-2 paragraphs to an executor with no prior context."),
+      goal: z.string().optional().nullable().describe(
+        "What 'done' means in 1-2 paragraphs to an executor with no prior context. Leave it out when unsure: it is filled from founder_request.",
+      ),
       scope: z.string().optional().nullable().describe(
         "The files or subsystem in scope, in plain words. Leave it out when you saw no file: it is filed as 'paths: agent to locate'. Cite a file path ONLY if you saw it in a tool result: a cited path that does " +
           "not exist is filed as an unverified hint, not an error, and Antigravity locates the real files. Never guess a path. " +
           "Paths the task will create go in new_files.",
       ),
-      expected: z.string().describe("Detailed expected behavior, architecture specifications, algorithms, or requirements."),
-      verification: z.string().describe("Exact shell commands whose raw output proves the fix (e.g. 'pnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate')."),
+      expected: z.string().optional().nullable().describe(
+        "Detailed expected behavior, architecture specifications, algorithms, or requirements. Leave it out when unsure: it is filled from founder_request.",
+      ),
+      verification: z.string().optional().nullable().describe(
+        "Exact shell commands whose raw output proves the fix (e.g. 'pnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate'). " +
+          "Leave it out when you do not know the repository's commands: it is filed as the repository's own checks.",
+      ),
       acceptance: z.string().optional().nullable().describe("Acceptance criteria the independent reviewer (pr-brain) checks before it clears the PR."),
       forbidden: z.string().optional().nullable().describe("Task-specific prohibitions beyond general standards."),
       problem: z.string().optional().nullable().describe(

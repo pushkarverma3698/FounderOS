@@ -113,6 +113,30 @@ describe("one-line /task requests are filed, not bounced", () => {
     expect((res.data as { warnings?: string[] }).warnings ?? []).toEqual([]);
   });
 
+  it("files a request whose goal, expected and verification the planner left out, from the founder's sentence", async () => {
+    const res = await dispatchAntigravityTool.execute({
+      title: "feat: shorter digest",
+      founder_request: "make the daily digest shorter",
+    });
+
+    expect(res.success, res.error ?? "").toBe(true);
+    const filed = mockIssuesCreate.mock.calls[0]?.[0] as { body: string };
+    expect(filed.body).toContain("> make the daily digest shorter");
+    expect(filed.body).toMatch(/## Verification commands\n\n[^#]*own checks/i);
+    expect(filed.body).toContain("paths: agent to locate");
+  });
+
+  it("still refuses a blank goal when there is no founder request to fill it from", async () => {
+    const full = { title: "feat: x", goal: "g", expected: "e", verification: "v" };
+    for (const args of [{ ...full, goal: "" }, { ...full, goal: "  " }, { ...full, expected: "" }, { ...full, verification: undefined }]) {
+      mockIssuesCreate.mockClear();
+      const res = await dispatchAntigravityTool.execute(args);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("requires title, goal, expected, and verification");
+      expect(mockIssuesCreate).not.toHaveBeenCalled();
+    }
+  });
+
   it("still refuses a brief that is missing something the tool cannot invent", async () => {
     const res = await dispatchAntigravityTool.execute({ title: "feat: x", goal: "g", scope: "", expected: "e" });
     expect(res.success).toBe(false);
@@ -142,6 +166,14 @@ describe("prepareDispatchBrief with no scope", () => {
     if (!prepared.ok) return;
     expect(prepared.input.scope).toBe(SCOPE_UNKNOWN);
     expect(prepared.warnings[0]).toMatch(/no file paths/i);
+  });
+
+  it("renders the card's 'Filled from your sentence' line only when something was filled", () => {
+    const base = { title: "t", goal: "g", scope: "", expected: "e", verification: "v" };
+    const filled = renderCardPreview(base, { bodyChars: 900, filled: ["Goal", "Expected", "Verification"] });
+    expect(filled).toContain("Filled from your sentence: Goal, Expected, Verification");
+    expect(renderCardPreview(base, { bodyChars: 900 })).not.toContain("Filled from your sentence");
+    expect(renderCardPreview(base, { bodyChars: 900, filled: [] })).not.toContain("Filled from your sentence");
   });
 
   it("renders the card's Files line without the blank, and with the unverified line", () => {
