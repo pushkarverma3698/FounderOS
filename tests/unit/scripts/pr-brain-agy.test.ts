@@ -78,7 +78,7 @@ function sweep(opts: SweepOptions = {}): { status: number | null; stdout: string
       QA_APP_ROOT: join(root, "no-founderos"),
       GH_DIR: ghDir,
       FAKE_HEAD: head,
-      PR_LIST: opts.prs ?? `56 ${head}`,
+      PR_LIST: opts.prs ?? `56 ${head} beta task/issue-56-x`,
       PR_LABELS_56: opts.labels ?? "",
       PR_LABELS_57: opts.labels57 ?? "",
       FAKE_PREFLIGHT: opts.preflight ?? "ok",
@@ -495,7 +495,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     git(seed, "push", "-q", bare, "task/issue-72-x");
     git(bare, "update-ref", "refs/pull/57/head", head2);
 
-    sweep({ prs: `56 ${head}\n57 ${head2}`, agyOut: review("BRAIN-VERDICT: FAIL"), env: { AGY_REVIEW_QUOTA_MODELS: SPENT } });
+    sweep({ prs: `56 ${head} beta task/issue-56-x\n57 ${head2} beta task/issue-57-x`, agyOut: review("BRAIN-VERDICT: FAIL"), env: { AGY_REVIEW_QUOTA_MODELS: SPENT } });
 
     expect(agyLog("pf-models")).toEqual([SPENT]);
     expect(agyLog("model")).toEqual([SPENT, FALLBACK, FALLBACK]);
@@ -655,7 +655,7 @@ describe("a PR the Claude Code executor wrote (engine:claude) is not reviewed by
     git(seed, "push", "-q", bare, "task/issue-72-x");
     git(bare, "update-ref", "refs/pull/57/head", head2);
 
-    sweep({ prs: `56 ${head}\n57 ${head2}`, agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", labels57: "engine:agy" });
+    sweep({ prs: `56 ${head} beta task/issue-56-x\n57 ${head2} beta task/issue-57-x`, agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", labels57: "engine:agy" });
 
     expect(agyLog("model")).toEqual([OTHER_FAMILY, CLAUDE_REVIEWER]);
   });
