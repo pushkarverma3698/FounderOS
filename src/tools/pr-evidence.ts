@@ -14,20 +14,24 @@
  * turns UNKNOWN into PASS, and a non-PASS verdict always carries at least one reason. Anything
  * the engine cannot read (malformed input, a pending check, a missing hash) is UNKNOWN, never PASS.
  *
- * The EvidenceSpec below is the subset of the TaskContract (src/tools/task-contract.ts) this
- * engine reads. It is declared here so this file does not depend on that module; a full
- * TaskContract satisfies it structurally.
+ * The contract fields this engine reads are a Pick of TaskContract (src/tools/task-contract.ts);
+ * the protected-path list and the glob matcher are the spec gate's (src/tools/spec-gate.ts).
+ *
+ * Every verdict carries the head sha it was computed for, and canMerge refuses evidence for any
+ * other head.
  */
 
 import { z } from "zod";
-import { globMatch, isTestPath, norm, protectedReason, unsafePath } from "./pr-evidence-paths.js";
-
-export { globMatch };
+import { TaskContractSchema } from "./task-contract.js";
+import type { TaskContract } from "./task-contract.js";
+import { inScope, isTestPath, norm, protectedReason, unsafePath } from "./pr-evidence-paths.js";
 
 export type EvidenceStatus = "PASS" | "FAIL" | "UNKNOWN";
 export interface EvidenceVerdict {
   status: EvidenceStatus;
   reasons: string[];
+  /** The head these checks and this diff were read at. canMerge refuses any other head. */
+  head_sha: string;
 }
 
 const CONCLUSIONS = ["success", "failure", "skipped", "cancelled", "neutral", "timed_out", "action_required"] as const;
@@ -38,6 +42,8 @@ const CheckRunSchema = z.object({
   conclusion: z.enum(CONCLUSIONS).nullable(),
   /** Test file paths parsed from the run, if known. Absent = unknown; empty = known to be none. */
   failedTests: z.array(z.string()).optional(),
+  /** Test file paths that ran and passed in this run. Absent = unknown; empty = known to be none. */
+  passedTests: z.array(z.string()).optional(),
 });
 
 const DiffFileSchema = z.object({
@@ -48,31 +54,26 @@ const DiffFileSchema = z.object({
   previousPath: z.string().min(1).optional(),
 });
 
-export const EvidenceSpecSchema = z.object({
-  locked_tests: z.array(z.string().min(1)),
-  scope: z.array(z.string().min(1)),
-  limits: z.object({
-    files: z.number().int().nonnegative(),
-    lines: z.number().int().nonnegative(),
-    deleted_lines: z.number().int().nonnegative(),
-    new_dependencies: z.literal(false),
-  }),
-  base_sha: z.string().min(1),
-  spec_commit: z.string().min(1).optional(),
-});
+const EVIDENCE_SPEC_KEYS = { locked_tests: true, scope: true, limits: true, base_sha: true, spec_commit: true } as const;
+/** The contract fields this engine reads. Extra keys on a full contract are ignored. */
+export const EvidenceSpecSchema = TaskContractSchema.pick(EVIDENCE_SPEC_KEYS).strip();
 
 const HashMapSchema = z.record(z.string(), z.string());
 
 export type CheckRun = z.infer<typeof CheckRunSchema>;
 export type DiffFile = z.infer<typeof DiffFileSchema>;
-export type EvidenceSpec = z.infer<typeof EvidenceSpecSchema>;
+export type EvidenceSpec = Pick<TaskContract, "locked_tests" | "scope" | "limits" | "base_sha" | "spec_commit">;
 
 export interface SpecRedInput {
+  /** The spec commit being judged. */
+  head_sha: string;
   checks: CheckRun[];
   /** Files changed by the spec (test) commit alone. */
   specCommitFiles: DiffFile[];
 }
 export interface ImplementationGreenInput {
+  /** The PR head being judged. */
+  head_sha: string;
   checks: CheckRun[];
   /** Files changed between base and head. */
   diff: DiffFile[];
@@ -80,8 +81,9 @@ export interface ImplementationGreenInput {
   dependencyChanged: boolean;
 }
 
-const SpecRedInputSchema = z.object({ checks: z.array(CheckRunSchema), specCommitFiles: z.array(DiffFileSchema) });
+const SpecRedInputSchema = z.object({ head_sha: z.string().min(1), checks: z.array(CheckRunSchema), specCommitFiles: z.array(DiffFileSchema) });
 const GreenInputSchema = z.object({
+  head_sha: z.string().min(1),
   checks: z.array(CheckRunSchema),
   diff: z.array(DiffFileSchema),
   lockedTestHashes: z.object({ atSpec: HashMapSchema, atHead: HashMapSchema }),
@@ -105,15 +107,21 @@ class Findings {
   unknown(reason: string): void {
     this.list.push({ level: "UNKNOWN", reason: reason || "unspecified unknown" });
   }
-  verdict(): EvidenceVerdict {
+  verdict(head_sha: string): EvidenceVerdict {
     const status: EvidenceStatus =
       this.list.length === 0 ? "PASS" : this.list.some((f) => f.level === "FAIL") ? "FAIL" : "UNKNOWN";
-    return { status, reasons: this.list.map((f) => f.reason) };
+    return { status, reasons: this.list.map((f) => f.reason), head_sha };
   }
 }
 
-function unknownVerdict(reason: string): EvidenceVerdict {
-  return { status: "UNKNOWN", reasons: [reason] };
+function unknownVerdict(reason: string, head_sha: string): EvidenceVerdict {
+  return { status: "UNKNOWN", reasons: [reason], head_sha };
+}
+
+/** The head sha of raw, possibly malformed input, or empty when it cannot be read. */
+function headOf(input: unknown): string {
+  const h = (input as { head_sha?: unknown } | null | undefined)?.head_sha;
+  return typeof h === "string" ? h : "";
 }
 
 function describeIssues(err: z.ZodError): string {
@@ -154,11 +162,12 @@ function scanRequiredChecks(f: Findings, checks: CheckRun[]): { required: number
  * failing test is a locked test, and every other required check is green. Otherwise FAIL or UNKNOWN.
  */
 export function verifySpecRed(spec: EvidenceSpec, input: SpecRedInput): EvidenceVerdict {
+  const head = headOf(input);
   const s = EvidenceSpecSchema.safeParse(spec);
-  if (!s.success) return unknownVerdict("invalid contract: " + describeIssues(s.error));
+  if (!s.success) return unknownVerdict("invalid contract: " + describeIssues(s.error), head);
   const i = SpecRedInputSchema.safeParse(input);
-  if (!i.success) return unknownVerdict("invalid spec-commit evidence: " + describeIssues(i.error));
-  if (s.data.locked_tests.length === 0) return unknownVerdict("the contract has no locked tests");
+  if (!i.success) return unknownVerdict("invalid spec-commit evidence: " + describeIssues(i.error), head);
+  if (s.data.locked_tests.length === 0) return unknownVerdict("the contract has no locked tests", head);
 
   const locked = new Set(s.data.locked_tests.map(norm));
   const f = new Findings();
@@ -201,7 +210,7 @@ export function verifySpecRed(spec: EvidenceSpec, input: SpecRedInput): Evidence
   if (scan.failed.length > 0 && !unreadable && lockedFailing === 0) {
     f.fail("none of the failing tests is a locked test");
   }
-  return f.verdict();
+  return f.verdict(i.data.head_sha);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -209,20 +218,43 @@ export function verifySpecRed(spec: EvidenceSpec, input: SpecRedInput): Evidence
 // ---------------------------------------------------------------------------------------------
 
 /**
- * All required checks green, locked tests byte-identical, no deleted tests, no CI/lint/type/
+ * Every locked test must be named in `passedTests` of a required success check: green CI that
+ * never ran the locked test proves nothing. No check says (all undefined) is UNKNOWN; a list
+ * that omits a locked test is FAIL.
+ */
+function requireLockedTestsRan(f: Findings, checks: CheckRun[], lockedTests: string[]): void {
+  const ok = checks.filter((c) => c.required && c.conclusion === "success");
+  if (ok.length === 0) return; // scanRequiredChecks has already said why
+  const reporting = ok.filter((c) => c.passedTests !== undefined);
+  if (reporting.length === 0) {
+    f.unknown("cannot tell whether the locked test ran: no required check reports which tests passed");
+    return;
+  }
+  for (const t of lockedTests.map(norm)) {
+    const ran = reporting.some((c) => (c.passedTests ?? []).map(norm).includes(t));
+    if (!ran) f.fail("locked test " + t + " did not run in any required check");
+  }
+}
+
+/**
+ * All required checks green and the locked tests actually run, locked tests byte-identical, no
+ * existing non-locked test changed or deleted (new test files are fine), no CI/lint/type/
  * test-config/manifest/verify-script edits, every non-test file inside scope, limits held, and
  * no new dependency. Test files are exempt from the scope globs, not from any other rule.
  */
 export function verifyImplementationGreen(spec: EvidenceSpec, input: ImplementationGreenInput): EvidenceVerdict {
+  const head = headOf(input);
   const s = EvidenceSpecSchema.safeParse(spec);
-  if (!s.success) return unknownVerdict("invalid contract: " + describeIssues(s.error));
+  if (!s.success) return unknownVerdict("invalid contract: " + describeIssues(s.error), head);
   const i = GreenInputSchema.safeParse(input);
-  if (!i.success) return unknownVerdict("invalid head evidence: " + describeIssues(i.error));
+  if (!i.success) return unknownVerdict("invalid head evidence: " + describeIssues(i.error), head);
   const f = new Findings();
   const { locked_tests, scope, limits } = s.data;
+  const lockedSet = new Set(locked_tests.map(norm));
 
   const scan = scanRequiredChecks(f, i.data.checks);
   for (const c of scan.failed) f.fail("required check " + c.name + " is " + c.conclusion);
+  requireLockedTestsRan(f, i.data.checks, locked_tests);
 
   const hashes = i.data.lockedTestHashes;
   for (const t of locked_tests.map(norm)) {
@@ -250,11 +282,11 @@ export function verifyImplementationGreen(spec: EvidenceSpec, input: Implementat
         f.fail(p + " is " + why + ", which an executor may not change");
         continue;
       }
-      const goneOrMoved = (file.status === "removed" && p === file.path) || (file.status === "renamed" && p === file.previousPath);
-      if (goneOrMoved && isTestPath(path)) f.fail("test file " + p + " was " + file.status + ": a build may not delete tests");
-      if (!isTestPath(path) && !scope.some((g) => globMatch(g, path))) {
-        f.fail(p + " is outside the contract scope");
+      const existing = file.status === "modified" || file.status === "removed" || (file.status === "renamed" && p === file.previousPath);
+      if (existing && isTestPath(path) && !lockedSet.has(path)) {
+        f.fail("existing test " + p + " changed: put it in locked_tests via a new spec");
       }
+      if (!isTestPath(path) && !inScope(scope, path)) f.fail(p + " is outside the contract scope");
     }
   }
 
@@ -265,7 +297,7 @@ export function verifyImplementationGreen(spec: EvidenceSpec, input: Implementat
     f.fail("diff deletes " + deletions + " lines, over the limit of " + limits.deleted_lines);
   }
   if (i.data.dependencyChanged) f.fail("a dependency was added or changed (new dependencies are not allowed)");
-  return f.verdict();
+  return f.verdict(i.data.head_sha);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -273,7 +305,7 @@ export function verifyImplementationGreen(spec: EvidenceSpec, input: Implementat
 // ---------------------------------------------------------------------------------------------
 
 const MergeInputSchema = z.object({
-  evidence: z.object({ status: z.enum(["PASS", "FAIL", "UNKNOWN"]), reasons: z.array(z.string()) }),
+  evidence: z.object({ status: z.enum(["PASS", "FAIL", "UNKNOWN"]), reasons: z.array(z.string()), head_sha: z.string().min(1) }),
   review: z.object({ decision: z.enum(["APPROVE", "REQUEST_CHANGES", "UNKNOWN"]), head_sha: z.string().min(1) }),
   headAtReview: z.string().min(1),
   headNow: z.string().min(1),
@@ -289,8 +321,8 @@ export interface MergeDecision {
 
 /**
  * True only if the evidence is PASS, the review is APPROVE for the head that is there now, and
- * neither head nor base moved since the review. Fail-closed: malformed input is a refusal. The
- * caller must pass evidence computed for headNow; this function cannot see which head it was for.
+ * neither head nor base moved since the review, and the evidence was computed for the head being
+ * merged. Fail-closed: malformed input is a refusal.
  */
 export function canMerge(input: MergeInput): MergeDecision {
   const p = MergeInputSchema.safeParse(input);
@@ -303,6 +335,9 @@ export function canMerge(input: MergeInput): MergeDecision {
     reasons.push("evidence is " + evidence.status + ": " + (evidence.reasons.join("; ") || "no reason given"));
   } else if (evidence.reasons.length > 0) {
     reasons.push("evidence says PASS but carries reasons, so it is inconsistent: " + evidence.reasons.join("; "));
+  }
+  if (evidence.head_sha !== headNow) {
+    reasons.push("evidence was computed for head " + evidence.head_sha + " but the PR head is " + headNow);
   }
   if (review.decision !== "APPROVE") reasons.push("review decision is " + review.decision + ", not APPROVE");
   if (review.head_sha !== headNow) {

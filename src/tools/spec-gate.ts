@@ -58,6 +58,7 @@ export const PROTECTED_PATHS: readonly string[] = [
   "tsconfig*",
   "vitest.config*",
   "vitest.workspace*",
+  "vitest.setup*",
   "scripts/verify-*",
 ];
 const FORBIDDEN_SCOPE = PROTECTED_PATHS;
