@@ -20,8 +20,8 @@
  * editing the database. Both commands are owner-only (chat-access.ts): they change
  * what every later answer treats as true.
  *
- * Replies are plain text, never HTML: the text is the founder's own and may contain
- * "<" or "&". Every reply is bounded by construction (a focus is at most
+ * Replies that echo his text are plain text, never HTML: it may contain "<" or "&". The
+ * empty states are static HTML (empty-states.ts) so their example is tappable. Every reply is bounded by construction (a focus is at most
  * CONTEXT_FOCUS_MAX_CHARS, a project list at most eight entries), far under Telegram's cap.
  */
 
@@ -32,6 +32,7 @@ import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { sanitizeContextUpdates } from "../tools/context-guard.js";
 import { contextTagRenderer } from "../tools/context-render.js";
+import { emptyStateHtml, type EmptyStateKind } from "./empty-states.js";
 
 const log = childLogger({ module: "gateway:focus" });
 
@@ -75,7 +76,8 @@ interface Spec {
   readonly show: (value: unknown) => string | null;
   /** The reply for a value with its date tag. */
   readonly reply: (shown: string, tag: string, saved: boolean) => string;
-  readonly none: string;
+  /** Which empty state to show when the row holds no value. */
+  readonly empty: EmptyStateKind;
 }
 
 const numbered = (items: readonly unknown[]): string => items.map((item, i) => `${i + 1}. ${itemText(item)}`).join("\n");
@@ -88,7 +90,7 @@ const FOCUS: Spec = {
   show: (value) => (typeof value === "string" && value.trim() !== "" ? value : null),
   reply: (shown, tag, saved) =>
     saved ? `Focus saved: ${shown}\n${tag}` : `Current focus: ${shown}\n${tag}\n\nSend /focus <text> to replace it.`,
-  none: "no focus set - send /focus <text>",
+  empty: "focus",
 };
 
 const PROJECTS: Spec = {
@@ -101,7 +103,7 @@ const PROJECTS: Spec = {
     saved
       ? `Projects saved:\n${shown}\n${tag}`
       : `Active projects:\n${shown}\n${tag}\n\nSend /projects <a>; <b> to replace the list.`,
-  none: "no projects set - send /projects <a>; <b>",
+  empty: "projects",
 };
 
 /** The row, or null after telling the founder the database could not be read. */
@@ -119,7 +121,8 @@ async function replyWithValue(ctx: Context, deps: FocusDeps, spec: Spec, row: Re
   const shown = spec.show(row[spec.key]);
   if (shown === null) {
     // Right after a save this is not "nothing set": it is a write that cannot be seen. Say so.
-    await ctx.reply(saved ? `Saved, but reading it back did not show ${spec.what}. Send ${spec.command} to check.` : spec.none);
+    if (saved) await ctx.reply(`Saved, but reading it back did not show ${spec.what}. Send ${spec.command} to check.`);
+    else await ctx.reply(emptyStateHtml(spec.empty), { parse_mode: "HTML" });
     return;
   }
   const tag = contextTagRenderer(row, deps.now(), {
