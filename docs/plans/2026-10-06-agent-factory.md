@@ -64,7 +64,7 @@ Anything a routine does that acts (send, post, merge) still raises its own appro
 |---|---|---|
 | Scheduled prompts | `schedule_task` (approved once, repeats daily, weekdays, weekly or monthly) fires each run as a normal turn on the founder's thread. 21 rows ever: 3 done, 16 failed, 2 canceled. None repeating; last created 07-21. | prod query |
 | Why they failed | 11 × Gemini `503 … high demand`, 1 × Gemini `429 … prepayment credits are depleted`, 2 × `402 Provider returned error`, 2 × the 300 s turn timeout. Each failed on its first attempt: the runner defers only for halt and the daily budget (`src/gateway/scheduled-task-run.ts:56-65`, `:195-202`). The in-turn model fallback chain existed from 07-11 and the 503s still came through. | prod query, code |
-| Routines share the founder's chat | A run holds `withChatTurnLock(chat_id)` (`src/gateway/kernel-run.ts:47`), so a typed message waits while a routine runs. | code |
+| Routines share the founder's chat | A run holds `withChatTurnLock(chat_id)` (`src/gateway/kernel-run.ts:48`), so a typed message waits while a routine runs. | code |
 | Approvals resume by chat | `resumeKernel` and `restorePendingApproval` find the pending card through `threadIdFor(chat)`. An agent running on its own thread would strand its cards. | code |
 | Waiting cards | A typed message is held while a card waits, because a new run on the same thread "would resume (or silently drop) the wrong request" (`src/gateway/turn-gates.ts:28-50`). Scheduled runs skip that check. | code |
 | Knowledge | `brain.brain_memories.project` already holds 6 project namespaces (largest: `founderos`, 2,112 rows). | prod query |
