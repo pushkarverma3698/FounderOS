@@ -320,22 +320,23 @@ export interface NewRowsAlertOptions {
   /** `profileSelector(profile)`: printed in every suggested command, empty for the default profile. */
   readonly selector?: string;
   /**
-   * `dedupeKey(company, title)` → the row's persisted `brief_rank`.
+   * `dedupeKey(company, title)` → the row's stable short id (`shortJobId`).
    *
-   * THE PINNED RANK, never a number invented for this message. `/jobs`,
-   * `/today` and `/fresh` all print the same one (B5), so a fourth numbering
-   * here would resolve `/draft 1` to whatever the queue has at 1 — a tailored
-   * application about the wrong company, sent from a tap.
+   * THE ROLE'S OWN ID, not a position. This used to be the pinned `brief_rank`, which is re-pinned on every
+   * render: an alert read three days later resolved `/draft 4` to whatever the queue had at 4 by then, a
+   * tailored application about the wrong company, sent from a tap. An id keeps pointing at the same role.
    *
-   * Keyed on `dedupeKey` because that is the identity the database uses; an
-   * alert row and a stored row are the same posting or they are not, and no
-   * second notion of sameness is allowed to decide it.
+   * Keyed on `dedupeKey` because that is the identity the database uses; an alert row and a stored row are
+   * the same posting or they are not, and no second notion of sameness is allowed to decide it.
    *
-   * A missing entry prints no command. Ranking runs before this and is
-   * fail-open, so "we could not number it" is a state that happens, and the
-   * honest rendering of it is a company name with nothing to tap.
+   * A missing entry prints no command: a company name with nothing to tap is the honest rendering of a row
+   * that could not be found.
    */
-  readonly ranks?: ReadonlyMap<string, number>;
+  readonly ids?: ReadonlyMap<string, string>;
+  /** How many rows to name before summarising the rest. Defaults to NEW_ROWS_NAMED; a batched message names more. */
+  readonly named?: number;
+  /** Roles that exist but are not in `rows` (a batch buffer past its cap): counted in the heading and the "+ N more" line. */
+  readonly extra?: number;
 }
 
 export function formatNewRowsAlert(
@@ -344,7 +345,8 @@ export function formatNewRowsAlert(
   candidateName?: string,
   opts: NewRowsAlertOptions = {},
 ): string {
-  const named = rows.slice(0, NEW_ROWS_NAMED);
+  const named = rows.slice(0, opts.named ?? NEW_ROWS_NAMED);
+  const total = rows.length + (opts.extra ?? 0);
   const sel = opts.selector ? ` ${opts.selector}` : "";
   // The mark is the row's own status, so a flagged company is visibly a question
   // rather than a recommendation. The title is the LINK and `/draft N` follows
@@ -353,12 +355,12 @@ export function formatNewRowsAlert(
   const lines = named
     .map((r) => {
       const mark = r.outcome === "pass" ? "✅" : "❓";
-      const rank = opts.ranks?.get(dedupeKey(r.company, r.title));
-      const action = rank === undefined ? "" : ` · ${cmd(`/draft${sel} ${rank}`)}`;
+      const id = opts.ids?.get(dedupeKey(r.company, r.title));
+      const action = id === undefined ? "" : ` · ${cmd(`/draft${sel} ${id}`)}`;
       return `${mark} <b>${esc(r.company)}</b> — ${link(r.title, r.url ?? null)}${action}`;
     })
     .join("\n");
-  const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
+  const rest = total > named.length ? `\n<i>+ ${total - named.length} more.</i>` : "";
   const backfill =
     (opts.backfill ?? 0) > 0
       ? `\n<i>+ ${opts.backfill} older ${opts.backfill === 1 ? "role" : "roles"} also added ` +
@@ -380,7 +382,7 @@ export function formatNewRowsAlert(
     .join(" · ");
 
   return (
-    `🆕 <b>${rows.length} new role${rows.length === 1 ? "" : "s"}${who}</b>\n` +
+    `🆕 <b>${total} new role${total === 1 ? "" : "s"}${who}</b>\n` +
     `<i>${split}</i>\n` +
     lines +
     rest +

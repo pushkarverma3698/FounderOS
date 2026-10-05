@@ -1810,5 +1810,8 @@ export * from "./goals-schema.js";
 // conversation_turns (0043). Own file for the same reason; re-exported so the parity test sees it.
 export * from "./conversation-turns-schema.js";
 
+// job_digest_state (0044). Own file for the same reason; re-exported so the parity test sees it.
+export * from "./job-digest-schema.js";
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
