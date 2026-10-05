@@ -77,8 +77,8 @@ tg_screen_log() {
   command -v jq >/dev/null 2>&1 || return 0
   local file="${FOUNDEROS_SCREEN_LOG:-${HOME}/.claude/screen.jsonl}"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
-  local size
-  size="$(wc -c <"$file" 2>/dev/null | tr -d ' ' || true)"
+  local size=""
+  [[ -f "$file" ]] && size="$(wc -c <"$file" 2>/dev/null | tr -d ' ' || true)"
   # Same cap as SCREEN_LOG_MAX_BYTES in src/infra/screen-log.ts.
   if [[ "$size" =~ ^[0-9]+$ ]] && (( size > 1048576 )); then
     mv -f "$file" "$file.1" 2>/dev/null || true

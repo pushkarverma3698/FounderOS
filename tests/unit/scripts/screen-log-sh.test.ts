@@ -47,6 +47,7 @@ describe("tg_screen_log", () => {
     writeFileSync(join(root, "msg.txt"), text);
     const r = run(`tg_screen_log "$(cat "${join(root, "msg.txt")}")" 111`);
     expect(r.stdout).toContain("survived");
+    expect(r.stderr).toBe(""); // the first write (no file yet) must not leave noise in the daemon's log
     const got = await readScreen("111", new Date(), { file: screenFile() });
     expect(got).toHaveLength(1);
     expect(got[0]!.text).toBe(text);
