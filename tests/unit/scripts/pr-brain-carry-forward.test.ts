@@ -109,7 +109,7 @@ beforeEach(() => {
 case "$*" in
   "api user"*) echo owner ;;
   "auth status"*) exit 0 ;;
-  "pr list"*) echo "56 $FAKE_HEAD" ;;
+  "pr list"*) echo "56 $FAKE_HEAD beta task/issue-56-x" ;;
   *"headRefOid"*) echo "$FAKE_HEAD" ;;
   *"--json comments"*) echo "$FAKE_COMMENTS" ;;
   *"reviewDecision"*) echo "CLEARED — marked ready for merge · title" ;;
