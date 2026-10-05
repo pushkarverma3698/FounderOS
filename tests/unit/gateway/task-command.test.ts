@@ -724,3 +724,181 @@ describe("handleNewProject", () => {
     expect(instruction).toMatch(/private/i);
   });
 });
+
+// ── UX audit P1-6 (F14): a first word that is a repo alias is the repo ───────
+
+describe("parseTaskArgs — repo alias as the first word", () => {
+  it("treats `/task founderos <work>` as repo + work, with the alias out of the brief", () => {
+    const parsed = parseTaskArgs("founderos fix the flaky CSV export");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.args.repo).toBe("pushkarverma3698/FounderOS");
+    expect(parsed.args.text).toBe("fix the flaky CSV export");
+  });
+
+  it("knows the short names the buttons use: hulda, oplify-app, oplify-api", () => {
+    const cases: [string, string][] = [
+      ["hulda fix the hero", "pushkarverma3698/House-of-Hulda-Website-frontend"],
+      ["Hulda fix the hero", "pushkarverma3698/House-of-Hulda-Website-frontend"],
+      ["oplify-app fix the hero", "OplifyMessage/oplify-messaging-app"],
+      ["oplify-api fix the hero", "OplifyMessage/oplify-messaging-api"],
+      ["oplify-messaging-api fix the hero", "OplifyMessage/oplify-messaging-api"],
+      ["pushkarverma3698/FounderOS fix the hero", "pushkarverma3698/FounderOS"],
+    ];
+    for (const [raw, repo] of cases) {
+      const parsed = parseTaskArgs(raw);
+      expect(parsed.ok, raw).toBe(true);
+      if (parsed.ok) expect(parsed.args.repo, raw).toBe(repo);
+    }
+  });
+
+  it("tolerates a trailing colon or comma on the alias", () => {
+    for (const raw of ["founderos: fix it please", "founderos, fix it please"]) {
+      const parsed = parseTaskArgs(raw);
+      expect(parsed.ok, raw).toBe(true);
+      if (parsed.ok) expect(parsed.args.text, raw).toBe("fix it please");
+    }
+  });
+
+  it("resolves a project repo the instance created, by its exact name", () => {
+    const parsed = parseTaskArgs("my-side-project add a readme", ["pushkarverma3698/my-side-project"]);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.args.repo).toBe("pushkarverma3698/my-side-project");
+  });
+
+  it("with an alias and no work, asks for the work, not for the repo", () => {
+    const parsed = parseTaskArgs("founderos");
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.kind).toBe("needs-work");
+    if (parsed.kind === "needs-work") expect(parsed.repo).toBe("pushkarverma3698/FounderOS");
+  });
+
+  it("does NOT read loose words as aliases: a substring is a guess, and a guess retargets the dispatch", () => {
+    for (const raw of ["app fix the login", "api is slow", "frontend needs a fix", "of course fix it", "fos broke", "fix founderos"]) {
+      const parsed = parseTaskArgs(raw);
+      expect(parsed.ok, raw).toBe(false);
+      if (!parsed.ok) expect(parsed.kind, raw).toBe("needs-repo");
+    }
+  });
+
+  it("does not guess when two repos share the name", () => {
+    const parsed = parseTaskArgs("shared-name do a thing", ["a/shared-name", "b/shared-name"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.kind).toBe("needs-repo");
+  });
+});
+
+describe("handleTask — alias", () => {
+  it("dispatches `/task hulda <work>` with no repo question", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("hulda fix the hero layout");
+
+    await handleTask(ctx, { runKernelText });
+
+    expect(replies).toEqual([]);
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain("Target repository: pushkarverma3698/House-of-Hulda-Website-frontend");
+    expect(instruction).toContain("fix the hero layout");
+    expect(instruction).not.toContain("hulda fix");
+  });
+
+  it("answers `/task founderos` with 'what should I build?' for THAT repo, never 'Which repo?'", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("founderos");
+
+    await handleTask(ctx, { runKernelText });
+
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toContain("pushkarverma3698/FounderOS");
+    expect(replies[0]).not.toMatch(/which repo/i);
+  });
+});
+
+// ── UX audit P1-6 (F14): asking is not a default ─────────────────────────────
+
+describe("a typed answer to the repo question", () => {
+  it.each([
+    ["🤖 Which repo should I build in?"],
+    ["🤖 Which repo?\n\nfix the flaky CSV export"],
+  ])("never picks a repo for him: %j", async (question) => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("", {
+      message: { message_id: 40, text: "fix the flaky CSV export", reply_to_message: { text: question } },
+    });
+
+    expect(await handleRepoReply(ctx, { runKernelText })).toBe(true);
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toMatch(/tap a repo/i);
+  });
+
+  it("still lets an ordinary reply to some other bot message through", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 41, text: "ok", reply_to_message: { text: "Which repo do you mean by 'the site'?" } },
+    });
+    expect(await handleRepoReply(ctx, { runKernelText })).toBe(false);
+  });
+});
+
+// ── UX audit P1-6 (F16): already queued → say so, spend nothing ──────────────
+
+describe("dedupe", () => {
+  const queued = { number: 77, title: "t", body: "", state: "ready" as const };
+
+  it("/task refuses a request that is already queued, naming the real issue number", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const findQueuedDuplicate = vi.fn().mockResolvedValue(queued);
+    const { ctx, replies } = fakeCtx("founderos fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText, findQueuedDuplicate });
+
+    expect(findQueuedDuplicate).toHaveBeenCalledWith("pushkarverma3698/FounderOS", "fix the flaky CSV export");
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toContain("already queued as #77");
+  });
+
+  it("the repo-button path checks too", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const findQueuedDuplicate = vi.fn().mockResolvedValue({ ...queued, number: 78, state: "review" as const });
+    const { ctx, replies } = tapCtx("task:repo:House-of-Hulda-Website-frontend", "/task make the hero responsive");
+
+    expect(await handleRepoChoice(ctx, { runKernelText, findQueuedDuplicate })).toBe(true);
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toContain("already queued as #78");
+  });
+
+  it("the typed-reply path checks too", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const findQueuedDuplicate = vi.fn().mockResolvedValue(queued);
+    const { ctx, replies } = fakeCtx("", {
+      message: {
+        message_id: 50,
+        text: "make the login form keyboard-accessible",
+        reply_to_message: { text: "📱 Oplify app — what should I build?\n\nRepo: OplifyMessage/oplify-messaging-app" },
+      },
+    });
+
+    expect(await handleRepoReply(ctx, { runKernelText, findQueuedDuplicate })).toBe(true);
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toContain("already queued as #77");
+  });
+
+  it("dispatches normally when nothing matches", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const findQueuedDuplicate = vi.fn().mockResolvedValue(null);
+    const { ctx } = fakeCtx("founderos fix something new");
+
+    await handleTask(ctx, { runKernelText, findQueuedDuplicate });
+    expect(runKernelText).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches anyway when the lookup itself fails: a GitHub blip must not take /task down", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const findQueuedDuplicate = vi.fn().mockRejectedValue(new Error("GitHub 502"));
+    const { ctx } = fakeCtx("founderos fix something new");
+
+    await handleTask(ctx, { runKernelText, findQueuedDuplicate });
+    expect(runKernelText).toHaveBeenCalledTimes(1);
+  });
+});

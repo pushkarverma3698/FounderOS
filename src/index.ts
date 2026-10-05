@@ -19,9 +19,11 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getKernel } from "./gateway/kernel-boot.js";
 import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
 import { restorePendingApproval } from "./gateway/kernel-run.js";
+import { startMergeDigestCron } from "./gateway/merge-digest-run.js";
 import { resumeInterruptedMission } from "./gateway/mission-resume.js";
 import { runDueScheduledTask, recoverStrandedScheduledTasks } from "./gateway/scheduled-task-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
+import { startClaudeLoginExpiryCron } from "./infra/claude-login-expiry.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
 import { shouldRunProviderSmoke } from "./infra/provider-config.js";
@@ -67,6 +69,7 @@ async function main(): Promise<void> {
 
   if (TELEGRAM_POLLING_ENABLED) {
     await startBot();
+    startClaudeLoginExpiryCron(); // daily 10:15; warns 3 days before the server's Claude login stops renewing
   } else {
     log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false)");
   }
@@ -112,6 +115,7 @@ async function main(): Promise<void> {
   void runGoalStandupCatchUp();
 
   if (TELEGRAM_POLLING_ENABLED) {
+    startMergeDigestCron(); // 19:00 list of PRs ready to merge, one Merge button each; the daemon never merges for you
     await sendBootNoticeOnce("restart", buildRestartMessage(), (text) => sendToChat(text, "HTML")).catch((err) =>
       log.warn({ err: (err as Error).message }, "Startup notification failed"),
     );
