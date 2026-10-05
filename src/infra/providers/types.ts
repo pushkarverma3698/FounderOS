@@ -2,7 +2,7 @@
  * FounderOS — Integration provider types
  * =======================================
  * Stable contracts between tools and platform backends. Tools depend on these
- * shapes — never on Composio, gws, or LinkedIn REST field names.
+ * shapes — never on gws or LinkedIn REST field names.
  *
  * See ADR-029 (direct platform integrations).
  */
@@ -13,8 +13,8 @@ import type { MentionTarget } from "../social-mention.js";
 /** Which adapter executes a platform call. Env-selectable; default = direct/gws.
  *  - gws:        Google Workspace CLI on the host (interactive `gws auth login`).
  *  - googleapis: service account + domain-wide delegation (unattended; ADR-029). */
-export type GoogleBackend = "gws" | "googleapis" | "composio";
-export type LinkedInBackend = "direct" | "composio";
+export type GoogleBackend = "gws" | "googleapis";
+export type LinkedInBackend = "direct";
 
 export interface SendEmailInput {
   to: string;

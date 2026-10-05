@@ -262,7 +262,7 @@ docker exec -it founderos-postgres psql -U founderos
 | Hetzner CX32 | ~€9.00 (4 vCPU / 8 GB — required for Ollama) |
 | Hetzner Storage Box (backups, optional) | ~€3.20 (BX11, 1 TB) |
 | Claude Pro (executor) | existing sub |
-| Gemini / Composio | usage-based |
+| Gemini | usage-based |
 | **Floor** | **~€9/mo + existing subs** |
 
 ## Day-1 live deploy: lessons & gotchas
@@ -298,7 +298,7 @@ base64 -w0 /opt/founderos/.env | gh secret set PROD_DOTENV
 `config.ts` fail-fast requires `GOOGLE_GENERATIVE_AI_API_KEY` to **exist** in prod —
 but a present-yet-invalid key boots fine and then every LLM call returns
 `400 API_KEY_INVALID`. The first deploy shipped a stale key set in `.env.production`
-(Google/GitHub/Firecrawl/Composio all differed from the working dev `.env`).
+(Google/GitHub/Firecrawl all differed from the working dev `.env`).
 **Always validate keys before trusting a deploy:**
 ```bash
 # Gemini
@@ -307,9 +307,6 @@ curl -s -o /dev/null -w "%{http_code}\n" \
   -H 'Content-Type: application/json' -d '{"contents":[{"parts":[{"text":"hi"}]}]}'
 # GitHub
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOK" https://api.github.com/user
-# Composio
-curl -s -o /dev/null -w "%{http_code}\n" -H "x-api-key: $K" \
-  https://backend.composio.dev/api/v3/connected_accounts
 ```
 `200` = good. The `[boot]` capability report (`boot-report.ts`) tells you which
 integrations are LIVE vs MISSING, but it can't catch an invalid-but-present key —

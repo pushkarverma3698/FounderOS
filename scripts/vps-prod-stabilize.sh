@@ -94,7 +94,7 @@ if command -v gws >/dev/null 2>&1; then
   gws auth status 2>&1 | head -5 || echo "!! gws auth not configured — run: gws auth login"
 else
   echo "!! gws CLI not installed — npm install -g @googleworkspace/cli && gws auth login"
-  echo "    Or set GMAIL_BACKEND=composio in PROD_DOTENV for rollback"
+  echo ""
 fi
 
 echo ""

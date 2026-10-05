@@ -76,7 +76,6 @@ describe("buildBootReport", () => {
       "LLM fallbacks",
       "Google Workspace (gws)",
       "LinkedIn (direct API)",
-      "Composio (legacy fallback)",
       "GitHub tools",
       "Web search (Firecrawl)",
       "Claude executor",

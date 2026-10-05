@@ -51,13 +51,6 @@ describe("formatToolError", () => {
     expect(result).toMatch(/unavailable|unavail/i);
   });
 
-  it("rewrites Composio no-id error to friendly message", async () => {
-    const { formatToolError } = await import("../../../src/gateway/status.js");
-    const raw = "Composio returned no message_id from the API";
-    const result = formatToolError(raw);
-    expect(result).toContain("Composio connection");
-  });
-
   it("rewrites 403 Forbidden to permission denied message", async () => {
     const { formatToolError } = await import("../../../src/gateway/status.js");
     const raw = "GitHub API call failed: 403 Forbidden";

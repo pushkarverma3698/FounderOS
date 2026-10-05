@@ -1,12 +1,10 @@
 /**
  * FounderOS — Integration provider health probes
  * ================================================
- * Reachability checks for gws (primary) and legacy Composio — used at boot smoke,
+ * Reachability checks for gws (primary) and googleapis — used at boot smoke,
  * /health, and /status. Failures name the REAL component (rule #22).
  */
 
-import { Composio } from "@composio/core";
-import { getComposioApiKey, getGmailConnectionId, getLinkedInConnectionId } from "./composio.js";
 import { runGws } from "./gws-runner.js";
 import {
   getCalendarBackend,
@@ -17,8 +15,6 @@ import {
   type ProviderStatus,
 } from "./provider-config.js";
 import { linkedInDirectConfigured } from "./providers/linkedin-direct.js";
-import { composioGoogleConfigured } from "./providers/google-composio.js";
-import { composioLinkedInConfigured } from "./providers/linkedin-composio.js";
 import { directReadEmails, googleapisConfigured } from "./providers/google-direct.js";
 import type { GoogleBackend } from "./providers/types.js";
 import type { ToolResult } from "../tools/index.js";
@@ -30,10 +26,9 @@ export interface ProviderProbeReport {
   checked_at: string;
   gmail_backend: GoogleBackend;
   calendar_backend: GoogleBackend;
-  linkedin_backend: "direct" | "composio";
+  linkedin_backend: "direct";
   gws_gmail: ProviderCheck;
   googleapis_gmail: ProviderCheck;
-  composio_gmail: ProviderCheck;
   active_gmail: ProviderCheck;
   active_calendar: ProviderCheck;
   active_linkedin: ProviderCheck;
@@ -51,42 +46,6 @@ export function setLastProviderProbe(report: ProviderProbeReport): void {
 
 function check(status: ProviderStatus, detail: string): ProviderCheck {
   return { status, detail };
-}
-
-/**
- * Fetch a Composio connected account and map its live status to a ProviderCheck.
- * Resources live on the Composio INSTANCE in the installed SDK (@composio/core
- * ≥0.10) — getClient() exposes a different generated client without this
- * surface, which crashed every probe in prod on 2026-07-12.
- */
-async function probeComposioConnection(
-  label: string,
-  connId: string,
-  timeoutMs: number,
-): Promise<ProviderCheck> {
-  try {
-    const composio = new Composio({ apiKey: getComposioApiKey()!, allowTracking: false });
-    const probe = composio.connectedAccounts.get(connId);
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} probe timed out`)), timeoutMs),
-    );
-    const account = (await Promise.race([probe, timeout])) as unknown as Record<string, unknown>;
-    const status = String(account["status"] ?? account["state"] ?? "unknown");
-    if (status.toUpperCase() === "ACTIVE") {
-      return check("up", `${label} ${connId} ACTIVE`);
-    }
-    return check("down", `${label} ${connId} status=${status}`);
-  } catch (err) {
-    return check("down", `${label} probe failed: ${(err as Error).message}`);
-  }
-}
-
-/** Probe Composio: API key present + Gmail connection ACTIVE. */
-export async function probeComposioGmail(timeoutMs = getProviderProbeTimeoutMs()): Promise<ProviderCheck> {
-  if (!composioGoogleConfigured()) {
-    return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
-  }
-  return probeComposioConnection("Composio Gmail", getGmailConnectionId(), timeoutMs);
 }
 
 /** Probe gws: binary exists + auth/list smoke (maxResults 1). */
@@ -139,26 +98,6 @@ function probeLinkedInDirect(): ProviderCheck {
   return check("up", "LinkedIn direct API credentials configured");
 }
 
-/**
- * Probe Composio LinkedIn: API key present + the connection is ACTUALLY ACTIVE
- * (reachability, not just presence) — mirrors probeComposioGmail.
- *
- * Fix (2026-07-01): this used to return "up" whenever COMPOSIO_API_KEY was
- * merely present, without ever calling the Composio API to check the LinkedIn
- * connection's real status. That is exactly the shallow check that let the
- * documented Composio outage (LIMITATIONS.md §7 — "Composio key was invalid in
- * both dev and prod: email/linkedin/calendar down") go undetected: /status's
- * 🟢/🔴 LinkedIn indicator would have shown a false 🟢 the whole time.
- */
-export async function probeLinkedInComposio(
-  timeoutMs = getProviderProbeTimeoutMs(),
-): Promise<ProviderCheck> {
-  if (!composioLinkedInConfigured()) {
-    return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
-  }
-  return probeComposioConnection("Composio LinkedIn", getLinkedInConnectionId(), timeoutMs);
-}
-
 /** Run all provider probes and cache the result. */
 export async function runProviderProbes(): Promise<ProviderProbeReport> {
   const timeoutMs = getProviderProbeTimeoutMs();
@@ -166,25 +105,22 @@ export async function runProviderProbes(): Promise<ProviderProbeReport> {
   const calendarBackend = getCalendarBackend();
   const linkedinBackend = getLinkedInBackend();
 
-  const [composio_gmail, gws_gmail, googleapis_gmail] = await Promise.all([
-    probeComposioGmail(timeoutMs),
+  const [gws_gmail, googleapis_gmail] = await Promise.all([
     probeGwsGmail(timeoutMs),
     probeGoogleapisGmail(timeoutMs),
   ]);
 
   const pick = (b: GoogleBackend): ProviderCheck =>
-    b === "gws" ? gws_gmail : b === "googleapis" ? googleapis_gmail : composio_gmail;
+    b === "googleapis" ? googleapis_gmail : gws_gmail;
   const active_gmail = pick(gmailBackend);
   const active_calendar = pick(calendarBackend);
-  const active_linkedin =
-    linkedinBackend === "direct" ? probeLinkedInDirect() : await probeLinkedInComposio(timeoutMs);
+  const active_linkedin = probeLinkedInDirect();
 
   const report: ProviderProbeReport = {
     checked_at: new Date().toISOString(),
     gmail_backend: gmailBackend,
     calendar_backend: calendarBackend,
     linkedin_backend: linkedinBackend,
-    composio_gmail,
     gws_gmail,
     googleapis_gmail,
     active_gmail,

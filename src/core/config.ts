@@ -54,15 +54,14 @@ export const envSchema = z.object({
   GOOGLE_SHEETS_CREDENTIALS_PATH: z.string().transform(v => v || undefined).optional(),
 
   // Tool keys — optional; tools fail loudly when key is missing
-  COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
-  /** Gmail backend: gws | googleapis (service account, unattended) | composio (legacy rollback). ADR-029 */
-  GMAIL_BACKEND: z.enum(["composio", "gws", "googleapis"]).default("gws"),
-  CALENDAR_BACKEND: z.enum(["composio", "gws", "googleapis"]).optional(),
+  /** Gmail backend: gws | googleapis (service account, unattended) . ADR-029 */
+  GMAIL_BACKEND: z.enum(["gws", "googleapis"]).default("gws"),
+  CALENDAR_BACKEND: z.enum(["gws", "googleapis"]).optional(),
   GWS_BIN: z.string().transform(v => v || undefined).optional(),
   PROVIDER_SMOKE_AT_BOOT: z.enum(["true", "false"]).optional(),
   PROVIDER_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   /** LinkedIn direct API (default backend). ADR-029 */
-  LINKEDIN_BACKEND: z.enum(["composio", "direct"]).default("direct"),
+  LINKEDIN_BACKEND: z.enum(["direct"]).default("direct"),
   LINKEDIN_ACCESS_TOKEN: z.string().transform(v => v || undefined).optional(),
   LINKEDIN_AUTHOR_URN: z.string().transform(v => v || undefined).optional(),
   LINKEDIN_API_VERSION: z.string().transform(v => v || undefined).optional(),

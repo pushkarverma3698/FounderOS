@@ -71,7 +71,7 @@ delete process.env["PROJECT_WORKFLOW_ROOT"];
 // ── 3. Network kill-switch (determinism guarantee) ───────────────────────────
 //
 // THE root cause of the historical flaky suite: unit tests silently reached
-// real services (the live Turicks-Brain RAG server on :8766, Gemini, Composio,
+// real services (the live Turicks-Brain RAG server on :8766, Gemini,
 // Firecrawl, Telegram). When a `vi.mock` leaked under parallel execution, the
 // REAL `fetch` ran and returned LIVE data — so the same commit produced
 // different pass/fail counts run to run (see docs/TESTING_AUDIT.md).

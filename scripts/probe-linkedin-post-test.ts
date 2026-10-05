@@ -1,7 +1,7 @@
 /**
  * BUG-A live verification: publish ONE clearly-marked CONNECTIONS-only post
  * through the real linkedinPostTool (exercises the author+visibility fix), then
- * print the real Composio post_id. Proves the contract fix end-to-end.
+ * print the real post_id. Proves the contract fix end-to-end.
  *
  *   node --env-file=.env --import tsx/esm scripts/probe-linkedin-post-test.ts
  */
