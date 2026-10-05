@@ -33,6 +33,7 @@ import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { recordTurnSafely, type TurnLog } from "./turn-log.js";
+import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { stripFalsePromises } from "./promise-guard.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
@@ -273,6 +274,7 @@ export function makePlanNode(
   clock: Clock = systemClock,
   commands: readonly CommandCatalogEntry[] = [],
   turnLog?: TurnLog,
+  screen?: ScreenSource,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
@@ -309,8 +311,11 @@ export function makePlanNode(
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
+          // What the founder saw outside this conversation (daemon alerts, command output), after the
+          // clock line so the static prompt prefix stays cacheable. "" when there is nothing to show.
+          const screenBlock = await screenBlockFor(screen, config?.configurable?.["thread_id"], clock());
           const base: BaseMessage[] = [
-            new SystemMessage(`${systemPrompt}\n\n${plannerNowLine(clock)}`),
+            new SystemMessage([systemPrompt, plannerNowLine(clock), screenBlock].filter(Boolean).join("\n\n")),
             ...historyMessages(conversation),
             new HumanMessage(input),
           ];

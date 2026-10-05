@@ -67,6 +67,31 @@ tg_hold() {
   printf '%s\t%s\t%s\n' "$utc_time" "$daemon_name" "$first_line" >>"$queue_file"
 }
 
+# tg_screen_log TEXT CHAT [MESSAGE_ID] — record a message the founder now sees, after the send
+# succeeded, in the screen log the bot's planner reads (src/infra/screen-log.ts has the format).
+# Without it, "which repo is that on?" about a daemon alert is a guess (2026-10-04). Best-effort:
+# always returns 0 and prints nothing, so a send's stdout (agy_tg_send's message id) stays clean.
+tg_screen_log() {
+  local text="${1:-}" chat="${2:-}" mid="${3:-}"
+  [[ -n "$text" && -n "$chat" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  local file="${FOUNDEROS_SCREEN_LOG:-${HOME}/.claude/screen.jsonl}"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  local size=""
+  [[ -f "$file" ]] && size="$(wc -c <"$file" 2>/dev/null | tr -d ' ' || true)"
+  # Same cap as SCREEN_LOG_MAX_BYTES in src/infra/screen-log.ts.
+  if [[ "$size" =~ ^[0-9]+$ ]] && (( size > 1048576 )); then
+    mv -f "$file" "$file.1" 2>/dev/null || true
+  fi
+  local src="${TG_DAEMON_NAME:-$(basename "$0" 2>/dev/null || echo daemon)}"
+  ( umask 077
+    jq -cn --arg chat "$chat" --arg src "$src" --arg text "$text" --arg mid "$mid" \
+      '{ts: (now | todate), chat: $chat, src: $src, text: ($text | .[0:4000])}
+       + (if ($mid | test("^[0-9]+$")) then {mid: ($mid | tonumber)} else {} end)' >>"$file"
+  ) 2>/dev/null || true
+  return 0
+}
+
 _tg_send_raw() {
   if declare -f notify_raw >/dev/null 2>&1; then
     notify_raw "$1"
@@ -85,7 +110,8 @@ _tg_send_raw() {
     "https://api.telegram.org/bot${token}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" \
-    --data "disable_web_page_preview=true"
+    --data "disable_web_page_preview=true" || return $?
+  tg_screen_log "$1" "$chat"
 }
 
 tg_flush_digest() {

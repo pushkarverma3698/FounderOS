@@ -34,6 +34,7 @@ import { sendBootNoticeOnce } from "./infra/boot-notice.js";
 import { sendToChat as sendInfraChat } from "./infra/telegram-send.js"; // the boot probe runs before the bot starts, as provider-probes always did
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
+import { installScreenCapture } from "./infra/screen-log.js";
 import type { Server } from "node:http";
 
 const log = logger.child({ module: "main" });
@@ -66,6 +67,9 @@ async function main(): Promise<void> {
   log.info("Kernel ready (planner + pure supervisor + 8 workers + synthesizer)");
 
   healthServer = startHealthServer();
+
+  // Command output, HITL cards and tool sends go to the screen log the planner reads (infra/screen-log.ts).
+  installScreenCapture(getBot().api, "bot");
 
   if (TELEGRAM_POLLING_ENABLED) {
     await startBot();
