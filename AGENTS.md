@@ -32,7 +32,7 @@ Every change must answer **why** before **what**:
 4. **Grounding & Memory-First Reasoning** — Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code. Never use ungrounded world assumptions to overcomplicate tasks.
 5. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
 
-**Integration rule (ADR-029):** Tools call `src/infra/providers/` — never Composio, gws, or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
+**Integration rule (ADR-029):** Tools call `src/infra/providers/` — never gws or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
 
 ---
 
@@ -106,7 +106,6 @@ this only records the gotchas.
   degrades gracefully without them. Don't treat them as blockers.
 - **gws** (Google Workspace CLI) is the default Gmail/Calendar backend (ADR-029).
   Optional in CI/tests (mocked). Install + `gws auth login` on prod VPS.
-- **Composio** is legacy rollback only (`*_BACKEND=composio`). Not required for boot.
 
 ### Gotchas (these will bite you)
 - **`pnpm setup` is NOT the DB setup script.** `setup` is a built-in pnpm command, so
@@ -126,11 +125,11 @@ this only records the gotchas.
   `GOOGLE_GENERATIVE_AI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` to run live.
 
 ### Platform integration defaults (ADR-029)
-| Platform | Default | Env rollback | Prod auth |
-|----------|---------|--------------|-----------|
-| Gmail + Calendar | `gws` | `GMAIL_BACKEND=composio` | `gws auth login` on VPS |
-| LinkedIn post | `direct` | `LINKEDIN_BACKEND=composio` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
-| GitHub | Octokit | — | `GITHUB_TOKEN` |
+| Platform | Backend | Prod auth |
+|----------|---------|-----------|
+| Gmail + Calendar | `gws` (or `googleapis`) | `gws auth login` on VPS |
+| LinkedIn post | `direct` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
+| GitHub | Octokit | `GITHUB_TOKEN` |
 
 ### JARVIS cinematic UI (`apps/jarvis-next`) — **run on your machine**
 - **One command:** `pnpm dev:jarvis-local` → UI **http://localhost:3000**, API **:3001**

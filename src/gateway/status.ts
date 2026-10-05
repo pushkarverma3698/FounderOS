@@ -110,7 +110,6 @@ const ERROR_PATTERNS: Array<[RegExp, string]> = [
   [/DuckDuckGo returned HTTP (\d+)/, "Search unavailable (HTTP $1). Try again."],
   [/DuckDuckGo returned no parseable results/, "Search returned nothing. Try rephrasing the query."],
   [/webSearchTool:/, "Search temporarily unavailable. Try again in a moment."],
-  [/Composio returned no (message_id|event_id|id)/, "Action could not complete — check your Composio connection."],
   [/403 Forbidden/, "Permission denied. Check your API token has the right scopes."],
   [/Command timed out after (\d+)s/, "Command timed out ($1s). Break it into smaller steps."],
   [/ECONNREFUSED/, "Service connection failed. Try again in a moment."],

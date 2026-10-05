@@ -2,7 +2,7 @@
  * FounderOS — Google Workspace via gws CLI (direct)
  * ==================================================
  * Primary Google backend. Auth: `gws auth login` on the host (or service-account
- * + domain-wide delegation for Workspace). No Composio middleman.
+ * + domain-wide delegation for Workspace). No third-party middleman.
  */
 
 import { childLogger } from "../logger.js";

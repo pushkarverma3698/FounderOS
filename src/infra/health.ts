@@ -114,7 +114,6 @@ export interface HealthReport {
     rag: RagHealthCheck;
   };
   integrations: {
-    composio_gmail: { status: string; detail: string };
     gws_gmail: { status: string; detail: string };
     googleapis_gmail: { status: string; detail: string };
     active_gmail: { status: string; detail: string };
@@ -146,7 +145,6 @@ export async function buildHealthReport(): Promise<HealthReport> {
   const probe =
     (await runProviderProbes().catch(() => null)) ?? getLastProviderProbe();
   const backend = probe?.gmail_backend ?? getGmailBackend();
-  const composio = probe?.composio_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gws = probe?.gws_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const googleapis = probe?.googleapis_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const active = probe?.active_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
@@ -162,7 +160,6 @@ export async function buildHealthReport(): Promise<HealthReport> {
       rag,
     },
     integrations: {
-      composio_gmail: composio,
       gws_gmail: gws,
       googleapis_gmail: googleapis,
       active_gmail: active,
