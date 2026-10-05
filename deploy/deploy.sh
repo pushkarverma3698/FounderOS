@@ -57,6 +57,10 @@ if [ -f .env ] && grep -q '^WEB_GATEWAY_TOKEN=' .env; then
 fi
 pnpm build:all
 
+# The agy-login helper runs as the antigravity user and reads the built app; a deploy under a strict umask left dist/ 0700.
+# Compiled output only (no secrets: .env is separate), and node_modules is already world-readable.
+chmod -R a+rX dist
+
 echo "==> Ensuring Postgres + Ollama are up"
 docker compose -f deploy/stack.compose.yml up -d
 
