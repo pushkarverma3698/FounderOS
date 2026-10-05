@@ -34,7 +34,6 @@ import { askInstruction, draftInstruction } from "./jobhunt-instructions.js";
 import { sendCoverLetter } from "./cover-letter-delivery.js";
 import {
   buildApplicationPacket,
-  resolveBriefRow,
   DRAFT_SECTIONS,
   type ApplicationPacket,
 } from "../tools/jobhunt/apply-packet.js";
@@ -44,6 +43,10 @@ import { threadIdFor } from "./kernel-run.js";
 import { safeHtml } from "./approval-card.js";
 import { childLogger } from "./../infra/logger.js";
 import type { JobApplication } from "../db/schema.js";
+import { idRef, parseRowArg, parseRowRef, rankRef, resolveRowRef, unresolvedMessage, type RowRef } from "./jobhunt-row-ref.js";
+
+// The row-reference parsers moved to jobhunt-row-ref.js; callers still import them from here.
+export { parseRowArg, unresolvedMessage };
 
 const log = childLogger({ module: "gateway:jobhunt-commands" });
 
@@ -55,22 +58,16 @@ const log = childLogger({ module: "gateway:jobhunt-commands" });
  */
 const DRAFT_FAILURE_REASON_CHARS = 400;
 
-/**
- * Parse the row number out of "/draft 2".
- *
- * Returns null for anything that is not a plain positive integer. "2nd", "two"
- * and "" are all refusals rather than guesses — the cost of picking wrong is a
- * tailored application sent about the wrong company.
- */
-export function parseRowArg(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return n >= 1 ? n : null;
-}
-
 /** How many rows one `/draft all` will tailor before it stops. */
 export const BULK_DRAFT_CAP = 6;
+
+export interface DraftArg {
+  /** Row numbers from the latest brief. */
+  readonly rows: number[];
+  /** Ids an alert printed, as hex prefixes. Absent when none were typed. */
+  readonly ids?: string[];
+  readonly all: boolean;
+}
 
 /**
  * Parse the argument of `/draft` into the list of rows to build.
@@ -87,49 +84,22 @@ export const BULK_DRAFT_CAP = 6;
  * would tailor two of the three applications he asked for and say nothing about
  * the third.
  */
-export function parseDraftArg(raw: string): { rows: number[]; all: boolean } | null {
+export function parseDraftArg(raw: string): DraftArg | null {
   const trimmed = raw.trim();
   if (/^all$/i.test(trimmed)) return { rows: [], all: true };
   if (trimmed.length === 0) return null;
 
   const parts = trimmed.split(/[,\s]+/).filter((p) => p.length > 0);
   const rows: number[] = [];
+  const ids: string[] = [];
   for (const part of parts) {
-    const n = parseRowArg(part);
-    if (n === null) return null;
-    if (!rows.includes(n)) rows.push(n);
+    const ref = parseRowRef(part);
+    if (ref === null) return null;
+    if (ref.kind === "rank" && !rows.includes(ref.rank)) rows.push(ref.rank);
+    if (ref.kind === "id" && !ids.includes(ref.hex)) ids.push(ref.hex);
   }
-  return rows.length > 0 ? { rows, all: false } : null;
-}
-
-/**
- * Which sections each command addresses, in the words the brief prints them in.
- *
- * `/draft` spans two since 2026-08-06: DO TODAY and the stretch section share
- * one continuous numbering, because a row flagged only on the years bar needs an
- * APPLICATION, not a question. Naming only the first would tell the founder his
- * row is missing from a section it was never in.
- */
-const COMMAND_SECTIONS: Readonly<Record<string, string>> = {
-  draft: "DO TODAY / A STRETCH WORTH APPLYING TO",
-  apply: "DO TODAY / A STRETCH WORTH APPLYING TO",
-  applied: "DO TODAY / A STRETCH WORTH APPLYING TO",
-  ask: "ONE QUESTION AWAY",
-};
-
-/** What to say when the number does not resolve. Never a silent no-op. */
-export function unresolvedMessage(command: string, rank: number | null): string {
-  if (rank === null) {
-    return (
-      `Usage: /${command} <number> — the number next to a row in the latest job brief.\n` +
-      `Example: /${command} 1`
-    );
-  }
-  return (
-    `No row ${rank} in the latest brief's ${COMMAND_SECTIONS[command] ?? "actionable"} ` +
-    `section.\n\nThe numbers come from the most recent brief only. Ask me for the job brief to ` +
-    `get a current list.`
-  );
+  if (rows.length + ids.length === 0) return null;
+  return ids.length > 0 ? { rows, ids, all: false } : { rows, all: false };
 }
 
 export interface JobhuntCommandDeps {
@@ -147,26 +117,27 @@ async function handleRowCommand(
   // Unlike /draft, this never resolved a profile — /ask always read
   // Pushkar's brief regardless of what was typed. With a second profile
   // registered, "wife" has to be honored here the same way /draft honors it.
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowRef(rest) !== null);
   if (isProfileArgMiss(selected)) {
     await ctx.reply(profileMissMessage(selected));
     return;
   }
 
-  const rank = parseRowArg(selected.rest);
-  if (rank === null) {
+  const ref = parseRowRef(selected.rest);
+  if (ref === null) {
     await ctx.reply(unresolvedMessage(command, null));
     return;
   }
 
-  const row = await resolveBriefRow(rank, sections, selected.profile);
-  if (!row) {
-    await ctx.reply(unresolvedMessage(command, rank));
+  const resolved = await resolveRowRef(ref, command, sections, selected.profile);
+  if (!resolved.ok) {
+    await ctx.reply(resolved.message);
     return;
   }
+  const { row } = resolved;
 
   log.info(
-    { command, rank, company: row.company, id: row.id, profile: selected.profile.id },
+    { command, ref, company: row.company, id: row.id, profile: selected.profile.id },
     "Brief row command resolved",
   );
   await deps.runKernelText(ctx, compose(row), selected.profile.id);
@@ -244,7 +215,7 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
     return;
   }
 
-  const ranks = parsed.all ? await liveDraftRanks(selected.profile) : parsed.rows;
+  const ranks = parsed.all ? (await liveDraftRanks(selected.profile)).map(rankRef) : [...parsed.rows.map(rankRef), ...(parsed.ids ?? []).map(idRef)];
   if (ranks.length === 0) {
     await ctx.reply(
       parsed.all
@@ -262,8 +233,8 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
     );
   }
 
-  for (const [i, rank] of capped.entries()) {
-    await draftOneRow(ctx, rank, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
+  for (const [i, ref] of capped.entries()) {
+    await draftOneRow(ctx, ref, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
   }
 }
 
@@ -286,17 +257,17 @@ async function liveDraftRanks(profile: JobSearchProfile): Promise<number[]> {
 /** One row, end to end: tailor → cover letter → deliver → the packet message. */
 async function draftOneRow(
   ctx: Context,
-  rank: number,
+  ref: RowRef,
   deps: JobhuntCommandDeps,
   progress: string,
   profile: JobSearchProfile,
 ): Promise<void> {
-  const row = await resolveBriefRow(rank, DRAFT_SECTIONS, profile);
-  if (!row) {
-    await ctx.reply(unresolvedMessage("draft", rank));
+  const resolved = await resolveRowRef(ref, "draft", DRAFT_SECTIONS, profile);
+  if (!resolved.ok) {
+    await ctx.reply(resolved.message);
     return;
   }
-  await draftRow(ctx, row, deps, progress, profile, rank);
+  await draftRow(ctx, resolved.row, deps, progress, profile, ref.kind === "rank" ? ref.rank : undefined);
 }
 
 /** Build the application for a resolved row; shared by `/draft N` and the 📝 Draft button. */
@@ -371,22 +342,23 @@ export async function handleAsk(ctx: Context, deps: JobhuntCommandDeps): Promise
  * change with nothing for a model to compose or approve.
  */
 export async function handleApplied(ctx: Context): Promise<void> {
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowRef(rest) !== null);
   if (isProfileArgMiss(selected)) {
     await ctx.reply(profileMissMessage(selected));
     return;
   }
-  const rank = parseRowArg(selected.rest);
-  if (rank === null) {
+  const ref = parseRowRef(selected.rest);
+  if (ref === null) {
     await ctx.reply(unresolvedMessage("applied", null));
     return;
   }
 
-  const row = await resolveBriefRow(rank, DRAFT_SECTIONS, selected.profile);
-  if (!row) {
-    await ctx.reply(unresolvedMessage("applied", rank));
+  const resolved = await resolveRowRef(ref, "applied", DRAFT_SECTIONS, selected.profile);
+  if (!resolved.ok) {
+    await ctx.reply(resolved.message);
     return;
   }
+  const { row } = resolved;
 
   const result = await markRowApplied(row);
   if (!result.ok) {
@@ -394,6 +366,6 @@ export async function handleApplied(ctx: Context): Promise<void> {
     return;
   }
 
-  log.info({ command: "applied", rank, company: row.company, id: row.id }, "Application marked applied");
+  log.info({ command: "applied", ref, company: row.company, id: row.id }, "Application marked applied");
   await ctx.reply(`✅ Marked applied — ${row.company} (${row.title}). It's off today's queue.`);
 }
