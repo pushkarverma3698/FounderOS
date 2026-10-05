@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DispatchSandbox, FAKE_GEMINI_KEY } from "./dispatch-sandbox.js";
 
@@ -473,7 +473,15 @@ describe("the real file, in the repo layout (helpers in deploy/lib)", () => {
     const r = sb.tick({ args: ["--help"] });
 
     expect(r.status).toBe(1);
-    expect(sb.log()).toMatch(/FATAL: lib\/down-state\.sh not found/);
+    expect(sb.log()).toMatch(/FATAL: lib\/.*\.sh not found/);
     expect(sb.log()).toMatch(/sync-daemons/);
+  });
+});
+
+describe("agent-dispatch — Telegram quiet hours", () => {
+  it("a login failure is urgent: it is sent at 02:00 and nothing is queued for the digest", () => {
+    sb.tick({ agyOut: `${"I am working on it.\n".repeat(5)}${AUTH_LINE}`, env: { TG_QUIET_NOW: "02" } });
+    expect(paused()).toHaveLength(1);
+    expect(existsSync(sb.home + "/.claude/tg-digest.queue")).toBe(false);
   });
 });

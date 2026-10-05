@@ -71,7 +71,10 @@ done
 # This is the most common cause of an empty turicks_brain: a brain sync ran while
 # Ollama was down and silently emitted 0 embeddings.
 echo "==> Ensuring Ollama container is running"
-if ! docker ps --filter "name=founderos-ollama" --filter "status=running" --quiet | grep -q .; then
+# Capture, then grep: under pipefail `cmd | grep -q` takes cmd's SIGPIPE (141) for "no match" when grep quits on its
+# first hit. Same trap and fix as head_is_stamped in vps-daemons/pr-brain.
+ollama_up=$(docker ps --filter "name=founderos-ollama" --filter "status=running" --quiet) || ollama_up=""
+if ! grep -q . <<<"$ollama_up"; then
   echo "    founderos-ollama not running — starting it"
   docker start founderos-ollama 2>/dev/null || \
     docker compose -f deploy/stack.compose.yml up -d ollama
@@ -163,7 +166,9 @@ else
   echo "    WARNING: /api/v1/health failed — JARVIS web UI may be down (core bot is up)." >&2
 fi
 
-if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
+# Capture the page, then grep it (SIGPIPE under pipefail, as with the Ollama check above): curl writes a whole page.
+spa_html=$(curl -fsS http://127.0.0.1:3001/) || spa_html=""
+if grep -qi 'html\|jarvis\|root' <<<"$spa_html"; then
   echo "==> JARVIS UI OK — GET / serves SPA"
 else
   echo "    (v3: web SPA removed — health endpoint only)" >&2

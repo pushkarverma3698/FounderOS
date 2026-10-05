@@ -11,6 +11,7 @@ import { recordTailoringResult } from "../db/job-queries.js";
 import { buildCoverLetter, type CoverLetterModel } from "../tools/jobhunt/cover-letter.js";
 import { invokeWorkerWithFallbacks } from "../agents/worker-invoke.js";
 import { uploadFile } from "../infra/storage/s3-client.js";
+import { DEFAULT_PROFILE_ID } from "../tools/jobhunt/profile-config.js";
 import { safeHtml } from "./approval-card.js";
 import { childLogger } from "../infra/logger.js";
 import type { JobApplication } from "../db/schema.js";
@@ -36,6 +37,15 @@ const FOUNDER_CONTEXT =
   "were real work. I am looking to come back into a team and can start " +
   "immediately. I am relocating to the Netherlands and am eligible for the " +
   "IND highly skilled migrant permit.";
+
+/**
+ * The founder's biography goes only into the founder's own letters. A letter
+ * drafted for another profile (the wife's, say) goes to a real company, and
+ * must not carry his guesthouse, studio or relocation story.
+ */
+export function founderContextFor(profileId: string): string | undefined {
+  return profileId === DEFAULT_PROFILE_ID ? FOUNDER_CONTEXT : undefined;
+}
 
 /**
  * Write the cover letter and put it in the chat, ready to paste.
@@ -79,7 +89,7 @@ export async function sendCoverLetter(
       jobDescription: row.description ?? "",
       track: row.track,
       cvText: cvMarkdown,
-      founderContext: FOUNDER_CONTEXT,
+      founderContext: founderContextFor(row.profile_id),
     },
     model,
   );

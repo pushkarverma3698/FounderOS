@@ -56,6 +56,7 @@ function publish(head: string): void {
 function sweep(head: string, gatedAt: string): void {
   spawnSync("bash", [SCRIPT], {
     env: {
+      TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
       PATH: `${bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
       HOME: home,
       PR_BRAIN_OWNER: "owner",

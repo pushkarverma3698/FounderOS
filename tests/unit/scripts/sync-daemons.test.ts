@@ -298,7 +298,7 @@ describe("the deployed daemons find their helpers from their own REAL path", () 
         encoding: "utf8",
       });
       expect(r.status, name).toBe(1);
-      expect(r.stdout).toMatch(/FATAL: lib\/down-state\.sh not found/);
+      expect(r.stdout).toMatch(/FATAL: lib\/.*\.sh not found/);
       expect(r.stdout).toMatch(/sync-daemons/);
     }
   });

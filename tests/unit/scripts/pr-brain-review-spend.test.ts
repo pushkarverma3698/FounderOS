@@ -64,6 +64,7 @@ interface SweepOptions {
 function sweep(opts: SweepOptions = {}): { status: number | null; stdout: string } {
   const r = spawnSync("bash", [SCRIPT, ...(opts.args ?? [])], {
     env: {
+      TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
       PATH: `${bin}:/usr/bin:/bin:/usr/local/bin`,
       HOME: home,
       PR_BRAIN_ROOT: join(root, "repos"),

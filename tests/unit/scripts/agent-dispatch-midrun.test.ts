@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, utimesSync } from "node:fs";
+import { mkdirSync, readFileSync, utimesSync } from "node:fs";
 import { DispatchSandbox } from "./dispatch-sandbox.js";
 
 const BRANCH = "task/issue-710-test-docs-add-visible-test-comment";
@@ -181,5 +181,16 @@ describe("the VPS rebooted mid-run: the existing lease path still recovers", () 
 
     expect(sb.hasState("agent-dispatch.down")).toBe(true);
     expect(sb.labelsOf(710)).toEqual(["agent:ready"]);
+  });
+});
+
+describe("Telegram quiet hours", () => {
+  it("a PR that opened at 02:00 is held for the digest, and the 09:00 tick delivers it", () => {
+    sb.tick({ agyOut: "done", agyRc: 0, agyHook: OPEN_A_PR, env: { TG_QUIET_NOW: "02" } });
+    expect(sb.messages()).toHaveLength(0);
+    expect(readFileSync(sb.home + "/.claude/tg-digest.queue", "utf8")).toContain("agent-dispatch");
+
+    sb.tick({ agyOut: "ok", env: { TG_QUIET_NOW: "09" } });
+    expect(sb.messages()[0]).toContain("🌅 Overnight digest");
   });
 });

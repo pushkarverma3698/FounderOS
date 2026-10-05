@@ -121,6 +121,36 @@ describe("/login", () => {
     expect(await handleLoginReply(ctx({ chatId: 100, text: "/status" }).c, d)).toBe(false);
   });
 
+  it("L5: a token with whitespace in it is still consumed, deleted and finished with the whitespace removed", async () => {
+    const a = adapter();
+    const d = mk(a);
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    for (const text of ["sk-ant-oat01-abc def\nghi", "http://localhost:1455/cb?state=x&code=ab cd", "see https://localhost/auth/callback?code=9"]) {
+      const m = ctx({ chatId: 100, text });
+      expect(await handleLoginReply(m.c, d)).toBe(true);
+      expect(m.c.deleteMessage).toHaveBeenCalled();
+      await d.pending.begin("100", a, "default", { html: "again", state: "S" });
+    }
+    expect(a.finish).toHaveBeenNthCalledWith(1, "default", "sk-ant-oat01-abcdefghi", "S");
+    expect(a.finish).toHaveBeenNthCalledWith(2, "default", "http://localhost:1455/cb?state=x&code=abcd", "S");
+  });
+
+  it("L8: when the paste cannot be deleted, the reply says to delete it yourself", async () => {
+    const d = mk(adapter());
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    const m = ctx({ chatId: 100, text: "code1code" });
+    m.c.deleteMessage.mockRejectedValueOnce(new Error("message can't be deleted"));
+    expect(await handleLoginReply(m.c, d)).toBe(true);
+    expect(m.replies[0]).toContain("Delete it yourself");
+  });
+
+  it("L11: a failed paste whose attempt is over drops it, so the retry is not told 'attempt has ended'", async () => {
+    const d = mk(adapter({ finish: vi.fn(async () => ({ ok: false, ended: true, html: "Send /login tool again" })) }));
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    expect(await handleLoginReply(ctx({ chatId: 100, text: "typo4code" }).c, d)).toBe(true);
+    expect(await d.pending.peek("100")).toBeUndefined();
+  });
+
   it("a sentence typed while a login waits reaches the kernel, untouched; the attempt stays open", async () => {
     const a = adapter();
     const d = mk(a);

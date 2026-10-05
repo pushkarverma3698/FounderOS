@@ -163,6 +163,7 @@ DRY_RUN=0
 LIST_ONLY=0
 FORCE_ISSUE=""
 
+TG_DAEMON_NAME="${TG_DAEMON_NAME:-agent-dispatch}"
 log() {
   local line
   line="$(date -u '+%Y-%m-%dT%H:%M:%SZ')  $*"
@@ -187,6 +188,11 @@ write_effective() {
 
 # Mirrors pr-brain's notify() exactly — same env file, same silent-if-unset behavior.
 notify() {
+  if tg_should_hold "$1"; then
+    tg_hold "$1"
+    return 0
+  fi
+  tg_flush_digest
   [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
   local token chat
   token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
@@ -224,6 +230,7 @@ notify_long() {
 # deploy/sync-daemons.sh ships them with the daemons, and tests/unit/scripts/sync-daemons.test.ts
 # fails when a file a daemon sources is not in that copy list. Without them there is no pause
 # state and no failure classifier, so refuse to run rather than fall back to the old silence.
+#   tg-quiet.sh     Telegram quiet hours helper
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with pr-brain)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message (shared with pr-brain)
@@ -232,7 +239,7 @@ notify_long() {
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -470,6 +477,7 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
     fi
   fi
   trap 'rm -rf "$LOCK"' EXIT
+  tg_flush_digest
 fi
 
 # The lock is ours, so this tick is real and is about to read the whole queue: any kick note is spent, whether
