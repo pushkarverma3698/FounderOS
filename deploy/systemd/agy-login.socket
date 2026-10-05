@@ -1,0 +1,12 @@
+[Unit]
+Description=FounderOS agy login helper socket (the bot asks it to sign agy in from Telegram)
+
+[Socket]
+# Only the bot's user (group founderos) and antigravity can open it. /run is tmpfs, so the file is recreated at boot.
+ListenStream=/run/agy-login.sock
+SocketUser=antigravity
+SocketGroup=founderos
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

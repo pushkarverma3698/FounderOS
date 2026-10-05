@@ -19,6 +19,7 @@ function deps(over: Partial<GoogleLoginDeps> = {}): GoogleLoginDeps & { files: M
     restore: async (p, had) => void (had ? files.set(p, files.get(`${p}.bak`)!) : files.delete(p)),
     clearAlerts: vi.fn(),
     forget: vi.fn(async (a: string) => void files.delete(`/acc/${a}/gws/credentials.json`)),
+    deleteCredentials: async (p) => void (files.delete(p), files.delete(`${p}.bak`)),
     ...over,
   };
 }

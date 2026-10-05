@@ -16,7 +16,6 @@
  * differ, step 2 (claude-host-login.ts) offers a second link that moves the server's own login to the token's account.
  */
 
-import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,13 +40,15 @@ import {
 import type { LoginAdapter, LoginFinished, LoginStarted, LoginTargetStatus } from "../types.js";
 import { escHtml, htmlLink, loginEnv, looksLikeCode, sleep, todayUtc } from "../util.js";
 
+import { classifyClaudeResult, probeStoredClaude, signOutClaude, verifyClaudeToken, type TokenCheck } from "./claude-check.js";
+
 export { readHostLogin, type HostLogin } from "./claude-host-login.js";
+export { classifyClaudeResult, probeStoredClaude, signOutClaude, verifyClaudeToken, type TokenCheck };
 
 const log = childLogger({ module: "gateway:login:claude" });
 
 const URL_TIMEOUT_MS = 30_000;
 const TOKEN_TIMEOUT_MS = 45_000;
-const VERIFY_TIMEOUT_MS = 60_000;
 const STATUS_CACHE_MS = 10 * 60_000;
 const PASTE_SETTLE_MS = 300;
 
@@ -108,67 +109,6 @@ export function describeAccount(org: OrgLookup, host: HostLogin | undefined, eff
     : `${line} /login claude <email> moves both to one account.`;
 }
 
-// ── the cheap real call ──────────────────────────────────────────────────────
-
-export type TokenCheck =
-  | { readonly kind: "ok"; readonly note?: string }
-  | { readonly kind: "rejected" }
-  | { readonly kind: "unknown"; readonly reason: string };
-
-/**
- * Reads `claude -p --output-format json`. Captured: a made-up token gives exit 1 and
- * {"is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}.
- * Never copies claude's text into the result: only fixed phrases.
- */
-export function classifyClaudeResult(stdout: string, exitCode: number | null): TokenCheck {
-  let j: { is_error?: boolean; api_error_status?: number | null; result?: unknown } | undefined;
-  try {
-    j = JSON.parse(stdout) as typeof j;
-  } catch {
-    // allow-failopen: unparseable output is the "unknown" answer below, never a pass.
-    j = undefined;
-  }
-  if (!j || typeof j !== "object") return { kind: "unknown", reason: `claude exited ${exitCode ?? "without a code"} with no JSON result` };
-  if (j.is_error === false) return { kind: "ok" };
-  const text = typeof j.result === "string" ? j.result : "";
-  if (j.api_error_status === 401 || j.api_error_status === 403 || /failed to authenticate|oauth token (has )?(expired|invalid)|not logged in/i.test(text)) {
-    return { kind: "rejected" };
-  }
-  if (/hit your .*limit|usage limit/i.test(text)) return { kind: "ok", note: "the token works but the usage limit is reached" };
-  return { kind: "unknown", reason: `claude returned an error (status ${j.api_error_status ?? "none"})` };
-}
-
-/** One `claude -p "reply ok" --max-turns 1` with ONLY this token, from an empty HOME so no other login can answer for it. */
-export async function verifyClaudeToken(token: string, spawnFn: SpawnLike = spawn as SpawnLike, base: NodeJS.ProcessEnv = process.env): Promise<TokenCheck> {
-  const home = await mkdtemp(join(tmpdir(), "claude-verify-"));
-  try {
-    return await new Promise<TokenCheck>((resolve) => {
-      const env = { ...loginEnv(home, base), CLAUDE_CODE_OAUTH_TOKEN: token };
-      const child = spawnFn("claude", ["-p", "reply ok", "--max-turns", "1", "--output-format", "json"], { env, cwd: home, stdio: ["ignore", "pipe", "pipe"] });
-      let out = "";
-      let settled = false;
-      const settle = (r: TokenCheck): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(r);
-      };
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        settle({ kind: "unknown", reason: "the check timed out" });
-      }, VERIFY_TIMEOUT_MS);
-      child.stdout?.on("data", (d: Buffer) => {
-        out += d.toString("utf8");
-      });
-      child.on("error", () => settle({ kind: "unknown", reason: "the claude binary could not be started" }));
-      child.on("close", (code) => settle(classifyClaudeResult(out, code)));
-    });
-  } finally {
-    // allow-failopen: a leftover empty scratch dir in /tmp is harmless and must not mask the verdict.
-    await rm(home, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
 // ── the adapter ──────────────────────────────────────────────────────────────
 
 export interface ClaudeLoginDeps {
@@ -185,6 +125,10 @@ export interface ClaudeLoginDeps {
   readonly hostLogin: () => Promise<HostLogin | undefined>;
   /** `claude auth status` against a given HOME: reads the scratch login in step 2 and the real one after install. */
   readonly readLogin: (home: string) => Promise<HostLogin | undefined>;
+  /** Deletes the token files, the server's own login backups, and runs `claude auth logout`. Never throws for a file that is already gone. */
+  readonly signOut: () => Promise<{ readonly hostLogout: "ok" | "failed" }>;
+  /** The real failed call: claude with only what is stored on disk. */
+  readonly probeStored: () => Promise<TokenCheck>;
 }
 
 interface ClaudeState {
@@ -213,6 +157,8 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
     lookupOrg: (t) => lookupOrgId(t),
     hostLogin: () => readHostLogin(undefined, process.env),
     readLogin: (home) => readHostLogin(undefined, { ...process.env, HOME: home }),
+    signOut: () => signOutClaude(paths),
+    probeStored: () => probeStoredClaude(),
     ...overrides,
   };
   let cache: { token: string; at: number; check: TokenCheck; account?: string } | undefined;
@@ -346,6 +292,28 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
         };
       }
       return complete(got.token, hint);
+    },
+
+    async logout(): Promise<LoginFinished> {
+      let out: { readonly hostLogout: "ok" | "failed" };
+      try {
+        out = await d.signOut();
+      } catch (err) {
+        log.error({ code: (err as NodeJS.ErrnoException).code ?? "error" }, "claude sign-out could not delete a credential");
+        return { ok: false, html: `Could not delete a Claude credential (${escHtml((err as NodeJS.ErrnoException).code ?? "error")}). Some of it may still be in place: check /login.` };
+      }
+      cache = undefined;
+      const left = (await Promise.all([d.paths.primary, d.paths.dispatch].map((p) => d.readFile(p)))).some((r) => r.state !== "missing");
+      const probe = await d.probeStored();
+      log.info({ hostLogout: out.hostLogout, probe: probe.kind, tokenFileLeft: left }, "claude credentials deleted");
+      if (left) return { ok: false, html: "I deleted the Claude token files, but one is still on disk. Check the server." };
+      if (probe.kind === "ok") {
+        return { ok: false, html: "I deleted the Claude token files, but a test call with only what is stored on this server still works, so a login is still there. It is not signed out." + (out.hostLogout === "failed" ? " <code>claude auth logout</code> failed." : "") };
+      }
+      const prefix = "Claude is signed out on this server: both token files and the saved login copies are deleted, none kept. ";
+      const tail = " pr-brain, the dispatch engine and the bot's Claude executor stop until /login claude. A token made with setup-token stays valid at Anthropic until you revoke it in claude.ai settings.";
+      if (probe.kind === "rejected") return { ok: true, html: `${prefix}A test call with what is left on this server was refused, as expected.${tail}` };
+      return { ok: true, html: `${prefix}The test call that proves it was refused could not run (${escHtml(probe.reason)}), so that part is not verified.${tail}` };
     },
 
     async status(): Promise<readonly LoginTargetStatus[]> {

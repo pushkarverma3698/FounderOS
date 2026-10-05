@@ -11,6 +11,7 @@
 #   deploy/agent-dispatch           -> ~/bin/agent-dispatch
 #   deploy/vps-daemons/pr-brain     -> ~/bin/pr-brain
 #   deploy/onboard-repo.sh          -> ~/bin/onboard-repo.sh
+#   deploy/systemd/agy-login.*     -> /etc/systemd/system  (sudo -n; the socket the bot uses to sign agy in from Telegram)
 #   (crontab)                       a `* * * * * … agent-dispatch --kicked` line, copied from the agent-dispatch
 #                                   line already there (see ensure_kick_cron); no other crontab line is touched
 #
@@ -160,5 +161,66 @@ ensure_kick_cron() {
 }
 ensure_kick_cron
 [[ -z "$KICK_CRON_NOTE" ]] || echo "sync-daemons: $KICK_CRON_NOTE"
+
+# 6. The agy login helper's systemd units. `/login agy` from Telegram needs a process that runs as the `antigravity` user
+# (the only one that can run agy) behind a unix socket the bot can open: the bot itself runs under NoNewPrivileges and
+# cannot sudo (see deploy/systemd/agy-login.service and src/gateway/login/agy-helper.ts). Unit files live outside ~/bin and
+# need root, so they are installed with `sudo -n` (the deploy user has passwordless sudo on the VPS), compared by sha256,
+# and the socket is enabled. Without passwordless sudo this warns and does nothing, like the kick cron: /login agy then
+# falls back to its by-hand instructions. The helper is try-restarted so it never serves last deploy's code.
+# Env: SYNC_DAEMONS_UNIT_DEST (default /etc/systemd/system), SYNC_DAEMONS_SUDO (default `sudo -n`; empty = none),
+#      SYNC_DAEMONS_SYSTEMCTL (default systemctl). Under a scratch HOME with none of these set it leaves systemd alone.
+UNIT_NOTE=""
+ensure_units() {
+  local udest="${SYNC_DAEMONS_UNIT_DEST:-/etc/systemd/system}" sysctl="${SYNC_DAEMONS_SYSTEMCTL:-systemctl}"
+  local -a sudo_cmd=()
+  if [[ -n "${SYNC_DAEMONS_SUDO+x}" ]]; then
+    read -r -a sudo_cmd <<<"${SYNC_DAEMONS_SUDO}"
+    (( ${#sudo_cmd[@]} > 0 )) || sudo_cmd=(env) # no privilege wanted: `env` runs the command as is (bash 3.2 rejects an empty array under set -u)
+  else
+    sudo_cmd=(sudo -n)
+  fi
+  if [[ -z "${SYNC_DAEMONS_UNIT_DEST:-}" ]]; then
+    local real_home
+    real_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    if [[ -z "$real_home" || "$HOME" != "$real_home" ]]; then
+      UNIT_NOTE="agy login units left alone (HOME=$HOME is not this user's own home)"
+      return 0
+    fi
+  fi
+  local units=(agy-login.socket agy-login.service) u changed=0
+  for u in "${units[@]}"; do
+    [[ -s "$SRC/systemd/$u" ]] || fail "$SRC/systemd/$u is missing or empty in the checkout"
+  done
+  if ! command -v "$sysctl" >/dev/null 2>&1; then
+    UNIT_NOTE="no systemctl here: the agy login units are not installed"
+    return 0
+  fi
+  if ! "${sudo_cmd[@]}" true >/dev/null 2>&1; then
+    UNIT_NOTE="WARNING: passwordless sudo is not available: the agy login units are not installed, so /login agy from Telegram falls back to the by-hand steps"
+    return 0
+  fi
+  for u in "${units[@]}"; do
+    if [[ "$(sha256_of "$SRC/systemd/$u")" != "$(sha256_of "$udest/$u" 2>/dev/null)" ]]; then
+      "${sudo_cmd[@]}" install -m 0644 "$SRC/systemd/$u" "$udest/$u.new" && "${sudo_cmd[@]}" mv -f "$udest/$u.new" "$udest/$u" \
+        || fail "could not install $udest/$u"
+      changed=1
+    fi
+  done
+  for u in "${units[@]}"; do
+    [[ "$(sha256_of "$SRC/systemd/$u")" == "$(sha256_of "$udest/$u" 2>/dev/null)" ]] \
+      || fail "MISMATCH: $udest/$u differs from $SRC/systemd/$u after install"
+  done
+  if (( changed )); then
+    "${sudo_cmd[@]}" "$sysctl" daemon-reload || fail "systemctl daemon-reload failed after installing the agy login units"
+  fi
+  "${sudo_cmd[@]}" "$sysctl" enable --now agy-login.socket >/dev/null 2>&1 || fail "could not enable agy-login.socket"
+  (( changed )) && { "${sudo_cmd[@]}" "$sysctl" restart agy-login.socket >/dev/null 2>&1 || fail "could not restart agy-login.socket"; }
+  "${sudo_cmd[@]}" "$sysctl" try-restart agy-login.service >/dev/null 2>&1 || true
+  [[ "$("$sysctl" is-active agy-login.socket 2>/dev/null)" == "active" ]] || fail "agy-login.socket is not active after install"
+  UNIT_NOTE="agy login units installed and agy-login.socket active ($([[ $changed == 1 ]] && echo updated || echo unchanged))"
+}
+ensure_units
+[[ -z "$UNIT_NOTE" ]] || echo "sync-daemons: $UNIT_NOTE"
 
 echo "sync-daemons: $((${#PAIRS[@]})) files installed into $DEST ($LIB_COUNT libs first), every sha256 matches the checkout, every daemon starts"
