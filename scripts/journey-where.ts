@@ -8,6 +8,7 @@
  */
 import { botUsername, connect, sendAndCollect } from "./lib/mtproto.js";
 import { judgeWhere, parseWhereReply, type WhereCounts } from "./lib/journey-where.js";
+import { appendScreenEntry } from "../src/infra/screen-log.js";
 
 const REPO = process.env["JOURNEY_WHERE_REPO"] ?? "pushkarverma3698/FounderOS";
 const WEEK_MS = 7 * 24 * 3_600_000;
@@ -16,11 +17,13 @@ async function notifyFounder(text: string): Promise<void> {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
   const chat = process.env["TELEGRAM_CHAT_ID"];
   if (!token || !chat) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chat, text }),
   });
+  // The bot's planner reads the screen log, so a follow-up question about this alert gets an answer.
+  if (res.ok) await appendScreenEntry({ chat, src: "journey-where", text });
 }
 
 async function searchCount(q: string): Promise<number> {
