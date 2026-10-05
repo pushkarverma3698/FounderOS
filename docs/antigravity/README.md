@@ -146,6 +146,7 @@ so the review is not a formality on top of the work, it *is* the quality mechani
 | [AG-010](AG-010-retrieval-eval-harness.md) | Retrieval eval: golden set, recall@k, RAG triad | eval infrastructure | **merged & shipped** — PR #514; found prod keyword RAG at 0% recall (no `ORDER BY` before `LIMIT`), fixed separately by PR #523 the same day |
 | [AG-011](AG-011-answer-quality-judge.md) | Point the existing judge at answer quality (async evaluator) | eval infrastructure | **merged & shipped** — PR #515, live on prod `32902f0` since 2026-08-20 |
 | [AG-012](AG-012-pr-review-canonical-protocol.md) | Make `pnpm pr:review` invoke the canonical `pr-adversary` skill, not a stale copy | cross-cutting (Brain/Doer tooling) | **ready to dispatch** — written 2026-09-07 |
+| [AG-023](AG-023-named-routines.md) | Named routines: scheduled prompts that retry, carry a name, remember, and list under /agents | agent factory (Option 1) | **needs founder approval** — written 2026-10-06; outside A–D, needs the `unfreeze` label |
 
 ### AG-004 must be rewritten before it is re-dispatched
 
