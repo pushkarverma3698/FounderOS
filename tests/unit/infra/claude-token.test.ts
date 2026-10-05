@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, stat, writeFile, chmod } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeTokenPaths, readClaudeToken, readTokenFile, writeClaudeTokenFiles } from "../../../src/infra/claude-token.js";
+import { claudeTokenPaths, parseExpiry, readClaudeToken, readHostRefreshExpiry, hostLoginNeedsRenewal, readTokenFile, writeClaudeTokenFiles, WARN_AHEAD_MS } from "../../../src/infra/claude-token.js";
 
 async function paths() {
   const dir = await mkdtemp(join(tmpdir(), "claude-token-test-"));
@@ -59,5 +59,57 @@ describe("claude token files", () => {
   it("paths honour the same overrides the daemons honour", () => {
     expect(claudeTokenPaths({}, "/h")).toEqual({ primary: "/h/.claude/pr-brain.token", dispatch: "/h/.claude/claude-code.token" });
     expect(claudeTokenPaths({ PR_BRAIN_TOKEN_FILE: "/a", AGENT_DISPATCH_CLAUDE_TOKEN_FILE: "/b" }, "/h")).toEqual({ primary: "/a", dispatch: "/b" });
+  });
+});
+
+describe("host login refresh-token expiry", () => {
+  const MS = Date.parse("2026-11-01T00:00:00Z");
+
+  it.each([
+    ["epoch ms number", MS, MS],
+    ["epoch ms as a digit string", String(MS), MS],
+    ["epoch seconds number", MS / 1000, MS],
+    ["ISO string", "2026-11-01T00:00:00Z", MS],
+  ])("parseExpiry reads %s", (_name, raw, expected) => {
+    expect(parseExpiry(raw)).toBe(expected);
+  });
+
+  it.each([[undefined], [null], [""], ["soon"], [{}], [true], [0], [-5], [Number.NaN]])("parseExpiry rejects %j", (raw) => {
+    expect(parseExpiry(raw)).toBeUndefined();
+  });
+
+  async function home(creds: string | undefined) {
+    const dir = await mkdtemp(join(tmpdir(), "claude-host-test-"));
+    if (creds !== undefined) {
+      await mkdir(join(dir, ".claude"), { recursive: true });
+      await writeFile(join(dir, ".claude", ".credentials.json"), creds, { mode: 0o600 });
+    }
+    return dir;
+  }
+
+  it("returns only the expiry, never the tokens beside it", async () => {
+    const h = await home(JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-SECRET-A", refreshToken: "sk-ant-SECRET-R", refreshTokenExpiresAt: MS }, mcpOAuth: { x: 1 } }));
+    const got = await readHostRefreshExpiry(h);
+    expect(got).toEqual({ state: "ok", expiresAtMs: MS });
+    expect(JSON.stringify(got)).not.toContain("SECRET");
+  });
+
+  it("names why there is no expiry, without echoing file content", async () => {
+    expect(await readHostRefreshExpiry(await home(undefined))).toEqual({ state: "no-file" });
+    expect(await readHostRefreshExpiry(await home("{not json sk-ant-SECRET"))).toEqual({ state: "unreadable" });
+    expect(await readHostRefreshExpiry(await home(JSON.stringify({ claudeAiOauth: { accessToken: "x" } })))).toEqual({ state: "no-expiry" });
+    expect(await readHostRefreshExpiry(await home(JSON.stringify({ claudeAiOauth: { refreshTokenExpiresAt: "sk-ant-SECRET" } })))).toEqual({ state: "garbage" });
+  });
+});
+
+describe("hostLoginNeedsRenewal", () => {
+  const NOW = 1_800_000_000_000;
+  it("is true inside the window and after the expiry, false outside it", () => {
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW + WARN_AHEAD_MS }, NOW)).toBe(true);
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW - 1 }, NOW)).toBe(true);
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW + WARN_AHEAD_MS + 1 }, NOW)).toBe(false);
+  });
+  it("claims nothing when the expiry could not be read", () => {
+    for (const state of ["no-file", "unreadable", "no-expiry", "garbage"] as const) expect(hostLoginNeedsRenewal({ state }, NOW)).toBe(false);
   });
 });

@@ -43,6 +43,7 @@ function deps(over: Partial<ClaudeLoginDeps> = {}) {
     env: { PATH: "/usr/bin", SECRET_BOT_KEY: "must-not-reach-the-child" },
     lookupOrg: async () => ({ org: ORG_NEW }),
     hostLogin: async () => undefined,
+    hostExpiry: async () => ({ state: "no-file" }),
     readLogin: async () => undefined,
     signOut: async () => ({ hostLogout: "ok" }),
     probeStored: async () => ({ kind: "rejected" }),
@@ -326,6 +327,23 @@ describe("which account", () => {
     expect(r.html).toContain("same private tab");
     expect(r.html).not.toContain(TOKEN);
     expect(r.next).toBeDefined();
+  });
+  it("finish: the SAME account but the server's login stops renewing within 3 days still offers step 2, worded as a renewal", async () => {
+    const same: HostLogin = { email: HOST.email, org: ORG_NEW };
+    const { base } = deps({ hostLogin: async () => same, hostExpiry: async () => ({ state: "ok", expiresAtMs: NOW + 2 * 86_400_000 }) });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(r.next).toBeDefined();
+    expect(r.html).toContain("renewed before it stops working");
+    expect(r.html).not.toContain("moves to the same account");
+  });
+  it("finish: the SAME account with a far expiry, or one that cannot be read, offers no step 2", async () => {
+    const same: HostLogin = { email: HOST.email, org: ORG_NEW };
+    for (const read of [{ state: "ok", expiresAtMs: NOW + 28 * 86_400_000 }, { state: "unreadable" }, { state: "no-file" }] as const) {
+      const { base } = deps({ hostLogin: async () => same, hostExpiry: async () => read });
+      const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+      expect(r.next).toBeUndefined();
+    }
   });
   it("finish: when step 2 cannot start, the token still counts and the reply names the account and the problem", async () => {
     const { base } = deps({ hostLogin: async () => HOST, spawnPty: () => fakePty("no link").child });

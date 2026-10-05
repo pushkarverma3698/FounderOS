@@ -15,6 +15,7 @@ import { FREE_SWEEP_CRON } from "../../../src/tools/jobhunt/sweep-runner.js";
 import { STANDUP_CRON } from "../../../src/goals/standup-schedule.js";
 import { MERGE_DIGEST_CRON } from "../../../src/gateway/merge-digest-run.js";
 import { JOBHUNT_FINDINGS_CRON } from "../../../src/evolution/jobhunt-findings-cron.js";
+import { CLAUDE_EXPIRY_CRON } from "../../../src/infra/claude-login-expiry.js";
 
 const SCHEDULER = readFileSync(fileURLToPath(new URL("../../../src/infra/scheduler.ts", import.meta.url)), "utf8");
 
@@ -46,6 +47,13 @@ describe("scheduler registry", () => {
     expect(own("jobhunt-findings")).toBe(JOBHUNT_FINDINGS_CRON);
     expect(own("free-board-sweep")).toBe(FREE_SWEEP_CRON);
     expect(own("merge-digest")).toBe(MERGE_DIGEST_CRON);
+    expect(own("claude-login-expiry")).toBe(CLAUDE_EXPIRY_CRON);
+  });
+
+  it("src/index.ts starts the Claude login expiry check inside the Telegram-polling block", () => {
+    const index = readFileSync(fileURLToPath(new URL("../../../src/index.ts", import.meta.url)), "utf8");
+    const block = /if \(TELEGRAM_POLLING_ENABLED\) \{\s*await startBot\(\);[\s\S]*?\n  \}/.exec(index)?.[0] ?? "";
+    expect(block).toContain("startClaudeLoginExpiryCron(");
   });
 
   it("scheduler.ts still starts the two routines that register themselves", () => {
