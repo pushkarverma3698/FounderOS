@@ -186,6 +186,9 @@ describe("runSpecGate: scope", () => {
       "scripts/verify-architecture.ts",
       "scripts/verify-*",
       "packages/web/package.json",
+      "governance/architecture-baseline.json",
+      ".eslintrc.json",
+      ".husky/pre-commit",
       "**",
       "*",
     ];

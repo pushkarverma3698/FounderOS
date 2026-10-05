@@ -42,16 +42,25 @@ export interface SpecGateResult {
   fingerprint: string;
 }
 
-/** Root-anchored patterns a task must never be allowed to edit: it could weaken its own judge. */
-const FORBIDDEN_SCOPE = [
+/**
+ * Root-anchored patterns a task must never be allowed to edit: it could weaken its own judge.
+ * pr-evidence.ts checks the built diff against the same list.
+ */
+export const PROTECTED_PATHS: readonly string[] = [
   ".github/**",
+  "governance/**",
+  ".husky/**",
   "package.json",
   "pnpm-lock.yaml",
+  ".npmrc",
   "eslint*",
+  ".eslintrc*",
   "tsconfig*",
   "vitest.config*",
+  "vitest.workspace*",
   "scripts/verify-*",
 ];
+const FORBIDDEN_SCOPE = PROTECTED_PATHS;
 
 const RISK_ORDER: readonly Risk[] = ["low", "medium", "high"];
 
