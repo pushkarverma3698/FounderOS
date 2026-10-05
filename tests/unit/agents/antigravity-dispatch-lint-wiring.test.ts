@@ -134,6 +134,33 @@ describe("dispatch_antigravity_task with the real lint", () => {
     expect(mockHitlGate).toHaveBeenCalledTimes(1);
   });
 
+  it("one sentence is enough: goal, expected and verification omitted, ONE card that says what was filled", async () => {
+    // C-P0-2. A cheap planner that leaves these out used to bounce at the schema before any card existed.
+    const reply = await dispatchAntigravityTask.invoke({
+      title: BRIEF.title,
+      repo: BRIEF.repo,
+      founder_request: "make the daily digest shorter",
+    });
+
+    expect(reply).toContain("✅ Dispatched to Google Antigravity: Issue #77");
+    expect(mockHitlGate).toHaveBeenCalledTimes(1);
+    const preview = (mockHitlGate.mock.calls[0]?.[0] as { preview: string }).preview;
+    expect(preview).toContain("Filled from your sentence: Goal, Expected, Verification");
+    expect(preview).toContain("Files: paths: agent to locate");
+    expect(preview).toContain("make the daily digest shorter");
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    for (const heading of AGENT_BRIEF_HEADINGS) expect(filed).toContain(`## ${heading}\n`);
+  });
+
+  it("without the founder's sentence a blank goal is text to the model: no card, nothing filed, and no question for the founder", async () => {
+    const reply = await dispatchAntigravityTask.invoke({ title: BRIEF.title, repo: BRIEF.repo });
+
+    expect(reply).toContain("founder_request");
+    expect(reply).toMatch(/do not ask the founder/i);
+    expect(mockHitlGate).not.toHaveBeenCalled();
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+  });
+
   it("still dispatches, and tells the founder what it could not check, when GitHub is down", async () => {
     mockGetContent.mockRejectedValue(Object.assign(new Error("Service Unavailable"), { status: 503 }));
 

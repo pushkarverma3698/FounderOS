@@ -16,6 +16,8 @@ import {
   demoteMissingPaths,
   evidenceFromFounderRequest,
   prepareDispatchBrief,
+  SCOPE_UNKNOWN,
+  withFounderRequestBrief,
   withFounderRequestEvidence,
   withFounderRequestProblem,
 } from "../../../src/tools/dispatch-brief-repair.js";
@@ -278,4 +280,58 @@ describe("the repaired body really passes the real lint", () => {
       if (prepared.ok) expect(prepared.demoted).toEqual(["src/gone.ts"]);
     },
   );
+});
+
+describe("withFounderRequestBrief (C-P0-2: /task writes the brief)", () => {
+  const BLANK: AntigravityTaskInput = { title: "feat: shorter digest", goal: "", scope: "", expected: "  ", verification: "" };
+  const REQUEST = "make the daily digest shorter";
+
+  it("fills a blank goal, expected and verification from the founder's quoted sentence, and names what it filled", () => {
+    const { input, filled } = withFounderRequestBrief(BLANK, REQUEST);
+
+    expect(filled).toEqual(["Goal", "Expected", "Verification"]);
+    expect(input.goal).toContain("> make the daily digest shorter");
+    expect(input.expected).toContain("> make the daily digest shorter");
+    expect(input.verification).toMatch(/repo(sitory)?'s own checks/i);
+  });
+
+  it("keeps every field the planner did supply, and lists only the ones it had to fill", () => {
+    const { input, filled } = withFounderRequestBrief({ ...BLANK, goal: "Digest is at most 5 lines.", verification: "pnpm test" }, REQUEST);
+
+    expect(filled).toEqual(["Expected"]);
+    expect(input.goal).toBe("Digest is at most 5 lines.");
+    expect(input.verification).toBe("pnpm test");
+  });
+
+  it("does nothing without a founder request: the tool cannot invent a goal", () => {
+    for (const request of [undefined, null, "", "   "]) {
+      const { input, filled } = withFounderRequestBrief(BLANK, request);
+      expect(filled).toEqual([]);
+      expect(input).toBe(BLANK);
+    }
+  });
+
+  it("fills a multi-line request as one quoted block", () => {
+    const { input } = withFounderRequestBrief(BLANK, "line one\nline two");
+    expect(input.goal).toContain("> line one\n> line two");
+  });
+
+  it("produces a body the real lint accepts, with no file named anywhere", async () => {
+    const prepared = await prepareDispatchBrief(BLANK, REQUEST, deps);
+
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(prepared.filled).toEqual(["Goal", "Expected", "Verification"]);
+    expect(prepared.input.scope).toBe(SCOPE_UNKNOWN);
+  });
+
+  it("reports nothing filled for a brief the planner completed", async () => {
+    const prepared = await prepareDispatchBrief(BASE, REQUEST, deps);
+    expect(prepared.ok && prepared.filled).toEqual([]);
+  });
+
+  it("refuses, as before, a blank brief with no founder request", async () => {
+    const prepared = await prepareDispatchBrief(BLANK, undefined, deps);
+    expect(prepared.ok).toBe(false);
+  });
 });
