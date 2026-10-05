@@ -73,7 +73,7 @@ export function parseCodingCallback(data: unknown): CodingCallback | null {
 // ── text layout ─────────────────────────────────────────────────────────────
 
 function wrap(tag: string, inner: string): string {
-  return "<" + tag + ">" + inner + "<" + String.fromCharCode(47) + tag + ">";
+  return "<" + tag + ">" + inner + "</" + tag + ">";
 }
 
 /**
@@ -112,7 +112,7 @@ function packLines(lines: string[]): string[] {
       parts.push(cur);
       cur = line;
     } else {
-      cur = cur === "" ? line : cur + String.fromCharCode(10) + line;
+      cur = cur === "" ? line : cur + "\n" + line;
     }
   }
   if (cur !== "" || parts.length === 0) parts.push(cur);
