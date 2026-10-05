@@ -7,9 +7,13 @@
  * produced zero applications for weeks because nothing about it demanded a
  * reaction. So the alert must fire ONLY for a posting that is both a pass and
  * new, and an outage must never read as a quiet market.
+ *
+ * SINCE 2026-10-05 a sweep BUFFERS its new roles and one batched message goes to the jobs group at each of
+ * three daily slots (alert-digest.ts, covered on its own in alert-digest.test.ts). Lane-health notices
+ * (alive ping, funnel alert, outage, sheet export failure) go to the founder DM, never the group.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { IngestLine } from "../../../src/tools/jobhunt/ingest-batch.js";
 import type { FreeIngestResult } from "../../../src/tools/jobhunt/free-ingest.js";
 import type { BoardSweep } from "../../../src/tools/jobhunt/free-ats-source.js";
@@ -44,7 +48,28 @@ vi.mock("../../../src/tools/jobhunt/profile-config.js", async (orig) => {
 });
 
 const mockSendToJobsChat = vi.fn(async () => {});
-vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat: mockSendToJobsChat }));
+const mockSendToChat = vi.fn(async () => {});
+vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat: mockSendToJobsChat, sendToChat: mockSendToChat }));
+
+// The batch buffer lives in job_digest_state. Faked in memory, same shape, so this suite needs no Postgres.
+type FakePending = { rows: { company: string; title: string }[]; backfill: number; overflow: number };
+const mockDigestStore = new Map<string, { pending: FakePending | null; lastDigestAt: Date | null }>();
+const mockSavePendingAlerts = vi.fn(async (profileId: string, pending: FakePending) => {
+  mockDigestStore.set(profileId, { pending, lastDigestAt: mockDigestStore.get(profileId)?.lastDigestAt ?? null });
+});
+vi.mock("../../../src/db/job-digest-queries.js", () => ({
+  loadDigestStates: async (ids: string[]) => new Map(ids.flatMap((id) => (mockDigestStore.has(id) ? [[id, mockDigestStore.get(id)!]] : []))),
+  savePendingAlerts: mockSavePendingAlerts,
+  markDigestSent: async (profileId: string, at: Date) => {
+    mockDigestStore.set(profileId, { pending: null, lastDigestAt: at });
+  },
+}));
+vi.mock("../../../src/db/job-ref-queries.js", () => ({ jobIdsByDedupeKey: async () => new Map() }));
+
+/** 09:30 in Asia/Kolkata: the first digest slot of the day has started. */
+const SLOT_OPEN = new Date("2026-08-06T04:00:00Z");
+/** 07:30 in Asia/Kolkata: before the first slot, so nothing is delivered. */
+const BEFORE_SLOT = new Date("2026-08-06T02:00:00Z");
 
 // Heartbeat state moved from an in-process Map to job_lane_heartbeats
 // (2026-09-07 — see sweep-runner.ts's doc comment). Faked here the same
@@ -131,6 +156,8 @@ function result(overrides: Partial<FreeIngestResult> = {}): FreeIngestResult {
 describe("runFreeSweep", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockDigestStore.clear();
+    vi.setSystemTime(SLOT_OPEN);
     // The alive-ping clock is persisted state that survives between tests.
     // Without this reset the suite would be order-dependent: a test that runs
     // after a simulated three-hour gap would inherit a due ping.
@@ -143,6 +170,8 @@ describe("runFreeSweep", () => {
     });
   });
 
+  afterEach(() => vi.useRealTimers());
+
   it("sends an alert when a new passing line exists", async () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
@@ -151,6 +180,41 @@ describe("runFreeSweep", () => {
     const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
     expect(text).toContain("Embedded Software Engineer");
+    expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
+  it("buffers a new role and sends nothing to the group before the first slot of the day", async () => {
+    vi.setSystemTime(BEFORE_SLOT);
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+    await runFreeSweep();
+
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
+    expect(mockSavePendingAlerts).toHaveBeenCalledOnce();
+    expect(mockDigestStore.get("pushkar-nl-tech")?.pending?.rows[0]?.company).toBe("Aquablu B.V.");
+  });
+
+  it("sends the batch once per slot however many sweeps follow", async () => {
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+    await runFreeSweep();
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line({ company: "Second Co" })] }));
+    await runFreeSweep();
+    vi.setSystemTime(new Date(SLOT_OPEN.getTime() + 30 * 60_000));
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line({ company: "Third Co" })] }));
+    await runFreeSweep();
+
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    expect(mockDigestStore.get("pushkar-nl-tech")?.pending?.rows.map((r) => r.company)).toEqual(["Second Co", "Third Co"]);
+  });
+
+  it("does not record the sweep as announced when the buffer cannot be written", async () => {
+    mockSavePendingAlerts.mockRejectedValueOnce(new Error("db down"));
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+    const savesBefore = mockSaveLaneHeartbeat.mock.calls.length;
+
+    await runFreeSweep();
+
+    expect(mockSaveLaneHeartbeat.mock.calls.length).toBe(savesBefore);
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   it("does not alert when every line is a duplicate or a reject", async () => {
@@ -189,31 +253,30 @@ describe("runFreeSweep", () => {
     expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
-  it("names at most 3 passing roles and states the true total when more exist", async () => {
-    const lines = Array.from({ length: 8 }, (_, i) =>
+  it("names at most 8 roles in the batch and states the true total when more exist", async () => {
+    const lines = Array.from({ length: 12 }, (_, i) =>
       line({ company: `Company ${i}`, title: `Role ${i}` }),
     );
     mockRunFreeIngest.mockResolvedValue(result({ lines }));
     await runFreeSweep();
 
     const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
-    expect(text).toContain("8 new role");
+    expect(text).toContain("12 new role");
     expect(text).toContain("Company 0");
-    expect(text).toContain("Company 2");
-    expect(text).not.toContain("Company 3");
-    expect(text).toContain("+ 5 more");
+    expect(text).toContain("Company 7");
+    expect(text).not.toContain("Company 8");
+    expect(text).toContain("+ 4 more");
   });
 
-  it("does not invent /draft numbers — the sheet carries the numbering", async () => {
-    // The `#` column is the pinned `brief_rank`. A second set of numbers in the
-    // alert would give the founder two schemes for the same jobs and no way to
-    // tell which one /draft meant.
+  it("does not invent /draft row numbers, and carries no sheet link in the group message", async () => {
+    // A row number is a position in a list that is re-ranked every sweep. The sheet link is a founder-facing
+    // fact: the candidates in the group do not need it.
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
 
     const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).not.toMatch(/\/draft \d/);
-    expect(text).toContain("docs.google.com/spreadsheets");
+    expect(text).not.toContain("docs.google.com/spreadsheets");
   });
 
   it("ranks BEFORE it exports, so the sheet's # column is never blank", async () => {
@@ -247,7 +310,7 @@ describe("runFreeSweep", () => {
     expect(text).toContain("Aquablu B.V.");
   });
 
-  it("omits the sheet notice from the alert when sheet export is skipped (unconfigured)", async () => {
+  it("keeps the sheet notice out of the group batch when sheet export is skipped (unconfigured)", async () => {
     mockExportJobSheet.mockResolvedValueOnce({
       ok: false,
       skipped: true,
@@ -262,9 +325,10 @@ describe("runFreeSweep", () => {
     expect(text).toContain("Aquablu B.V.");
     expect(text).not.toContain("not set up");
     expect(text).not.toContain("null");
+    expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
-  it("still shows real export failures in the alert when skipped is false", async () => {
+  it("tells the founder in his DM, not the group, when the sheet export really fails", async () => {
     mockExportJobSheet.mockResolvedValueOnce({
       ok: false,
       skipped: false,
@@ -274,10 +338,11 @@ describe("runFreeSweep", () => {
 
     await runFreeSweep();
 
-    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [dm] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(dm).toContain("could not be updated");
     const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
-    expect(text).toContain("could not be updated");
+    expect(text).not.toContain("could not be updated");
   });
 
   it("sends metered sweep summary without null or link when export is skipped", async () => {
@@ -306,7 +371,7 @@ describe("runFreeSweep", () => {
     expect(mockExportJobSheet).not.toHaveBeenCalled();
   });
 
-  it("proves it is alive after three quiet hours, naming the boards it checked", async () => {
+  it("proves it is alive in the founder DM after three quiet hours, naming the boards it checked", async () => {
     await resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
     vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
     mockRunFreeIngest.mockResolvedValue(
@@ -315,14 +380,14 @@ describe("runFreeSweep", () => {
 
     await runFreeSweep();
 
-    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
+    expect(mockSendToChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("alive");
     expect(text).toContain("285");
-    vi.useRealTimers();
   });
 
-  it("fires the outage alert when boards failed and the sweep fetched nothing at all", async () => {
+  it("DMs the founder an outage alert when boards failed and the sweep fetched nothing at all", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
         seen: 0,
@@ -332,8 +397,9 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
+    expect(mockSendToChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     // Counts per (platform, reason), and EVERY failure counted — the old version
     // named the first three boards and silently dropped the fourth, which is how
     // 36 Recruitee rate limits a sweep stayed invisible for a day.
