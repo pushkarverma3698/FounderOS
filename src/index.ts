@@ -22,6 +22,7 @@ import { restorePendingApproval } from "./gateway/kernel-run.js";
 import { resumeInterruptedMission } from "./gateway/mission-resume.js";
 import { runDueScheduledTask, recoverStrandedScheduledTasks } from "./gateway/scheduled-task-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
+import { startClaudeLoginExpiryCron } from "./infra/claude-login-expiry.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
 import { shouldRunProviderSmoke } from "./infra/provider-config.js";
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
 
   if (TELEGRAM_POLLING_ENABLED) {
     await startBot();
+    startClaudeLoginExpiryCron(); // daily 10:15; warns 3 days before the server's Claude login stops renewing
   } else {
     log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false)");
   }
