@@ -137,6 +137,12 @@ async function removeTarget(ctx: Context, adapter: LoginAdapter, name: string): 
 const looksLikePaste = (text: string): boolean => !/\s/.test(text) && /\d/.test(text);
 
 /**
+ * A credential that picked up whitespace on the way (a wrapped token, a URL with a stray space) is
+ * still a credential: while a login is pending it is consumed, not handed to the model and stored.
+ */
+const CREDENTIAL_MARKER_RE = /sk-ant-|[?&]code=|https?:\/\/localhost/i;
+
+/**
  * Called before the kernel sees a text message. Returns true when the message was the pasted
  * reply to a pending login (consumed: never reaches the kernel, never logged, deleted from the chat).
  */
@@ -145,20 +151,24 @@ export async function handleLoginReply(ctx: Context, deps: LoginDeps): Promise<b
   const chatId = String(ctx.chat!.id);
   const pending = await deps.pending.peek(chatId);
   const text = ctx.message?.text?.trim() ?? "";
-  if (!pending || !text || text.startsWith("/") || !looksLikePaste(text)) return false;
+  if (!pending || !text || text.startsWith("/")) return false;
+  const credential = CREDENTIAL_MARKER_RE.test(text);
+  if (!credential && !looksLikePaste(text)) return false;
 
-  // allow-failopen: the paste is a credential; if Telegram refuses the delete, finishing the login still matters more.
-  await ctx.deleteMessage().catch(() => undefined);
+  let deleted = true;
+  // allow-failopen: the paste is a credential; if Telegram refuses the delete, finishing the login still matters more. The reply says so.
+  await ctx.deleteMessage().catch(() => { deleted = false; });
+  const notDeleted = deleted ? "" : "\n\n⚠️ I could not delete your message. Delete it yourself: it still holds the code.";
   let result;
   try {
-    result = await pending.adapter.finish(pending.target, text, pending.started.state);
+    result = await pending.adapter.finish(pending.target, credential ? text.replace(/\s+/g, "") : text, pending.started.state);
   } catch (err) {
     log.error({ tool: pending.adapter.id, target: pending.target, err: err instanceof Error ? err.message : String(err) }, "login finish failed");
     result = { ok: false, html: `The ${esc(pending.adapter.title)} login failed: ${esc(err instanceof Error ? err.message : String(err))}` };
   }
   // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it, or hands over to its next step.
   if (result.ok && result.next) await deps.pending.begin(chatId, pending.adapter, pending.target, result.next);
-  else if (result.ok) await deps.pending.drop(chatId);
-  await send(ctx, result.next ? `${result.html}\n\nChanged your mind? /login cancel` : result.html);
+  else if (result.ok || result.ended) await deps.pending.drop(chatId);
+  await send(ctx, (result.next ? `${result.html}\n\nChanged your mind? /login cancel` : result.html) + notDeleted);
   return true;
 }

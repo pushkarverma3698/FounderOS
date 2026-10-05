@@ -26,6 +26,8 @@ export interface LoginFinished {
   readonly ok: boolean;
   /** Telegram HTML: what was stored and verified, or exactly what failed and what to do. */
   readonly html: string;
+  /** The attempt cannot take another paste (its child is gone). With !ok the command drops it instead of leaving it open. */
+  readonly ended?: boolean;
   /** A follow-up step (another link): it replaces the finished attempt, and the next paste goes to it. Only with ok. */
   readonly next?: LoginStarted;
 }
