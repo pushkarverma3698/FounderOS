@@ -28,7 +28,7 @@
  */
 
 import type { Context } from "grammy";
-import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
+import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos, resolveRepoAlias } from "../tools/dispatch-repos.js";
 import { validateProjectRepoName } from "../tools/create-project-repo.js";
 import { engineDisplay, engineFromCommand, type Engine } from "../tools/coding-engine.js";
 import { REVIEWER_PHRASE } from "../tools/dispatch-roles.js";
@@ -41,6 +41,9 @@ import {
   repoFromCallbackData,
   repoFromPrompt,
 } from "./repo-picker.js";
+import { queuedReply, type QueuedIssue } from "./task-dedupe.js";
+
+export { lookupQueuedDuplicate } from "./task-dedupe.js";
 
 const REPO_PREFIX = "repo:";
 
@@ -71,8 +74,8 @@ const USAGE = [
   "Example:",
   "  /task fix the flaky CSV export in the jobhunt brief",
   "",
-  "I ask which repo with buttons — you never have to type a repo name.",
-  "(/task repo:hulda <work> still skips the question if you prefer typing.)",
+  "Name the repo first to skip the question: /task hulda <work>, /task founderos <work>,",
+  "/task oplify-app <work>. Without one I ask, with buttons.",
   "",
   "I expand this into a full brief, show you an approval card, then file it as an",
   `agent:ready issue. Antigravity implements it and ${REVIEWER_PHRASE} reviews the PR.`,
@@ -112,7 +115,13 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
 
   const [first, ...rest] = trimmed.split(/\s+/);
   if (!first?.toLowerCase().startsWith(REPO_PREFIX)) {
-    return { ok: false, kind: "needs-repo", text: trimmed };
+    // A first word that IS a repo (exact name or short alias, never a substring) names it, so the
+    // founder is not asked about a repository he just typed. Anything looser is a question.
+    const alias = resolveRepoAlias(first?.replace(/[:,]+$/, "") ?? "", registered);
+    if (!alias) return { ok: false, kind: "needs-repo", text: trimmed };
+    const aliasText = rest.join(" ").trim();
+    if (!aliasText) return { ok: false, kind: "needs-work", message: USAGE, repo: alias };
+    return { ok: true, args: { repo: alias, text: aliasText } };
   }
 
   const hint = first.slice(REPO_PREFIX.length);
@@ -205,6 +214,11 @@ export interface TaskCommandDeps {
    * behaviour; supplied in production by the gateway.
    */
   readonly listRegisteredRepos?: () => Promise<readonly string[]>;
+  /**
+   * The queued/in-review issue this request repeats, if any. Optional like the registry read, so existing
+   * callers and tests keep dispatching unconditionally; supplied in production by the gateway.
+   */
+  readonly findQueuedDuplicate?: (repo: string, text: string) => Promise<QueuedIssue | null>;
 }
 
 async function registeredRepos(deps: TaskCommandDeps): Promise<readonly string[]> {
@@ -216,10 +230,20 @@ async function registeredRepos(deps: TaskCommandDeps): Promise<readonly string[]
   }
 }
 
+/** The single exit to the kernel: typed, tapped and replied dispatches all come through here, so none skips the dedupe. */
+async function dispatchUnlessQueued(ctx: Context, deps: TaskCommandDeps, args: TaskArgs): Promise<void> {
+  const already = await queuedReply(deps.findQueuedDuplicate, args.repo, args.text);
+  if (already) await ctx.reply(already);
+  else await deps.runKernelText(ctx, buildTaskInstruction(args), undefined, args.engine);
+}
+
 /** The repo buttons, as a grammy `reply_markup`. */
 function repoKeyboard(registered: readonly string[]): { inline_keyboard: { text: string; callback_data: string }[][] } {
   return { inline_keyboard: buildRepoKeyboardRows(registered) };
 }
+
+/** The two questions handleTask asks when no repo is named. Telegram hands them back without formatting. */
+const WHICH_REPO_QUESTION = /^\s*🤖\s*Which repo\b/;
 
 /** `engine` is set by the /claude and /agy registrations; /task passes none. */
 export async function handleTask(ctx: Context, deps: TaskCommandDeps, engine?: Engine): Promise<void> {
@@ -227,7 +251,7 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps, engine?: E
   const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
 
   if (parsed.ok) {
-    await deps.runKernelText(ctx, buildTaskInstruction({ ...parsed.args, ...(engine ? { engine } : {}) }), undefined, engine);
+    await dispatchUnlessQueued(ctx, deps, { ...parsed.args, ...(engine ? { engine } : {}) });
     return;
   }
 
@@ -330,7 +354,7 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
     return true;
   }
 
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
+  await dispatchUnlessQueued(ctx, deps, { repo, text: work, ...(engine ? { engine } : {}) });
   return true;
 }
 
@@ -348,13 +372,20 @@ export async function handleRepoReply(ctx: Context, deps: TaskCommandDeps): Prom
   if (!prompt) return false;
 
   const repo = repoFromPrompt(prompt, await registeredRepos(deps));
-  if (!repo) return false;
+  if (!repo) {
+    // A typed answer to "Which repo?" would fall through to the kernel, which defaults to FounderOS (F14).
+    if (WHICH_REPO_QUESTION.test(prompt)) {
+      await ctx.reply("Tap a repo button, or send /task <repo> <work>. I won't pick a repo for you.");
+      return true;
+    }
+    return false;
+  }
 
   const work = (ctx.message?.text ?? "").trim();
   if (!work) return false;
 
   const engine = engineFromPrompt(prompt);
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
+  await dispatchUnlessQueued(ctx, deps, { repo, text: work, ...(engine ? { engine } : {}) });
   return true;
 }
 
