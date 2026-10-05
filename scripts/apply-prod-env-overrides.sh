@@ -46,6 +46,8 @@ cd "$APP_DIR"
 #   Unset, the job lane falls back to the founder's chat, so a wiped value moves every job message back there.
 #   AGENT_DISPATCH_BIN makes a filed issue start in seconds (src/tools/dispatch-tick.ts);
 #   unset on prod until 2026-09-29, so #762 waited for the next 15-minute cron tick.
+#   2026-10-05: COMPOSIO_API_KEY stays here only until the founder approves removing the COMPOSIO_* lines
+#   from prod .env (Composio code is gone); delete it from this list in the same step.
 PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH GEMINI_THINKING_LEVEL TELEGRAM_ALLOWED_CHAT_IDS TELEGRAM_ANSWER_ALL_CHAT_IDS TELEGRAM_OWNER_USER_ID JOBHUNT_CHAT_ID AGENT_DISPATCH_BIN"
 
 if [ -n "${PROD_DOTENV:-}" ]; then

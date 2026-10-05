@@ -63,7 +63,7 @@ function sweep(opts: {
     FAKE_GATE: opts.gate ?? "done",
     FAKE_GATE_RC: String(opts.gateRc ?? 0),
     FAKE_HEAD: opts.head ?? "aaaa1111",
-    FAKE_PRS: opts.prs ?? `56 ${opts.head ?? "aaaa1111"}`,
+    FAKE_PRS: opts.prs ?? `56 ${opts.head ?? "aaaa1111"} beta task/issue-56-x`,
     FAKE_COMMENTS: opts.comments ?? "",
     CLAUDE_CALLS: claudeCalls,
     SENDS: sends,
@@ -264,7 +264,7 @@ describe("pr-brain — Claude is called on demand only", () => {
   });
 
   it("preflights once per sweep, however many PRs it gates", () => {
-    sweep({ preflight: "ok", prs: "56 aaaa1111\n57 aaaa1111" });
+    sweep({ preflight: "ok", prs: "56 aaaa1111 beta task/issue-56-x\n57 aaaa1111 beta task/issue-57-x" });
     // one preflight + one gate per PR
     expect(claudeCallCount()).toBe(3);
   });

@@ -62,6 +62,7 @@ import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
 import { COMMAND_CALLBACK_PREFIX, handleCommandCallback, registerCommandDispatch } from "./command-dispatch.js";
 import { MERGE_CALLBACK_PREFIX, handleMergeCallback } from "./merge-digest-callback.js";
 import { handleRetryCallback } from "./retry-callback.js";
+import { emptyStateHtml } from "./empty-states.js";
 import {
   OWNER_ONLY_COMMANDS,
   buildChatAccessConfig,
@@ -172,7 +173,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("remind", (ctx: Context) => {
     const text = ctx.match?.toString().trim();
     if (!text) {
-      void ctx.reply("Usage: /remind <what and when>\n\nExample: /remind call the landlord at 3pm");
+      void ctx.reply(emptyStateHtml("remind"), { parse_mode: "HTML" });
       return;
     }
     return runKernelText(ctx, `Remind me ${text}`);

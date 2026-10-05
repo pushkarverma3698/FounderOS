@@ -8,6 +8,7 @@ import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { retryKeyboard } from "./retry-button.js";
+import { modelErrorLine } from "./model-error-line.js";
 
 const log = logger.child({ module: "error-reply" });
 
@@ -99,6 +100,11 @@ export async function replyForError(
   }
   const msg = err instanceof Error ? err.message : String(err);
   log.error({ err: err instanceof Error ? (err.stack ?? msg) : msg }, "Kernel run failed");
+  const oneLine = modelErrorLine(msg);
+  if (oneLine !== null) {
+    await ctx.reply(`⚠️ ${oneLine}`, withButton);
+    return;
+  }
   const displayMsg = sanitizeErrorForFounder(msg);
   await ctx.reply(
     `❌ <b>Error</b>\n<code>${safeHtml(displayMsg)}</code>\n\n` +

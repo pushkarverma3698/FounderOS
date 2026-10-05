@@ -16,7 +16,6 @@ import {
 import { getIntegrationAccount } from "../db/account-queries.js";
 import { defaultCredentialRefs } from "./credential-resolver.js";
 import {
-  resolveComposioConnection,
   resolveGitHubCredentials,
   resolveGoogleCredentials,
   resolveLinkedInCredentials,
@@ -133,12 +132,6 @@ export async function getGitHubAccount(input: ResolveAccountInput) {
 export async function getMetaAccount(platform: "instagram" | "facebook", input: ResolveAccountInput) {
   const ctx = await resolveAccountContext({ ...input, platform });
   return { ctx, credentials: resolveMetaCredentials(ctx.credential_refs) };
-}
-
-/** Composio connection ids for rollback path. */
-export async function getComposioAccount(platform: Platform, input: ResolveAccountInput) {
-  const ctx = await resolveAccountContext({ ...input, platform });
-  return { ctx, connection: resolveComposioConnection(ctx.credential_refs) };
 }
 
 export function parseAccountKey(value: unknown): AccountKey | undefined {

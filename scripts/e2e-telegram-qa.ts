@@ -149,7 +149,7 @@ const TASKS: Task[] = [
     expect: "Routes to research, calls search_web, returns recent developments — not a generic description." },
   { id: "T03", group: "group1", name: "Comms (read inbox)", expectHitl: false, decision: "none", expectAudit: false, waitS: 45,
     prompt: "Check my unread emails.",
-    expect: "Routes to comms, reads inbox via Composio, or cleanly says 'Gmail not connected'. No crash." },
+    expect: "Routes to comms, reads inbox via gws, or cleanly says 'Gmail not connected'. No crash." },
   { id: "T04", group: "group1", name: "Engineering (list repos)", expectHitl: false, decision: "none", expectAudit: false, waitS: 45,
     prompt: "List my GitHub repositories.",
     expect: "Routes to engineering, calls github_read, returns real repo names." },
@@ -661,7 +661,7 @@ async function runTask(
     console.log(`  ↳ card present; NOT auto-approving (flag --no-approve or non-HITL task).`);
   }
 
-  // Give Composio/idempotency a beat to flush, then diff the audit log.
+  // Give idempotency a beat to flush, then diff the audit log.
   await sleep(1_500);
   const newAuditRows = await auditSince(since);
 

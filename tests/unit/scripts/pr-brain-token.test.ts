@@ -66,7 +66,7 @@ function sweep(opts: { preflight?: string; nowEpoch?: string; args?: string[] } 
     QA_APP_ROOT: join(root, "no-founderos"),
     FAKE_PREFLIGHT: opts.preflight ?? "ok",
     FAKE_HEAD: "aaaa1111",
-    FAKE_PRS: "56 aaaa1111",
+    FAKE_PRS: "56 aaaa1111 beta task/issue-56-x",
     CLAUDE_SEEN: claudeSeen,
     CLAUDE_ARGV: claudeArgv,
     GH_SEEN: ghSeen,

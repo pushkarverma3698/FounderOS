@@ -721,10 +721,10 @@ export const integrationAccounts = agentsSchema.table(
     /** active | expired | disabled */
     status: text("status").notNull().default("active"),
 
-    /** gws | direct | meta_graph | composio | pat */
+    /** gws | direct | meta_graph | pat (legacy rows may still say composio) */
     auth_backend: text("auth_backend").notNull(),
 
-    /** CredentialRefs JSON — env var names, gws profile dirs, composio ids */
+    /** CredentialRefs JSON — env var names, gws profile dirs (legacy rows may carry composio_* keys, ignored) */
     credential_refs: jsonb("credential_refs").notNull().default({}),
 
     metadata: jsonb("metadata"),

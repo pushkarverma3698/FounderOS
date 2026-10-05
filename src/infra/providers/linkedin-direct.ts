@@ -2,7 +2,7 @@
  * FounderOS — LinkedIn via direct Posts API
  * ===========================================
  * Primary LinkedIn backend. Auth: founder OAuth token in env (admin-owned).
- * No Composio middleman. Post-only scope (ADR-009).
+ * No third-party middleman. Post-only scope (ADR-009).
  */
 
 import { childLogger } from "../logger.js";
@@ -64,7 +64,7 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
       success: false,
       error:
         `LinkedIn access token not configured for account '${creds.accountKey}'. ` +
-        "Set the token env var from the account registry runbook, or use LINKEDIN_BACKEND=composio.",
+        "Set the token env var from the account registry runbook.",
     };
   }
 
@@ -96,7 +96,7 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
     return {
       success: false,
       error:
-        "Scheduled LinkedIn posts are not supported via the direct API adapter yet. Post immediately or use LINKEDIN_BACKEND=composio.",
+        "Scheduled LinkedIn posts are not supported via the direct API adapter yet. Post immediately.",
     };
   }
 

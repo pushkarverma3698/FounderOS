@@ -78,7 +78,7 @@ describe("health server", () => {
     expect(report).toHaveProperty("version");
     expect(report.checks).toHaveProperty("database");
     expect(report.checks).toHaveProperty("gmail_backend");
-    expect(report.integrations).toHaveProperty("composio_gmail");
+    expect(report.integrations).not.toHaveProperty("composio_gmail");
     expect(report).toHaveProperty("spend_today_usd");
   });
 

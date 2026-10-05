@@ -33,6 +33,7 @@ import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { recordTurnSafely, type TurnLog } from "./turn-log.js";
+import { stripFalsePromises } from "./promise-guard.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
 export interface KernelChatModel {
@@ -360,7 +361,7 @@ export function makePlanNode(
       return {
         ...base,
         mission: { goal: input, status: "done", plan: null, cursor: 0 },
-        reply: decision.text,
+        reply: stripFalsePromises(decision.text, []),
       };
     }
     if (decision.type === "command") {

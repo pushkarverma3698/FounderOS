@@ -1,0 +1,145 @@
+{
+  "numTotalTests": 25,
+  "numPassedTests": 25,
+  "numFailedTests": 0,
+  "success": true,
+  "testResults": [
+    {
+      "name": "/home/runner/work/FounderOS/FounderOS/tests/unit/tools/oracle-http.test.ts",
+      "status": "passed",
+      "assertionResults": [
+        {
+          "fullName": "observeHttp GETs an allowlisted https target and parses a JSON body",
+          "status": "passed",
+          "title": "GETs an allowlisted https target and parses a JSON body"
+        },
+        {
+          "fullName": "observeHttp keeps a non-JSON body as text",
+          "status": "passed",
+          "title": "keeps a non-JSON body as text"
+        },
+        {
+          "fullName": "observeHttp never fetches a host that is not on the allowlist",
+          "status": "passed",
+          "title": "never fetches a host that is not on the allowlist"
+        },
+        {
+          "fullName": "observeHttp never fetches over http, with embedded credentials, an odd port, or an empty allowlist",
+          "status": "passed",
+          "title": "never fetches over http, with embedded credentials, an odd port, or an empty allowlist"
+        },
+        {
+          "fullName": "observeHttp matches the allowlist case-insensitively",
+          "status": "passed",
+          "title": "matches the allowlist case-insensitively"
+        },
+        {
+          "fullName": "observeHttp errors without a request for a non-http oracle or a missing target",
+          "status": "passed",
+          "title": "errors without a request for a non-http oracle or a missing target"
+        },
+        {
+          "fullName": "observeHttp returns the error when fetch rejects",
+          "status": "passed",
+          "title": "returns the error when fetch rejects"
+        },
+        {
+          "fullName": "observeHttp aborts on timeout and reports it",
+          "status": "passed",
+          "title": "aborts on timeout and reports it"
+        },
+        {
+          "fullName": "observeHttp reports a redirect status as-is instead of following it",
+          "status": "passed",
+          "title": "reports a redirect status as-is instead of following it"
+        }
+      ]
+    },
+    {
+      "name": "/home/runner/work/FounderOS/FounderOS/tests/unit/tools/oracle.test.ts",
+      "status": "passed",
+      "assertionResults": [
+        {
+          "fullName": "satisfies passes on exact match including dotted paths",
+          "status": "passed",
+          "title": "passes on exact match including dotted paths"
+        },
+        {
+          "fullName": "satisfies names every wrong value",
+          "status": "passed",
+          "title": "names every wrong value"
+        },
+        {
+          "fullName": "satisfies treats a missing key as a mismatch and names it",
+          "status": "passed",
+          "title": "treats a missing key as a mismatch and names it"
+        },
+        {
+          "fullName": "satisfies is strict about types: '200' is not 200, null is not missing",
+          "status": "passed",
+          "title": "is strict about types: '200' is not 200, null is not missing"
+        },
+        {
+          "fullName": "satisfies does not walk the prototype chain",
+          "status": "passed",
+          "title": "does not walk the prototype chain"
+        },
+        {
+          "fullName": "satisfies a non-object actual satisfies nothing",
+          "status": "passed",
+          "title": "a non-object actual satisfies nothing"
+        },
+        {
+          "fullName": "readOracleMarkers reads id -> json from marker lines and ignores other output",
+          "status": "passed",
+          "title": "reads id -> json from marker lines and ignores other output"
+        },
+        {
+          "fullName": "readOracleMarkers ignores and counts malformed marker lines",
+          "status": "passed",
+          "title": "ignores and counts malformed marker lines"
+        },
+        {
+          "fullName": "readOracleMarkers handles CRLF and last-wins on a repeated id",
+          "status": "passed",
+          "title": "handles CRLF and last-wins on a repeated id"
+        },
+        {
+          "fullName": "readOracleMarkers does not match a marker that is merely quoted mid-line",
+          "status": "passed",
+          "title": "does not match a marker that is merely quoted mid-line"
+        },
+        {
+          "fullName": "evaluatePostDeploy unit-only is UNKNOWN, even with an observation",
+          "status": "passed",
+          "title": "unit-only is UNKNOWN, even with an observation"
+        },
+        {
+          "fullName": "evaluatePostDeploy an observation error is UNKNOWN and carries the error",
+          "status": "passed",
+          "title": "an observation error is UNKNOWN and carries the error"
+        },
+        {
+          "fullName": "evaluatePostDeploy no actual is UNKNOWN",
+          "status": "passed",
+          "title": "no actual is UNKNOWN"
+        },
+        {
+          "fullName": "evaluatePostDeploy PASS when expected_after is satisfied",
+          "status": "passed",
+          "title": "PASS when expected_after is satisfied"
+        },
+        {
+          "fullName": "evaluatePostDeploy FAIL prints each mismatch",
+          "status": "passed",
+          "title": "FAIL prints each mismatch"
+        },
+        {
+          "fullName": "evaluatePostDeploy an empty expected_after never passes vacuously",
+          "status": "passed",
+          "title": "an empty expected_after never passes vacuously"
+        }
+      ]
+    }
+  ]
+}

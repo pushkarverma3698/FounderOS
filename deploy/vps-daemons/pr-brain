@@ -59,7 +59,9 @@
 #                              ceiling). A review is a whole agy session on the quota the executor shares.
 #   PR_BRAIN_CI_WAIT_SWEEPS    sweeps a head waits for its required CI to finish before it is reviewed anyway (default 4)
 #
-# What a sweep does NOT spend a review on (each is logged; `--pr N` is an explicit order and ignores all three):
+# What a sweep does NOT spend a review on (each is logged; `--pr N` is an explicit order and ignores all of them):
+#   - a PR that is not a pipeline PR (founder decision 2026-10-05): the sweep reviews only a head branch task/issue-*
+#     (the issue queue's own PRs) or a PR carrying the label claude-review. Anything else is skipped with one log line;
 #   - a promotion or sync PR (head branch beta, main, master or chore/promote-*): its work already passed its own gate;
 #   - a head whose required CI is red: nothing to clear. It is not stamped either: agent-dispatch reads the same red
 #     check and sends the executor back to fix it. Someone else's PR is left alone and the founder is told once;
@@ -1105,6 +1107,19 @@ is_promotion_pr() { # is_promotion_pr HEAD_REF
   return 1
 }
 
+# The sweep reviews only PIPELINE PRs: the issue queue's own (head task/issue-*), or one a human opted in with the
+# label claude-review. LABELS_CSV is the PR's label names joined with commas, so a label that merely contains the word
+# (not-claude-review) does not count.
+is_pipeline_pr() { # is_pipeline_pr HEAD_REF LABELS_CSV
+  case "$1" in
+    task/issue-*) return 0 ;;
+  esac
+  case ",$2," in
+    *,claude-review,*) return 0 ;;
+  esac
+  return 1
+}
+
 ci_file() { printf '%s/%s#%s' "$CI_DIR" "$repo_name" "$1"; }
 
 reviews_in_last_day() {
@@ -1215,17 +1230,22 @@ while IFS= read -r repo; do
                   | select(.isCrossRepository == false)
                   | select(.author.login == \"$OWNER\")
                   | select([.labels[].name] | index(\"no-brain\") | not)
-                  | \"\(.number) \(.headRefOid) \(.baseRefName) \(.headRefName)\"" 2>/dev/null || true)
+                  | \"\(.number) \(.headRefOid) \(.baseRefName) \(.headRefName) \([.labels[].name] | join(\",\"))\"" 2>/dev/null || true)
   fi
 
   [[ -z "$prs" ]] && { popd >/dev/null; continue; }
 
-  while read -r pr head base_ref head_ref; do
+  while read -r pr head base_ref head_ref labels; do
     [[ -z "$pr" ]] && continue
     [[ "$acted" -ge "$MAX" ]] && break
 
     if [[ -z "$ONE_PR" ]] && is_promotion_pr "$head_ref"; then
       log "$repo_name#$pr is a promotion/sync PR ($head_ref → $base_ref): its work already passed its own gate — not reviewed again"
+      continue
+    fi
+
+    if [[ -z "$ONE_PR" ]] && ! is_pipeline_pr "$head_ref" "$labels"; then
+      log "$repo_name#$pr is not a pipeline PR ($head_ref) — not reviewed"
       continue
     fi
 

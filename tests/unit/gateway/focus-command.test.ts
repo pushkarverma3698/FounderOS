@@ -95,6 +95,7 @@ vi.mock("../../../src/db/client.js", () => ({
 import { registerHandlers } from "../../../src/gateway/telegram.js";
 import { OWNER_ONLY_COMMANDS, buildChatAccessConfig } from "../../../src/gateway/chat-access.js";
 import { COMMAND_MENU } from "../../../src/gateway/command-menu.js";
+import { emptyStateHtml } from "../../../src/gateway/empty-states.js";
 import { buildMenuSection } from "../../../src/gateway/home-menu.js";
 import { reconcileSeededContext } from "../../../src/db/founder-context.js";
 import { CONTEXT_META_KEY, CONTEXT_STALE_MARKER } from "../../../src/db/context-meta.js";
@@ -338,16 +339,16 @@ describe("/focus with no text", () => {
   it("says how to set one when there is none", async () => {
     store.row = { tech_stack: "v3 kernel" };
     await send(bot, "/focus");
-    expect(lastReply()).toBe("no focus set - send /focus <text>");
+    expect(lastReply()).toBe(emptyStateHtml("focus"));
 
     store.row = undefined;
     await send(bot, "/focus");
-    expect(lastReply()).toBe("no focus set - send /focus <text>");
+    expect(lastReply()).toBe(emptyStateHtml("focus"));
   });
 
   it("treats a bare space as no text", async () => {
     await send(bot, "/focus    ");
-    expect(lastReply()).toBe("no focus set - send /focus <text>");
+    expect(lastReply()).toBe(emptyStateHtml("focus"));
   });
 
   it("says the database is down, and that it changed nothing, when it cannot read", async () => {
@@ -433,10 +434,10 @@ describe("/projects", () => {
 
   it("says how to set them when there are none", async () => {
     await send(bot, "/projects");
-    expect(lastReply()).toBe("no projects set - send /projects <a>; <b>");
+    expect(lastReply()).toBe(emptyStateHtml("projects"));
     store.row = { active_projects: [] };
     await send(bot, "/projects");
-    expect(lastReply()).toBe("no projects set - send /projects <a>; <b>");
+    expect(lastReply()).toBe(emptyStateHtml("projects"));
   });
 
   it("says nothing was changed, and why, when the database is down", async () => {
@@ -500,5 +501,34 @@ describe("discoverable", () => {
       expect(COMMAND_MENU.some((e) => e.command === command), command).toBe(true);
       expect(buildMenuSection("system"), command).toContain(`/${command}`);
     }
+  });
+});
+
+describe("empty states show one tappable example (P2-3)", () => {
+  const lastSend = (): SentCall | undefined => sent.filter((c) => c.method === "sendMessage").at(-1);
+
+  it("/focus with nothing set sends the example as HTML so Telegram makes it tappable", async () => {
+    await send(bot, "/focus");
+    expect(lastReply()).toContain("<code>/focus ");
+    expect(lastSend()?.payload["parse_mode"]).toBe("HTML");
+  });
+
+  it("/projects with nothing set sends the example as HTML", async () => {
+    await send(bot, "/projects");
+    expect(lastReply()).toContain("<code>/projects ");
+    expect(lastSend()?.payload["parse_mode"]).toBe("HTML");
+  });
+
+  it("a bare /remind shows the example and starts no kernel turn", async () => {
+    await send(bot, "/remind");
+    expect(lastReply()).toBe(emptyStateHtml("remind"));
+    expect(lastSend()?.payload["parse_mode"]).toBe("HTML");
+    expect(runKernelText).not.toHaveBeenCalled();
+  });
+
+  it("a saved focus is still plain text: the founder's own <, > and & are never parsed", async () => {
+    store.row = { current_focus: "Ship <b>fast</b>" };
+    await send(bot, "/focus");
+    expect(lastSend()?.payload["parse_mode"]).toBeUndefined();
   });
 });
