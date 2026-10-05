@@ -59,7 +59,8 @@ pnpm build:all
 
 # The agy-login helper runs as the antigravity user and reads the built app; a deploy under a strict umask left dist/ 0700.
 # Compiled output only (no secrets: .env is separate), and node_modules is already world-readable.
-chmod -R a+rX dist
+# Only files this user owns: a few stale root-owned build files in dist/ are already readable and cannot be chmod'd.
+find dist -user "$(id -un)" -exec chmod a+rX {} +
 
 echo "==> Ensuring Postgres + Ollama are up"
 docker compose -f deploy/stack.compose.yml up -d
