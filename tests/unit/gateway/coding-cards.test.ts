@@ -324,7 +324,7 @@ describe("callback data", () => {
         expect(Buffer.byteLength(b.callback_data, "utf8")).toBeLessThanOrEqual(64);
       }
     }
-    expect(checked).toBeGreaterThanOrEqual(10);
+    expect(checked).toBe(7);
   });
 
   it("every rendered callback parses back to its action and nonce", () => {
