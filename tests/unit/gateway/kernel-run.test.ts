@@ -1041,3 +1041,43 @@ describe("runKernelText: the ack goes out before the gates", () => {
     ]);
   });
 });
+
+// Same rule for the Approve/Reject tap: the ack goes out before the pending-interrupt lookup and the
+// first-boot kernel compile, and anything that stops the resume before the stream takes the ack away.
+describe("resumeKernel: the ack goes out before the pending lookup", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("sends the placeholder while getPendingInterrupt is still pending", async () => {
+    let release!: (v: unknown) => void;
+    getPendingInterrupt.mockReturnValue(new Promise((r) => (release = r)));
+    const { ctx, replies } = fakeCtx();
+    const run = resumeKernel(ctx, "approved");
+    await tick();
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+
+    release(null);
+    await run;
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stale card tap deletes the ack before it says the card is expired", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "current-9f8e7d6c", created_at: new Date().toISOString() });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await resumeKernel(ctx, "approved", "stale123");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toMatch(/expired|older task/i);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a failure before the stream starts deletes the ack, then shows the error", async () => {
+    getPendingInterrupt.mockRejectedValue(new Error("db down"));
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toContain("❌");
+  });
+});

@@ -264,16 +264,20 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 
 const cardEngine = (data: string | null | undefined) => { const engine = engineFromApprovalCard(data); return engine ? { engine } : {}; };
 export async function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
+  const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
     const threadId = threadIdFor(chatId);
     const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: kernelPromptHash() });
+    // First, as in runKernelText: the tap is acknowledged before the pending lookup and the first-boot kernel compile.
+    const ack = sendTurnAck(ctx, trace, arrivedAt);
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
       const pending = await getPendingInterrupt(threadId);
       if (nonce && pending && !pending.interrupt_id.startsWith(nonce)) {
         log.warn({ expected: pending.interrupt_id, received: nonce }, "Rejected stale HITL card tap");
+        await ack.remove();
         await ctx.reply("⚠️ This approval card is expired or belongs to an older task.", { parse_mode: "HTML" });
         return;
       }
@@ -304,6 +308,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
               signal: abort.signal,
             }) as Promise<AsyncIterable<unknown>>,
             () => touch?.(),
+            ack,
           ),
           OFFICE_TURN_TIMEOUT_MS,
           "kernel.resume",
@@ -338,6 +343,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
         message: failure instanceof Error ? failure.message.slice(0, 400) : String(failure),
       });
       if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, failure);
+      await ack.remove(); // the pending lookup or getKernel() failed before the stream took the ack over; idempotent otherwise
       await replyForError(ctx, failure);
     }
   });
