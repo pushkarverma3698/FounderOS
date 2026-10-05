@@ -77,6 +77,13 @@ describe("Tashi — Dutch finance titles the 2026-09-28 sweep dropped as off-tra
     ["Risk Specialist", "auditor"], // Fastned
     ["Risk Officer", "auditor"], // AFS Energy
     ["Risk Analyst", "auditor"],
+    // 2026-10-05 audit: titles still off-track in a live sweep of 490 Dutch postings
+    ["Finance Support Specialist", "finance-ops"], // Adyen
+    ["Internal Control Specialist", "auditor"], // Adyen
+    ["Analyst Regulatory Risk & Compliance", "auditor"], // Deloitte NL
+    ["Operations Controller", "fpa"], // Flexport
+    ["Senior Consultant Corporate Finance", "fpa"], // BDO
+    ["Risk Consultant Verzekeren", "auditor"], // Rabobank
   ])("%s → %s", (title, track) => {
     expect(classifyTrack(title, tashi)).toBe(track);
   });
