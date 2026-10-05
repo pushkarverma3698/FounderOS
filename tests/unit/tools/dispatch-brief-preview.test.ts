@@ -110,6 +110,7 @@ describe("renderCardPreview", () => {
   it("fits under the approval card's own cut-off even when every field is enormous", () => {
     const preview = renderCardPreview(MAXIMAL, {
       bodyChars: 500_000,
+      filled: ["Goal", "Expected", "Verification"],
       warnings: ["Could not verify 30 of 30 paths (".padEnd(1000, "x")],
     });
 
@@ -133,8 +134,8 @@ describe("renderCardPreview", () => {
 
   it("keeps the budget table honest: the worst case cannot exceed CARD_PREVIEW_MAX_CHARS", () => {
     const fields = Object.values(CARD_FIELD_BUDGETS).reduce((sum, n) => sum + n, 0);
-    // labels (~50) + separators (~8) + the closing line (~100) + a warning line (~185)
-    expect(fields + 50 + 8 + 100 + 185).toBeLessThanOrEqual(CARD_PREVIEW_MAX_CHARS);
+    // labels (~50) + separators (~8) + the closing line (~100) + a warning line (~185) + the filled line (~60)
+    expect(fields + 50 + 8 + 100 + 185 + 60).toBeLessThanOrEqual(CARD_PREVIEW_MAX_CHARS);
   });
 });
 

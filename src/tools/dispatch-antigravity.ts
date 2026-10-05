@@ -198,7 +198,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       goal: {
         type: "string",
-        description: "What 'done' means in 1-2 paragraphs to an executor with no prior context.",
+        description: "What 'done' means in 1-2 paragraphs to an executor with no prior context. Optional when founder_request is passed: a blank one is filled from his sentence. Required without it.",
       },
       scope: {
         type: "string",
@@ -210,11 +210,11 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       expected: {
         type: "string",
-        description: "Detailed expected behavior, architecture specifications, algorithms, or requirements.",
+        description: "Detailed expected behavior, architecture specifications, algorithms, or requirements. Optional when founder_request is passed: a blank one is filled from his sentence. Required without it.",
       },
       verification: {
         type: "string",
-        description: "Exact shell commands whose raw output proves the fix (e.g. 'pnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate').",
+        description: "Exact shell commands whose raw output proves the fix (e.g. 'pnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate'). Optional when founder_request is passed: a blank one is filled from his sentence. Required without it.",
       },
       acceptance: {
         type: "string",
@@ -268,9 +268,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
           "Omit it to use the founder's current default (/engine).",
       },
     },
-    // scope is not required: a one-line request has no file to name, and an empty scope is filed as
-    // "paths: agent to locate" (./dispatch-brief-repair.ts) instead of bouncing the founder.
-    required: ["title", "goal", "expected", "verification"],
+    // scope is not required: an empty one is filed as "paths: agent to locate" (./dispatch-brief-repair.ts). goal, expected
+    // and verification are required only without founder_request (JSON schema cannot say "or"): execute() enforces it.
+    required: ["title"],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
@@ -280,7 +280,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
     const expected = args["expected"] as string | undefined;
     const verification = args["verification"] as string | undefined;
 
-    if (!title || !goal || !expected || !verification) {
+    // A blank goal, expected or verification is filled from his sentence (withFounderRequestBrief): refused only without it.
+    const noSentence = !(args["founder_request"] as string | undefined)?.trim();
+    if (!title || (noSentence && [goal, expected, verification].some((v) => !v?.trim()))) {
       return {
         success: false,
         error: "dispatch_antigravity_task requires title, goal, expected, and verification commands.",
@@ -289,10 +291,10 @@ export const dispatchAntigravityTool: UnifiedTool = {
 
     const input: AntigravityTaskInput = {
       title,
-      goal,
+      goal: goal ?? "",
       scope,
-      expected,
-      verification,
+      expected: expected ?? "",
+      verification: verification ?? "",
       acceptance: args["acceptance"] as string | undefined,
       forbidden: args["forbidden"] as string | undefined,
       problem: args["problem"] as string | undefined,

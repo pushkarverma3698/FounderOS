@@ -182,6 +182,19 @@ describe("buildTaskInstruction", () => {
   });
 });
 
+describe("buildTaskInstruction — the planner never asks the founder for a path or command", () => {
+  const instruction = buildTaskInstruction({ repo: "pushkarverma3698/FounderOS", text: "make the digest shorter" });
+
+  it("tells it the tool fills goal, expected and verification from founder_request when it leaves them out", () => {
+    expect(instruction).toMatch(/goal, expected or verification/i);
+    expect(instruction).toContain("founder_request");
+  });
+
+  it("forbids asking the founder for a file path or a command", () => {
+    expect(instruction).toMatch(/never ask the founder for a file path or a command/i);
+  });
+});
+
 describe("handleTask", () => {
   it("hands a composed instruction to the ordinary kernel turn", async () => {
     const runKernelText = vi.fn().mockResolvedValue(undefined);
