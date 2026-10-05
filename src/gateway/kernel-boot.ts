@@ -37,7 +37,7 @@ import { withModelFallbacks } from "./model-fallback.js";
 import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
 import { env } from "../core/config.js";
-import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
+import { DEPARTMENT_TOOLS, HITL_GATED_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
 import { applySkillSynthesisLoader } from "../agents/skill-loader.js";
 import { resolveVpsRunConfig } from "../tools/vps-run.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
@@ -317,6 +317,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     ),
     workers: buildWorkerSpecs(),
     commands: plannableCommands(),
+    gatedTools: HITL_GATED_TOOLS,
     checkpointer,
     lessons: buildLessonStore(),
     turnLog: buildTurnLog(),
