@@ -31,6 +31,7 @@ import {
 import { safeHtml } from "./approval-card.js";
 import { TELEGRAM_MAX } from "./format.js";
 import { retryKeyboard } from "./retry-button.js";
+import { modelErrorLine } from "./model-error-line.js";
 import { logger } from "../infra/logger.js";
 
 const log = logger.child({ module: "failure-card" });
@@ -89,7 +90,8 @@ export function renderFailureCard(state: CardState, opts: { retry: boolean }): s
   const request = state.turn?.raw_input || state.mission?.goal || "";
   const objective =
     words(objectiveOf(state, failure.step_id) ?? "") || words(request) || "your request";
-  const reason = words(failure.message) || "the step failed";
+  // A model-API rejection is one plain line (P2-6); the raw text stays in the details block below.
+  const reason = (failure.stage === "model" ? modelErrorLine(failure.message) : null) ?? (words(failure.message) || "the step failed");
 
   const lines = [
     `⚠️ <b>I couldn't finish:</b> ${safeHtml(clip(objective, OBJECTIVE_MAX))}`,
