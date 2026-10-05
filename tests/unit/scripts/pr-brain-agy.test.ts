@@ -179,7 +179,7 @@ case "$*" in
   "pr comment "*) body=""; while [ $# -gt 0 ]; do [ "$1" = "--body" ] && body="$2"; shift; done; printf '%s\\n' "$body" >>"$GH_DIR/comments" ;;
   *"app-evidence"*) : ;;
   *"--json comments"*) cat "$GH_DIR/comments" 2>/dev/null; if [ -n "\${GH_SLOW_TAIL:-}" ]; then sleep 0.3; echo "-- a later comment --"; fi ;;
-  *"headRefOid"*) echo "$FAKE_HEAD" ;;
+  *"headRefOid"*) if [ -f "$GH_DIR/head" ]; then cat "$GH_DIR/head"; else echo "$FAKE_HEAD"; fi ;;
   *"--json isDraft --jq .isDraft"*) cat "$GH_DIR/draft" ;;
   *"--json labels"*) [ -n "\${PR_LABELS_FAIL:-}" ] && exit 1; case "$3" in 56) printf '%s\\n' "\${PR_LABELS_56:-}" ;; 57) printf '%s\\n' "\${PR_LABELS_57:-}" ;; esac ;;
   *"reviewDecision"*) if [ "$(cat "$GH_DIR/draft")" = true ]; then echo "REVIEWED, left as draft — not cleared · feat: x"; else echo "CLEARED — marked ready for merge (self-approval impossible; ready IS the pass) · feat: x"; fi ;;
@@ -737,6 +737,26 @@ describe("configuration", () => {
     sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
 
     expect(ghCalls().some((c) => c.startsWith("pr merge 56 --squash"))).toBe(true);
+  });
+
+  it("the merge is pinned to the reviewed commit, so a push after the verdict cannot be merged unreviewed", () => {
+    makeRepoOurs();
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
+
+    expect(ghCalls().some((c) => c.startsWith(`pr merge 56 --squash --match-head-commit ${head}`))).toBe(true);
+  });
+
+  it("a push during the review discards the verdict: nothing is readied, stamped or merged", () => {
+    makeRepoOurs();
+    sweep({
+      agyOut: review("BRAIN-VERDICT: PASS"),
+      agyHook: 'echo 0123456789abcdef0123456789abcdef01234567 >"$GH_DIR/head"',
+    });
+
+    expect(ghCalls().some((c) => c.startsWith("pr ready"))).toBe(false);
+    expect(ghCalls().some((c) => c.startsWith("pr merge"))).toBe(false);
+    expect(ghState("comments")).not.toContain("brain-reviewed:");
+    expect(prBrainLog()).toMatch(/head moved during the review/);
   });
 
   it("PR_BRAIN_MERGE=0 clears the PR but never merges or promotes it (reviewing a change to this loop without deploying it)", () => {
