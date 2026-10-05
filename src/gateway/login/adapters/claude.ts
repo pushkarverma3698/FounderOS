@@ -25,6 +25,9 @@ import {
   readTokenFile,
   writeClaudeTokenFiles,
   type ClaudeTokenPaths,
+  hostLoginNeedsRenewal,
+  readHostRefreshExpiry,
+  type HostExpiryRead,
   type TokenFileRead,
 } from "../../../infra/claude-token.js";
 import { extractHyperlink, spawnPty, stripAnsi, type PtyChild, type SpawnPty } from "../pty-child.js";
@@ -123,6 +126,8 @@ export interface ClaudeLoginDeps {
   readonly env: NodeJS.ProcessEnv;
   readonly lookupOrg: (token: string) => Promise<OrgLookup>;
   readonly hostLogin: () => Promise<HostLogin | undefined>;
+  /** When the server's saved login stops renewing: step 2 is offered inside the warning window even for the same account. */
+  readonly hostExpiry: () => Promise<HostExpiryRead>;
   /** `claude auth status` against a given HOME: reads the scratch login in step 2 and the real one after install. */
   readonly readLogin: (home: string) => Promise<HostLogin | undefined>;
   /** Deletes the token files, the server's own login backups, and runs `claude auth logout`. Never throws for a file that is already gone. */
@@ -156,6 +161,7 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
     env: process.env,
     lookupOrg: (t) => lookupOrgId(t),
     hostLogin: () => readHostLogin(undefined, process.env),
+    hostExpiry: () => readHostRefreshExpiry(),
     readLogin: (home) => readHostLogin(undefined, { ...process.env, HOME: home }),
     signOut: () => signOutClaude(paths),
     probeStored: () => probeStoredClaude(),
@@ -164,12 +170,15 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
   let cache: { token: string; at: number; check: TokenCheck; account?: string } | undefined;
 
   /** One lookup, two wordings. Never throws and never fails a login: a broken lookup becomes "could not tell". `moveTo` is set when the server's own login is another account. */
-  async function accountLines(token: string): Promise<{ short: string; long: string; moveTo?: string }> {
+  async function accountLines(token: string): Promise<{ short: string; long: string; moveTo?: string; renew?: boolean }> {
     try {
       const org = await d.lookupOrg(token);
       const host = await d.hostLogin();
-      const moveTo = "org" in org && host?.org !== org.org ? org.org : undefined;
-      return { short: describeAccount(org, host), long: describeAccount(org, host, true), moveTo };
+      const differs = "org" in org && host?.org !== org.org;
+      // Same account but the server's login is about to stop renewing: step 2 is the only thing that renews it.
+      const renew = "org" in org && !differs && hostLoginNeedsRenewal(await d.hostExpiry(), d.now());
+      const moveTo = "org" in org && (differs || renew) ? org.org : undefined;
+      return { short: describeAccount(org, host), long: describeAccount(org, host, true), moveTo, renew: renew || undefined };
     } catch {
       // allow-failopen: identity is advisory; the verified token result stands.
       const m = "I could not tell which account this is.";
@@ -178,7 +187,7 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
   }
 
   /** Step 2 after a saved token whose account is not the server's own login. A failure to start keeps the token and says so. */
-  async function offerHostStep(saved: string, account: { long: string; moveTo?: string }, hint: string | undefined): Promise<LoginFinished> {
+  async function offerHostStep(saved: string, account: { long: string; moveTo?: string; renew?: boolean }, hint: string | undefined): Promise<LoginFinished> {
     const plain = `${saved} ${escHtml(account.long)}`;
     if (!account.moveTo) return { ok: true, html: `${plain}\n\npr-brain and the Claude dispatch engine read it on their next run; the bot's own Claude executor reads it on its next task.` };
     try {
@@ -188,7 +197,7 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
         next,
         html:
           `Step 1 of 2 done. ${saved} pr-brain, the dispatch engine and the bot's executor use it from their next run.\n\n` +
-          `Step 2, so this server's own Claude login moves to the same account and I can name it: ${next.html}, in the same private tab. Tap Authorize, then paste the code here.\n` +
+          `Step 2, ${account.renew ? "so this server's own Claude login is renewed before it stops working" : "so this server's own Claude login moves to the same account and I can name it"}: ${next.html}, in the same private tab. Tap Authorize, then paste the code here.\n` +
           `Skip it and only a plain claude run on the server stays as it is now.`,
       };
     } catch (err) {

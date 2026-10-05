@@ -130,3 +130,12 @@ export async function readHostRefreshExpiry(home: string = homedir()): Promise<H
   const expiresAtMs = parseExpiry(raw);
   return expiresAtMs === undefined ? { state: "garbage" } : { state: "ok", expiresAtMs };
 }
+
+export const DAY_MS = 24 * 60 * 60 * 1000;
+/** Warn, and offer a renewal, from this far ahead of the expiry. */
+export const WARN_AHEAD_MS = 3 * DAY_MS;
+
+/** True when the server's saved login is inside the warning window or already past it. An unreadable expiry is not "needs renewal": nothing is claimed. */
+export function hostLoginNeedsRenewal(read: HostExpiryRead, now: number): boolean {
+  return read.state === "ok" && read.expiresAtMs - now <= WARN_AHEAD_MS;
+}

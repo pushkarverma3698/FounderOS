@@ -18,17 +18,13 @@ import { appTimeZone } from "../core/time.js";
 import { TENANT } from "../core/config.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import { childLogger } from "./logger.js";
-import { readHostRefreshExpiry, type HostExpiryRead } from "./claude-token.js";
+import { DAY_MS, WARN_AHEAD_MS, readHostRefreshExpiry, type HostExpiryRead } from "./claude-token.js";
 import { sendToChat } from "./telegram-send.js";
 
 const log = childLogger({ module: "claude-login-expiry" });
 
 /** Daily 10:15 in the founder's timezone: after the 09:00 standup, clear of the 09:30 job-hunt check. */
 export const CLAUDE_EXPIRY_CRON = "15 10 * * *";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** Warn from this far ahead. */
-export const WARN_AHEAD_MS = 3 * DAY_MS;
 
 export interface ExpiryDeps {
   readonly read: () => Promise<HostExpiryRead>;

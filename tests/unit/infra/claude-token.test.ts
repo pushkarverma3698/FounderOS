@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile, chmod } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeTokenPaths, parseExpiry, readClaudeToken, readHostRefreshExpiry, readTokenFile, writeClaudeTokenFiles } from "../../../src/infra/claude-token.js";
+import { claudeTokenPaths, parseExpiry, readClaudeToken, readHostRefreshExpiry, hostLoginNeedsRenewal, readTokenFile, writeClaudeTokenFiles, WARN_AHEAD_MS } from "../../../src/infra/claude-token.js";
 
 async function paths() {
   const dir = await mkdtemp(join(tmpdir(), "claude-token-test-"));
@@ -99,5 +99,17 @@ describe("host login refresh-token expiry", () => {
     expect(await readHostRefreshExpiry(await home("{not json sk-ant-SECRET"))).toEqual({ state: "unreadable" });
     expect(await readHostRefreshExpiry(await home(JSON.stringify({ claudeAiOauth: { accessToken: "x" } })))).toEqual({ state: "no-expiry" });
     expect(await readHostRefreshExpiry(await home(JSON.stringify({ claudeAiOauth: { refreshTokenExpiresAt: "sk-ant-SECRET" } })))).toEqual({ state: "garbage" });
+  });
+});
+
+describe("hostLoginNeedsRenewal", () => {
+  const NOW = 1_800_000_000_000;
+  it("is true inside the window and after the expiry, false outside it", () => {
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW + WARN_AHEAD_MS }, NOW)).toBe(true);
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW - 1 }, NOW)).toBe(true);
+    expect(hostLoginNeedsRenewal({ state: "ok", expiresAtMs: NOW + WARN_AHEAD_MS + 1 }, NOW)).toBe(false);
+  });
+  it("claims nothing when the expiry could not be read", () => {
+    for (const state of ["no-file", "unreadable", "no-expiry", "garbage"] as const) expect(hostLoginNeedsRenewal({ state }, NOW)).toBe(false);
   });
 });
