@@ -54,6 +54,11 @@ export interface LoginAdapter {
   addProblem?(name: string): string | undefined;
   /** Optional: `/login <id> remove <name>` signs a target out and forgets it. */
   remove?(target: string): Promise<LoginFinished>;
+  /**
+   * Optional: `/login <id> logout [target]` deletes the stored credential, keeps no backup, and proves it with a real call that now fails.
+   * `ok` means the credential is gone AND that call failed (or could not run, said in `html`); a call that still succeeds is `ok:false`.
+   */
+  logout?(target: string): Promise<LoginFinished>;
   /** Optional: `/login <id> <email>` is accepted and handed to `start` as `hint`, to pre-select that account on the sign-in page. */
   readonly acceptsEmailHint?: boolean;
   start(target: string, hint?: string): Promise<LoginStarted>;

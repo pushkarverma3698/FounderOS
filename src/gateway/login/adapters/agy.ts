@@ -96,7 +96,7 @@ async function realReadDownFlag(): Promise<{ cls: string; since: string } | null
   }
 }
 
-const SSH_HINT =
+export const SSH_HINT =
   "Renew it by hand: ssh -t founderos-vps 'sudo -u antigravity -i agy', press Enter on 1. Google OAuth, open the link, paste the code. Then delete ~/.claude/agent-dispatch.down if it exists.";
 
 interface AgyState {
@@ -257,8 +257,27 @@ export function createAgyAdapter(overrides: Partial<AgyLoginDeps> = {}): LoginAd
       };
     },
 
+    async logout(): Promise<LoginFinished> {
+      const live = `"$HOME/${TOKEN_REL}"`;
+      const rm = await sh(`rm -f -- ${live} ${live}.bak ${live}.new`);
+      cache = undefined;
+      if (rm.code !== 0) {
+        log.error({ code: rm.code }, "agy logout could not delete the login");
+        return { ok: false, html: `Could not delete the agy login (rm exited ${rm.code ?? "without a code"}). It is still in place. ${SSH_HINT}` };
+      }
+      const probe = classifyAgyModels(await agyModelsIn(null), Boolean(d.user));
+      log.info({ probe: probe.kind }, "agy login deleted");
+      if (probe.kind === "rejected") {
+        return { ok: true, html: "agy is signed out: the login file and its backup are deleted, and <code>agy models</code> now says to sign in. agent-dispatch pauses its agy tasks until /login agy." };
+      }
+      if (probe.kind === "ok") {
+        return { ok: false, html: "I deleted agy's login file, but <code>agy models</code> still answers, so another credential source is active (an environment key, or a second login file). It is not signed out." };
+      }
+      return { ok: true, html: `The agy login file and its backup are deleted. The check that agy now refuses could not run (${escHtml(probe.reason)}), so that part is not verified.` };
+    },
+
     async status(): Promise<readonly LoginTargetStatus[]> {
-      const row = (ok: boolean, detail: string, unverified = false): readonly LoginTargetStatus[] => [
+      const row =(ok: boolean, detail: string, unverified = false): readonly LoginTargetStatus[] => [
         { target: "default", label: "Antigravity (agy)", ok, detail, ...(unverified ? { unverified } : {}) },
       ];
       try {

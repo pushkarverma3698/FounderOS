@@ -4,6 +4,8 @@
  * `/login`                  status of every credential, and how to renew one
  * `/login <tool> [target]`  start a renewal; the next message he sends is the pasted code
  * `/login <tool> add <name>` / `remove <name>`  for tools with several accounts (Google)
+ * `/login <tool> logout [name]`  delete the stored credential and prove it with a call that now fails
+ * `/login history`         the last logins, logouts and removals
  *
  * Founder's private chat only (not a group, not an allow-listed guest): a pasted code or token
  * is a credential, and a group member must neither start a login nor have a message swallowed.
@@ -13,6 +15,7 @@ import type { Context } from "grammy";
 import { classifyChatAccess, type ChatAccessConfig } from "../chat-access.js";
 import { splitForTelegram } from "../format.js";
 import { childLogger } from "../../infra/logger.js";
+import { historyText, type LoginAudit, type LoginEvent } from "./login-audit.js";
 import { PendingLogins } from "./pending.js";
 import { LOGIN_ADAPTERS } from "./registry.js";
 import type { LoginAdapter, LoginTargetStatus } from "./types.js";
@@ -23,10 +26,18 @@ export interface LoginDeps {
   readonly adapters: readonly LoginAdapter[];
   readonly pending: PendingLogins;
   readonly access: ChatAccessConfig;
+  /** Where login, logout and remove events are recorded. Absent in tests that do not care. */
+  readonly audit?: LoginAudit;
 }
 
-export function defaultLoginDeps(access: ChatAccessConfig): LoginDeps {
-  return { adapters: LOGIN_ADAPTERS, pending: new PendingLogins(), access };
+export function defaultLoginDeps(access: ChatAccessConfig, audit?: LoginAudit): LoginDeps {
+  return { adapters: LOGIN_ADAPTERS, pending: new PendingLogins(), access, ...(audit ? { audit } : {}) };
+}
+
+/** A failed audit write is logged and never changes what the founder is told: the login itself already happened. */
+async function record(deps: LoginDeps, event: LoginEvent): Promise<void> {
+  // allow-failopen: the audit row is a trail, not a gate; the login/logout outcome stands and the failure is logged.
+  await deps.audit?.record(event).catch((err: unknown) => log.error({ tool: event.tool, kind: event.kind, err: err instanceof Error ? err.message : String(err) }, "login audit write failed"));
 }
 
 const EMAIL_RE = /^[^\s@<>&"]+@[^\s@<>&"]+\.[^\s@<>&"]+$/;
@@ -63,7 +74,8 @@ async function statusScreen(deps: LoginDeps): Promise<string> {
       return a.addProblem ? `${renew}\n/login ${a.id} add &lt;name&gt; · /login ${a.id} remove &lt;name&gt;` : renew;
     })
     .join("\n");
-  return `${blocks.join("\n\n")}\n\nRenew one:\n${usage}`;
+  const out = deps.adapters.filter((a) => a.logout).map((a) => `/login ${a.id} logout${a.targets.length > 1 ? " &lt;name&gt;" : ""}`);
+  return `${blocks.join("\n\n")}\n\nRenew one:\n${usage}${out.length ? `\n\nSign out (deletes the login, keeps no copy):\n${out.join("\n")}` : ""}\n\nWho signed in or out, and when: /login history`;
 }
 
 export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> {
@@ -75,6 +87,15 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
   const [toolArg, targetArg, nameArg] = (typeof ctx.match === "string" ? ctx.match : "").trim().toLowerCase().split(/\s+/);
   if (!toolArg) {
     await send(ctx, await statusScreen(deps));
+    return;
+  }
+  if (toolArg === "history") {
+    try {
+      await send(ctx, deps.audit ? historyText(await deps.audit.recent(10)) : "Login events are not being recorded in this setup.");
+    } catch (err) {
+      log.error({ err: err instanceof Error ? err.message : String(err) }, "login history read failed");
+      await send(ctx, "Could not read the login history: the database did not answer.");
+    }
     return;
   }
   if (toolArg === "cancel") {
@@ -89,7 +110,11 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     return;
   }
   if (targetArg === "remove" && adapter.remove) {
-    await removeTarget(ctx, adapter, nameArg ?? "");
+    await removeTarget(ctx, deps, adapter, nameArg ?? "");
+    return;
+  }
+  if (targetArg === "logout") {
+    await logoutTarget(ctx, deps, adapter, nameArg ?? "");
     return;
   }
   const hint = adapter.acceptsEmailHint && targetArg !== undefined && EMAIL_RE.test(targetArg) ? targetArg : undefined;
@@ -113,20 +138,47 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     await send(ctx, `${started.html}\n\nChanged your mind? /login cancel`);
   } catch (err) {
     log.error({ tool: adapter.id, target, err: err instanceof Error ? err.message : String(err) }, "login start failed");
+    await record(deps, { tool: adapter.id, target, kind: "login", ok: false, detail: `could not start: ${err instanceof Error ? err.message : String(err)}` });
     await send(ctx, `Could not start the ${esc(adapter.title)} login: ${esc(err instanceof Error ? err.message : String(err))}`);
   }
 }
 
-async function removeTarget(ctx: Context, adapter: LoginAdapter, name: string): Promise<void> {
+async function removeTarget(ctx: Context, deps: LoginDeps, adapter: LoginAdapter, name: string): Promise<void> {
   if (!adapter.targets.includes(name)) {
     await send(ctx, `Which one? /login ${adapter.id} remove ${adapter.targets.join(" | ")}`);
     return;
   }
   try {
-    await send(ctx, (await adapter.remove!(name)).html);
+    const done = await adapter.remove!(name);
+    await record(deps, { tool: adapter.id, target: name, kind: "remove", ok: done.ok, detail: done.ok ? undefined : done.html });
+    await send(ctx, done.html);
   } catch (err) {
     log.error({ tool: adapter.id, target: name, err: err instanceof Error ? err.message : String(err) }, "login remove failed");
+    await record(deps, { tool: adapter.id, target: name, kind: "remove", ok: false, detail: err instanceof Error ? err.message : String(err) });
     await send(ctx, `Could not remove ${esc(name)}: ${esc(err instanceof Error ? err.message : String(err))}`);
+  }
+}
+
+async function logoutTarget(ctx: Context, deps: LoginDeps, adapter: LoginAdapter, name: string): Promise<void> {
+  if (!adapter.logout) {
+    await send(ctx, `${esc(adapter.title)} has no sign-out here.`);
+    return;
+  }
+  const target = name || (adapter.targets.length === 1 ? adapter.targets[0]! : "");
+  if (!adapter.targets.includes(target)) {
+    await send(ctx, `Which one? /login ${adapter.id} logout ${adapter.targets.join(" | ")}`);
+    return;
+  }
+  // A login waiting for a paste would be completed by the next message after the sign-out: drop it first.
+  await deps.pending.drop(String(ctx.chat!.id));
+  try {
+    const done = await adapter.logout(target);
+    await record(deps, { tool: adapter.id, target, kind: "logout", ok: done.ok, detail: done.ok ? undefined : done.html });
+    await send(ctx, done.html);
+  } catch (err) {
+    log.error({ tool: adapter.id, target, err: err instanceof Error ? err.message : String(err) }, "logout failed");
+    await record(deps, { tool: adapter.id, target, kind: "logout", ok: false, detail: err instanceof Error ? err.message : String(err) });
+    await send(ctx, `Could not sign ${esc(adapter.title)} out: ${esc(err instanceof Error ? err.message : String(err))}`);
   }
 }
 
@@ -166,6 +218,7 @@ export async function handleLoginReply(ctx: Context, deps: LoginDeps): Promise<b
     log.error({ tool: pending.adapter.id, target: pending.target, err: err instanceof Error ? err.message : String(err) }, "login finish failed");
     result = { ok: false, html: `The ${esc(pending.adapter.title)} login failed: ${esc(err instanceof Error ? err.message : String(err))}` };
   }
+  await record(deps, { tool: pending.adapter.id, target: pending.target, kind: "login", ok: result.ok, detail: result.ok ? undefined : result.html });
   // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it, or hands over to its next step.
   if (result.ok && result.next) await deps.pending.begin(chatId, pending.adapter, pending.target, result.next);
   else if (result.ok || result.ended) await deps.pending.drop(chatId);

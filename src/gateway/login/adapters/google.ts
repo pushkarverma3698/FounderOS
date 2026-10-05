@@ -29,6 +29,8 @@ export interface GoogleLoginDeps {
   clearAlerts(account: string): void;
   /** Deletes an added mailbox's folder (credentials included). */
   forget(account: string): Promise<void>;
+  /** Deletes an account's credentials file and its `.bak`, nothing else. */
+  deleteCredentials(path: string): Promise<void>;
 }
 
 const esc = (s: string): string => s.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
@@ -62,6 +64,10 @@ export const defaultGoogleDeps: GoogleLoginDeps = {
     clearCredentialAlert("active_calendar", account);
   },
   forget: (account) => rm(dirname(mailboxProfileDir(account)), { recursive: true, force: true }),
+  deleteCredentials: async (path) => {
+    await rm(path, { force: true });
+    await rm(`${path}.bak`, { force: true });
+  },
 };
 
 const PROFILE_ARGS = ["gmail", "users", "getProfile", "--params", JSON.stringify({ userId: "me" })];
@@ -135,6 +141,24 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
         html:
           `Removed "${esc(target)}": FounderOS no longer has its login and the name is gone.\n` +
           `To also cut Google's side, that account can revoke the app at myaccount.google.com/permissions.`,
+      };
+    },
+
+    async logout(target): Promise<LoginFinished> {
+      if (!isAccountKey(target)) return this.remove!(target);
+      const dir = deps.profileDir(target);
+      await deps.deleteCredentials(`${dir}/credentials.json`);
+      // The real failed call: the same Gmail request the sign-in used, against the folder that no longer holds a login.
+      const check = await deps.runGws(PROFILE_ARGS, dir);
+      const email = emailOf(check);
+      if (email) {
+        return { ok: false, html: `I deleted ${esc(labelOf(target))}'s login file, but Gmail still answers for ${esc(email)}, so another credential is active for it. It is not signed out.` };
+      }
+      return {
+        ok: true,
+        html:
+          `${esc(labelOf(target))} is signed out: its login file and backup are deleted, none kept, and a Gmail call now fails.\n` +
+          `Mail and calendar for it stop until /login google ${esc(target)}. To also cut Google's side, revoke the app at myaccount.google.com/permissions.`,
       };
     },
 

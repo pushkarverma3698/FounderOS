@@ -472,3 +472,111 @@ exit 2
     expect(stateLines()[1]).toBe(KICK_LINE);
   });
 });
+
+describe("sync-daemons.sh — the agy login helper's systemd units", () => {
+  let units: string;
+  let ctl: string;
+  let ctlLog: string;
+
+  /** A systemctl that logs every call; `is-active` says active once `enable` ran, unless told otherwise. */
+  function fakeSystemctl(opts: { neverActive?: boolean; failDaemonReload?: boolean } = {}): void {
+    ctl = join(root, "systemctl-stub");
+    ctlLog = join(root, "systemctl.log");
+    writeFileSync(
+      ctl,
+      `#!/usr/bin/env bash
+echo "$*" >>"${ctlLog}"
+case "$1" in
+  daemon-reload) ${opts.failDaemonReload ? "exit 1" : "exit 0"} ;;
+  enable) touch "${root}/enabled"; exit 0 ;;
+  is-active) ${opts.neverActive ? "echo inactive; exit 3" : `[ -f "${root}/enabled" ] && { echo active; exit 0; }; echo inactive; exit 3`} ;;
+  *) exit 0 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+  }
+  const calls = (): string[] => (existsSync(ctlLog) ? readFileSync(ctlLog, "utf8").split("\n").filter(Boolean) : []);
+  const env = (extra: Record<string, string> = {}): Record<string, string> => ({
+    SYNC_DAEMONS_UNIT_DEST: units,
+    SYNC_DAEMONS_SUDO: "",
+    SYNC_DAEMONS_SYSTEMCTL: ctl,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    units = join(root, "units");
+    mkdirSync(units, { recursive: true });
+    fakeSystemctl();
+  });
+
+  it("installs both unit files byte for byte, reloads systemd, enables and starts the socket, and says so", () => {
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    for (const u of ["agy-login.socket", "agy-login.service"]) {
+      expect(sha(join(units, u))).toBe(sha(join(DEPLOY, "systemd", u)));
+      expect(modeOf(join(units, u))).toBe("644");
+    }
+    expect(calls()).toEqual(expect.arrayContaining(["daemon-reload", "enable --now agy-login.socket", "restart agy-login.socket", "try-restart agy-login.service"]));
+    expect(r.out).toContain("agy login units installed and agy-login.socket active (updated)");
+    expect(existsSync(join(units, "agy-login.socket.new"))).toBe(false);
+  });
+
+  it("is idempotent: a second deploy reloads nothing and restarts no socket", () => {
+    sync(env());
+    writeFileSync(ctlLog, "");
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    expect(calls()).not.toContain("daemon-reload");
+    expect(calls()).not.toContain("restart agy-login.socket");
+    expect(r.out).toContain("(unchanged)");
+  });
+
+  it("replaces a hand-edited unit with the checkout's", () => {
+    writeFileSync(join(units, "agy-login.service"), "[Service]\nUser=root\n");
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    expect(sha(join(units, "agy-login.service"))).toBe(sha(join(DEPLOY, "systemd", "agy-login.service")));
+  });
+
+  it("fails the deploy, naming the socket, when it is not active afterwards", () => {
+    fakeSystemctl({ neverActive: true });
+    const r = sync(env());
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("agy-login.socket is not active after install");
+  });
+
+  it("fails the deploy when daemon-reload fails", () => {
+    fakeSystemctl({ failDaemonReload: true });
+    const r = sync(env());
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("daemon-reload failed");
+  });
+
+  it("warns and installs nothing when passwordless sudo is not available (the box keeps working, /login agy falls back)", () => {
+    const deny = join(root, "deny-sudo");
+    writeFileSync(deny, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const r = sync(env({ SYNC_DAEMONS_SUDO: deny }));
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("passwordless sudo is not available");
+    expect(readdirSync(units)).toEqual([]);
+  });
+
+  it("never touches systemd under a scratch HOME when no unit destination is given", () => {
+    const r = sync({ SYNC_DAEMONS_SYSTEMCTL: ctl });
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("agy login units left alone");
+    expect(calls()).toEqual([]);
+  });
+
+  it("the units are what the bot's sandbox needs: the helper runs as antigravity, the socket is group founderos 0660 and not world-openable", () => {
+    const service = readFileSync(join(DEPLOY, "systemd", "agy-login.service"), "utf8");
+    const socket = readFileSync(join(DEPLOY, "systemd", "agy-login.socket"), "utf8");
+    expect(service).toMatch(/^User=antigravity$/m);
+    expect(service).toMatch(/^ExecStart=\/usr\/bin\/node \/opt\/founderos\/dist\/src\/gateway\/login\/agy-helper\.js$/m);
+    expect(service.split("\n").filter((l) => !l.startsWith("#"))).not.toEqual(expect.arrayContaining([expect.stringMatching(/EnvironmentFile|\.env/)]));
+    expect(socket).toMatch(/^SocketUser=antigravity$/m);
+    expect(socket).toMatch(/^SocketGroup=founderos$/m);
+    expect(socket).toMatch(/^SocketMode=0660$/m);
+  });
+});
