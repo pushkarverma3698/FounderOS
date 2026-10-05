@@ -10,7 +10,7 @@
 
 import { type Context, InlineKeyboard } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
-import { TENANT, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
+import { TENANT, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { getKernel } from "./kernel-boot.js";
 import { kernelReply, kernelCommand, getPendingKernelApproval, type PlannedCommand } from "../kernel/index.js";
@@ -18,10 +18,8 @@ import { runPlannedCommand } from "./command-dispatch.js";
 import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
-import { getPendingInterrupt, resolveInterrupt, getTodayCostUsd, logLlmCost } from "../db/queries.js";
+import { getPendingInterrupt, resolveInterrupt, logLlmCost } from "../db/queries.js";
 import { BudgetExceededError, enforceRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
-import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
-import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { kernelPromptHash } from "./prompt-version.js";
@@ -29,7 +27,8 @@ import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
-import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
+import { streamKernelTurn, progressLabelFor, sendTurnAck } from "./kernel-progress.js";
+import { passTurnGates, sendApprovalCard, HITL_RESTORE_MAX_AGE_MS } from "./turn-gates.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
@@ -40,9 +39,6 @@ import { engineFromApprovalCard, type Engine } from "../tools/coding-engine.js";
 export { progressLabelFor };
 
 const log = logger.child({ module: "kernel-run" });
-
-/** Only re-post HITL cards paused within this window (crash recovery). */
-export const HITL_RESTORE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 // ── Per-chat turn serialization ────────────────────────────────────────────────
 
@@ -133,34 +129,6 @@ async function sendReply(ctx: Context, text: string): Promise<void> {
   }
 }
 
-async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, nonce?: string): Promise<void> {
-  const card = formatApprovalCard(approval, { nonce });
-  await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
-}
-
-/**
- * A text turn must not start while an approval card is waiting on the same thread:
- * the new run would share the old checkpoint and pending row, so one tap would
- * resume (or silently drop) the wrong request. Re-send the card and say so. A card
- * older than the restore window is abandoned, so expire it instead of blocking forever.
- * Returns true when the turn was held.
- */
-async function holdForPendingApproval(ctx: Context, chatId: string | number): Promise<boolean> {
-  const pending = await getPendingInterrupt(threadIdFor(chatId));
-  if (!pending) return false;
-  const age = Date.now() - new Date(pending.created_at ?? 0).getTime();
-  if (age > HITL_RESTORE_MAX_AGE_MS) {
-    await resolveInterrupt(pending.interrupt_id, "expired");
-    return false;
-  }
-  const payload = JSON.parse(pending.callback_data ?? "{}") as Omit<ApprovalRequest, "kind">;
-  await ctx.reply(
-    "⏸ Not started: an approval is still waiting. Approve or reject the card below, then send your message again.",
-  );
-  await sendApprovalCard(ctx, { kind: "approval", ...payload }, pending.interrupt_id.substring(0, 8));
-  return true;
-}
-
 // ── One text turn ──────────────────────────────────────────────────────────────
 
 /**
@@ -178,29 +146,23 @@ async function holdForPendingApproval(ctx: Context, chatId: string | number): Pr
  * word, so the choice cannot depend on the model copying it.
  */
 export async function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
+  const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
+  const queued = chatTurnChains.has(String(chatId));
   // UX: Let the founder know the system heard him if another turn is already running.
-  if (chatTurnChains.has(String(chatId))) {
+  if (queued) {
     await ctx.reply("⏳ Got it — finishing the current request first.").catch(() => undefined); // allow-failopen: queue ack is cosmetic
   }
   // Set inside the turn, run after its lock is released: a command such as /task starts turns of its own.
   let planned = null as PlannedCommand | null;
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
+    // First: the founder sees "Working on it" before the gates and the first-boot kernel compile, not after them.
+    const ack = sendTurnAck(ctx, trace, arrivedAt, { queued });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
-      const halt = await readHalt();
-      if (halt) {
-        await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
-        return;
-      }
-      if (await holdForPendingApproval(ctx, chatId)) return;
-      await assertDailyBudgetAllowsRun(
-        () => getTodayCostUsd(TENANT),
-        DAILY_BUDGET_USD,
-        (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
-      );
+      if (!(await passTurnGates(ctx, chatId, threadIdFor(chatId), ack))) return;
 
       const kernel = await getKernel();
       budget = makeRunBudget();
@@ -243,6 +205,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
             { ...config, streamMode: "values", signal: abort.signal },
           ) as Promise<AsyncIterable<unknown>>,
           () => touch?.(),
+          ack,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.invoke",
@@ -278,6 +241,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       const card = failureCardFor(res as never, { turnId: trace.turnId, profileId });
       await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
     } catch (err) {
+      await ack.remove(); // a gate or getKernel() failed before the stream took the ack over; idempotent otherwise
       const failure = budget ? failureFor(err, budget) : err;
       trace.event("turn.error", {
         message: failure instanceof Error ? failure.message.slice(0, 400) : String(failure),

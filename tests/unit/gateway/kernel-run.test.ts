@@ -879,3 +879,165 @@ describe("failed turns reach the founder as a card with a Retry button", () => {
   });
 });
 
+// 2026-10-05: the "Working on it" ack went out only after readHalt, the pending-approval lookup, two
+// daily-budget reads and the first-boot kernel compile, so it routinely missed the 2 s budget. The ack now
+// goes first and the gates run behind it; a gate that refuses must take the ack away so nothing is orphaned.
+describe("runKernelText: the ack goes out before the gates", () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("sends the placeholder while readHalt is still pending, then runs the kernel once the gates pass", async () => {
+    const gate = deferred<unknown>();
+    readHalt.mockReturnValue(gate.promise);
+    const { ctx, replies } = fakeCtx();
+    const run = runKernelText(ctx, "hello");
+    await tick();
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+
+    gate.resolve(null);
+    await run;
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…", "All done."]);
+  });
+
+  it("sends the placeholder while the pending-approval lookup and the budget read are pending", async () => {
+    const pending = deferred<unknown>();
+    getPendingInterrupt.mockReturnValue(pending.promise);
+    const { ctx, replies } = fakeCtx();
+    const run = runKernelText(ctx, "hello");
+    await tick();
+    expect(replies).toHaveLength(1);
+    expect(getTodayCostUsd).not.toHaveBeenCalled();
+    pending.resolve(null);
+    await run;
+    expect(getTodayCostUsd).toHaveBeenCalledTimes(1);
+  });
+
+  it("records turn.ack with the milliseconds since the message arrived, before any gate resolves", async () => {
+    const events: TraceEvent[] = [];
+    setTraceSink((e) => events.push(e));
+    try {
+      const gate = deferred<unknown>();
+      readHalt.mockReturnValue(gate.promise);
+      const { ctx } = fakeCtx();
+      const run = runKernelText(ctx, "hello");
+      await tick();
+      const ack = events.find((e) => e.seam === "turn.ack");
+      expect(ack).toBeDefined();
+      expect(typeof ack!.data?.["ms"]).toBe("number");
+      expect(ack!.data!["ms"] as number).toBeLessThan(2000);
+      expect(events.some((e) => e.seam === "turn.in")).toBe(false); // the gates have not finished
+      gate.resolve(null);
+      await run;
+    } finally {
+      setTraceSink(null);
+    }
+  });
+
+  it("halted: the ack is deleted, the halt notice is shown, and the kernel never runs", async () => {
+    readHalt.mockResolvedValue({ reason: "stop" });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…", "halted"]);
+    expect(deletedIds).toEqual([1]); // exactly the ack, exactly once
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+    expect(getPendingInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("an approval is pending: the ack is deleted before the hold notice, and the kernel never runs", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "abcd1234-0000",
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      callback_data: JSON.stringify({ action: "dispatch_antigravity", title: "Dispatch?", summary: "s", preview: "p", args: {} }),
+    });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "/task another");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies[0]!.text).toBe("🤔 Working on it…");
+    expect(replies[1]!.text).toMatch(/approve or reject/i);
+    expect(replies).toHaveLength(3); // ack, hold notice, the pending card again: no second ack
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+    expect(getTodayCostUsd).not.toHaveBeenCalled();
+  });
+
+  it("daily budget exhausted: the ack is deleted, the refusal is shown, and the kernel never runs", async () => {
+    getTodayCostUsd.mockResolvedValue(1_000_000);
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies).toHaveLength(2);
+    expect(replies[1]!.text).toMatch(/budget/i);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a failing gate read is a loud error with the ack removed, not a stuck ack", async () => {
+    readHalt.mockRejectedValue(new Error("halt table unreachable"));
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toContain("❌");
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a slow ack send does not let a refusal overtake it: the refusal waits, then the ack is deleted", async () => {
+    readHalt.mockResolvedValue({ reason: "stop" });
+    const send = deferred<{ message_id: number }>();
+    const { ctx, replies, deletedIds } = fakeCtx();
+    let first = true;
+    (ctx.reply as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      replies.push({ text });
+      if (first) {
+        first = false;
+        return send.promise;
+      }
+      return { message_id: 99 };
+    });
+    const run = runKernelText(ctx, "hello");
+    await tick();
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]); // refusal not sent yet
+    send.resolve({ message_id: 41 });
+    await run;
+    expect(deletedIds).toEqual([41]);
+    expect(replies.at(-1)!.text).toBe("halted");
+  });
+
+  it("a normal turn still deletes the ack exactly once, after the reply path ends", async () => {
+    const { ctx, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+    expect(deletedIds).toEqual([1]);
+  });
+
+  it("a queued turn shows the queue ack and then its own placeholder", async () => {
+    let release!: () => void;
+    fakeKernel.stream.mockImplementationOnce(async function* () {
+      await new Promise<void>((r) => (release = r));
+      yield DONE_STATE;
+    } as never);
+    const first = fakeCtx();
+    const second = fakeCtx();
+    const a = runKernelText(first.ctx, "one");
+    await tick();
+    const b = runKernelText(second.ctx, "two");
+    await tick();
+    expect(second.replies.map((r) => r.text)).toEqual(["⏳ Got it — finishing the current request first."]);
+    release();
+    await Promise.all([a, b]);
+    expect(second.replies.map((r) => r.text)).toEqual([
+      "⏳ Got it — finishing the current request first.",
+      "🤔 Working on it…",
+      "All done.",
+    ]);
+  });
+});
