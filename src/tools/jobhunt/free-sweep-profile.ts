@@ -140,6 +140,7 @@ export async function runFreeSweepForProfile(
         `⚠ Free job lane failed for ${profile.candidateName} — nothing was fetched this sweep.\n` +
           summariseFailures(result.failures),
       ),
+      { repeatKey: `fetched-nothing:${profile.id}` },
     );
     return;
   }
@@ -210,7 +211,7 @@ export async function runFreeSweepForProfile(
   // and the group message never carries a sheet line at all (the link is on the founder-facing pings).
   if (notice !== null) {
     try {
-      await sendLaneOps(notice);
+      await sendLaneOps(notice, { repeatKey: `sheet-notice:${profile.id}` });
     } catch (err) {
       // allow-failopen: the notice is a courtesy about the export; the roles and the heartbeat matter more.
       log.warn({ err: (err as Error).message, profile: profile.id }, "Sheet notice could not be delivered");

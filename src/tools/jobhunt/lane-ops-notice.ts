@@ -12,7 +12,32 @@
 
 import { sendToChat } from "../../infra/telegram-send.js";
 
-/** Send a lane-health message (HTML) to the founder private chat. Rejects when Telegram does, like sendToJobsChat. */
-export async function sendLaneOps(text: string): Promise<void> {
+/** How long a notice with a repeatKey stays quiet after it was delivered. */
+export const LANE_OPS_REPEAT_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Last delivery per repeatKey. In memory on purpose: a restart sends one repeat, which is the right side to err on,
+ * and a table for a courtesy DM would be a new thing to migrate and clean up.
+ */
+const lastSent = new Map<string, number>();
+
+export function resetLaneOpsThrottle(): void {
+  lastSent.clear();
+}
+
+/**
+ * Send a lane-health message (HTML) to the founder private chat. Rejects when Telegram does, like sendToJobsChat.
+ *
+ * `repeatKey` is for a condition that persists: "nothing was fetched" and "the sheet could not be updated" would
+ * otherwise repeat every 30-minute sweep for as long as the outage lasts. The window starts only after Telegram
+ * accepted the message, so a failed send is retried by the next sweep.
+ */
+export async function sendLaneOps(text: string, opts: { repeatKey?: string } = {}): Promise<void> {
+  const key = opts.repeatKey;
+  if (key !== undefined) {
+    const last = lastSent.get(key);
+    if (last !== undefined && Date.now() - last < LANE_OPS_REPEAT_MS) return;
+  }
   await sendToChat(text);
+  if (key !== undefined) lastSent.set(key, Date.now());
 }
