@@ -11,7 +11,6 @@
 import { describe, it, expect } from "vitest";
 import {
   canMerge,
-  globMatch,
   mergeIdempotencyKey,
   verifyImplementationGreen,
   verifySpecRed,
@@ -39,7 +38,7 @@ const spec: EvidenceSpec = {
 };
 
 const check = (over: Partial<CheckRun> = {}): CheckRun =>
-  mix<CheckRun>({ name: "ci / test", required: true, conclusion: "success" }, over);
+  mix<CheckRun>({ name: "ci / test", required: true, conclusion: "success", passedTests: LIST }, over);
 const file = (path: string, over: Partial<DiffFile> = {}): DiffFile =>
   mix<DiffFile>({ path, status: "modified", additions: 5, deletions: 1 }, over);
 const hs = (atSpec: string, atHead: string) => ({
@@ -52,6 +51,7 @@ const green = (over: Record<string, unknown> = {}): EvidenceVerdict =>
     spec,
     mix(
       {
+        head_sha: HEAD,
         checks: [check()],
         diff: [file("src/tools/widget.ts"), file(LOCKED, { status: "added" })],
         lockedTestHashes: hs("h1", "h1"),
@@ -66,6 +66,7 @@ const red = (over: Record<string, unknown> = {}): EvidenceVerdict =>
     spec,
     mix(
       {
+        head_sha: HEAD,
         checks: [check({ conclusion: "failure", failedTests: LIST }), check({ name: "ci / lint" })],
         specCommitFiles: [file(LOCKED, { status: "added" })],
       },
@@ -77,7 +78,7 @@ const reasonsOf = (v: EvidenceVerdict) => v.reasons.join(" | ");
 
 describe("verifySpecRed", () => {
   it("PASSes when only the locked test was added and only it fails", () => {
-    expect(red()).toEqual({ status: "PASS", reasons: [] });
+    expect(red()).toEqual({ status: "PASS", reasons: [], head_sha: HEAD });
   });
 
   it("FAILs when the spec commit also touches a source file", () => {
@@ -150,7 +151,7 @@ describe("verifySpecRed", () => {
 
   it("is UNKNOWN for a contract with no locked tests", () => {
     const noLocked = mix(spec, { locked_tests: [] });
-    const v = verifySpecRed(noLocked, { checks: [check()], specCommitFiles: [] });
+    const v = verifySpecRed(noLocked, { head_sha: HEAD, checks: [check()], specCommitFiles: [] });
     expect(v.status).toBe("UNKNOWN");
   });
 
@@ -165,7 +166,7 @@ describe("verifySpecRed", () => {
 
 describe("verifyImplementationGreen", () => {
   it("PASSes a clean in-scope change with green required checks and an untouched locked test", () => {
-    expect(green()).toEqual({ status: "PASS", reasons: [] });
+    expect(green()).toEqual({ status: "PASS", reasons: [], head_sha: HEAD });
   });
 
   it("FAILs when the executor edited the locked test (hash differs)", () => {
@@ -274,7 +275,7 @@ describe("verifyImplementationGreen", () => {
 });
 
 describe("canMerge", () => {
-  const pass: EvidenceVerdict = { status: "PASS", reasons: [] };
+  const pass: EvidenceVerdict = { status: "PASS", reasons: [], head_sha: HEAD };
   const base = {
     evidence: pass,
     review: { decision: "APPROVE" as const, head_sha: HEAD },
@@ -315,14 +316,14 @@ describe("canMerge", () => {
 
   it("refuses FAIL and UNKNOWN evidence, each with a reason", () => {
     for (const status of ["FAIL", "UNKNOWN"] as const) {
-      const r = canMerge(mix(base, { evidence: { status, reasons: ["x"] } }));
+      const r = canMerge(mix(base, { evidence: { status, reasons: ["x"], head_sha: HEAD } }));
       expect(r.ok).toBe(false);
       expect(r.reasons.length).toBeGreaterThan(0);
     }
   });
 
   it("refuses PASS evidence that smuggles in a status string it should not trust", () => {
-    const r = canMerge(mix(base, { evidence: { status: "pass", reasons: [] } }));
+    const r = canMerge(mix(base, { evidence: { status: "pass", reasons: [], head_sha: HEAD } }));
     expect(r.ok).toBe(false);
   });
 
@@ -381,21 +382,111 @@ describe("invariant: UNKNOWN never becomes PASS, every non-PASS says why", () =>
   });
 });
 
-describe("globMatch", () => {
+describe("scope uses the spec-gate glob rules", () => {
+  const inScope = (scope: string[], path: string) =>
+    verifyImplementationGreen(mix(spec, { scope }), {
+      head_sha: HEAD,
+      checks: [check()],
+      diff: [file(path)],
+      lockedTestHashes: hs("h1", "h1"),
+      dependencyChanged: false,
+    }).status === "PASS";
   it.each([
-    ["src/tools/widget.ts", "src/tools/widget.ts", true],
-    ["src/tools/*.ts", "src/tools/widget.ts", true],
-    ["src/tools/*.ts", "src/tools/deep/widget.ts", false],
-    ["src/**/*.ts", "src/tools/deep/widget.ts", true],
-    ["src/**/*.ts", "src/widget.ts", true],
-    ["src/**", "src/a/b/c.md", true],
-    ["src/tools/", "src/tools/a/b.ts", true],
-    ["src/tools/w?dget.ts", "src/tools/widget.ts", true],
-    ["src/*.{ts,tsx}", "src/a.tsx", true],
-    ["src/*.{ts,tsx}", "src/a.js", false],
-    ["src/tools/widget.ts", "src/tools/widget.tsx", false],
-    ["src/a.b", "src/aXb", false],
-  ])("%s vs %s -> %s", (glob, path, expected) => {
-    expect(globMatch(glob, path)).toBe(expected);
+    [["src/tools/*.ts"], "src/tools/widget.ts", true],
+    [["src/tools/*.ts"], "src/tools/deep/widget.ts", false],
+    [["src/**/*.ts"], "src/tools/deep/widget.ts", true],
+    [["src/**"], "src/a/b/c.md", true],
+    [["src/tools/w?dget.ts"], "src/tools/widget.ts", true],
+    [["src/tools/widget.ts"], "src/tools/widget.tsx", false],
+    [["src/tools/"], "src/tools/a/b.ts", false],
+    [["src/*.{ts,tsx}"], "src/a.tsx", false],
+  ])("scope %j vs %s -> %s", (scope, path, expected) => {
+    expect(inScope(scope, path)).toBe(expected);
+  });
+});
+
+describe("hole 1: the locked test must have run and passed", () => {
+  it("is UNKNOWN when no required check reports which tests passed", () => {
+    const v = green({ checks: [check({ passedTests: undefined })] });
+    expect(v.status).toBe("UNKNOWN");
+    expect(reasonsOf(v)).toContain("cannot tell whether the locked test ran");
+  });
+
+  it("FAILs when passedTests is present but omits the locked test", () => {
+    for (const passedTests of [[], ["tests/unit/other.test.ts"]]) {
+      const v = green({ checks: [check({ passedTests })] });
+      expect(v.status).toBe("FAIL");
+      expect(reasonsOf(v)).toContain("locked test " + LOCKED + " did not run");
+    }
+  });
+
+  it("PASSes when any one required success check ran the locked test", () => {
+    const other = check({ name: "ci / lint", passedTests: [] });
+    expect(green({ checks: [other, check()] }).status).toBe("PASS");
+  });
+
+  it("does not count a passedTests list on a check that is not required", () => {
+    const extra = check({ name: "ui-qa", required: false, passedTests: LIST });
+    expect(green({ checks: [check({ passedTests: [] }), extra] }).status).toBe("FAIL");
+  });
+});
+
+describe("hole 2: evidence is bound to a head", () => {
+  const approved = { decision: "APPROVE" as const, head_sha: HEAD };
+  const input = (evidenceHead: string, headNow: string) => ({
+    evidence: { status: "PASS" as const, reasons: [], head_sha: evidenceHead },
+    review: approved,
+    headAtReview: HEAD,
+    headNow,
+    baseAtReview: BASE,
+    baseNow: BASE,
+  });
+
+  it("carries the input head_sha on every verdict", () => {
+    expect(green().head_sha).toBe(HEAD);
+    expect(red().head_sha).toBe(HEAD);
+    expect(green({ head_sha: HEAD2, checks: [] }).head_sha).toBe(HEAD2);
+  });
+
+  it("refuses PASS evidence computed for a different head than the one merging", () => {
+    const r = canMerge(input(HEAD2, HEAD));
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(" ")).toContain("evidence was computed for head " + HEAD2);
+  });
+
+  it("allows PASS evidence for the head being merged", () => {
+    expect(canMerge(input(HEAD, HEAD)).ok).toBe(true);
+  });
+
+  it("refuses evidence with no head_sha", () => {
+    const bare = mix(input(HEAD, HEAD), { evidence: { status: "PASS", reasons: [] } });
+    expect(canMerge(bare).ok).toBe(false);
+  });
+});
+
+describe("hole 3: an executor may not edit an existing test it did not lock", () => {
+  const why = /existing test tests\/unit\/old\.test\.ts changed: put it in locked_tests via a new spec/;
+  it.each(["modified", "removed"] as const)("FAILs when an existing non-locked test is %s", (status) => {
+    const old = file("tests/unit/old.test.ts", { status });
+    const v = green({ diff: [file("src/tools/widget.ts"), old] });
+    expect(v.status).toBe("FAIL");
+    expect(reasonsOf(v)).toMatch(why);
+  });
+
+  it("FAILs when an existing test is renamed away", () => {
+    const moved = file("tests/unit/new-name.test.ts", { status: "renamed", previousPath: "tests/unit/old.test.ts" });
+    const v = green({ diff: [file("src/tools/widget.ts"), moved] });
+    expect(v.status).toBe("FAIL");
+    expect(reasonsOf(v)).toMatch(why);
+  });
+
+  it("allows adding a new test file", () => {
+    const added = file("tests/unit/brand-new.test.ts", { status: "added" });
+    expect(green({ diff: [file("src/tools/widget.ts"), added] }).status).toBe("PASS");
+  });
+
+  it("allows the locked test itself to appear as modified (its hash is checked separately)", () => {
+    const locked = file(LOCKED, { status: "modified" });
+    expect(green({ diff: [file("src/tools/widget.ts"), locked] }).status).toBe("PASS");
   });
 });

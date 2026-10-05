@@ -183,6 +183,7 @@ describe("runSpecGate: scope", () => {
       "eslint.config.js",
       "tsconfig.json",
       "vitest.config.ts",
+      "vitest.setup.ts",
       "scripts/verify-architecture.ts",
       "scripts/verify-*",
       "packages/web/package.json",
