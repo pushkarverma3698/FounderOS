@@ -1213,6 +1213,34 @@ close_out_finished_review() {
   esac
 }
 
+# 1c. Non-blocking findings of a PASS. pr-brain's review comment ends with the typed verdict (src/tools/review-verdict.ts):
+#     a fenced json block {version, head_sha, decision, findings}. NB_COUNT is how many major/minor findings the
+#     LAST such block for this head carries, and 0 when the follow-up pass must not run: the head was never
+#     stamped reviewed, the decision is not APPROVE, a blocker rides along (contradictory), the block names another
+#     head or is not valid JSON, a nonblockers-sent marker already exists on the PR (once per PR, so it never loops),
+#     or the PR is a promotion (its work already passed its own gate). Prose is never parsed.
+NB_COUNT=0
+nonblockers_count() { # nonblockers_count PR HEAD HEAD_REF
+  NB_COUNT=0
+  case "$3" in beta|main|master|chore/promote-*) return 0 ;; esac
+  local out
+  out=$(gh pr view "$1" --repo "$REPO" --json comments 2>/dev/null \
+    | jq -r --arg head "$2" --arg m "<!-- brain-reviewed: ${2}" '
+        [.comments[].body] as $b
+        | if any($b[]; contains("nonblockers-sent:")) or (any($b[]; contains($m)) | not) then 0
+          else
+            ([ $b[]
+               | [match("```json[^\\n]*\\n([\\s\\S]*?)```"; "g").captures[0].string] | last // empty
+               | try fromjson catch empty
+               | select(type == "object" and .version == 1 and .head_sha == $head and .decision == "APPROVE" and (.findings | type) == "array")
+             ] | last) as $v
+            | if $v == null or any($v.findings[]; .severity == "blocker") then 0
+              else [$v.findings[] | select(.severity == "major" or .severity == "minor")] | length end
+          end' 2>/dev/null) || return 0
+  [[ "$out" =~ ^[0-9]+$ ]] && NB_COUNT="$out"
+  return 0
+}
+
 # 2. Re-dispatch: find PRs pr-brain reviewed and left uncleared (still draft after
 #    a brain-reviewed marker for the CURRENT head SHA — pr-brain's own vocabulary
 #    for "REVIEWED, left as draft — not cleared"). This is reading pr-brain's
@@ -1233,7 +1261,16 @@ redispatch_unresolved_reviews() {
     local is_draft head_sha
     is_draft=$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq .isDraft)
     head_sha=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid)
-    [[ "$is_draft" != "true" ]] && continue
+    # A PR that is not a draft was cleared (PASS). It is the executor's again only for ONE pass over the review's
+    # non-blocking findings, and only while required CI is not red. This never touches the PASS: no label, no draft.
+    local mode=review
+    if [[ "$is_draft" != "true" ]]; then
+      nonblockers_count "$pr" "$head_sha" "$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq .headRefName 2>/dev/null)"
+      [[ "$NB_COUNT" -gt 0 ]] || continue
+      required_ci_state "$pr" "$REPO"
+      [[ "$CI_STATE" == red ]] && continue
+      mode=nonblockers
+    fi
 
     local reviewed_this_head
     # Same gh --jq/--arg incompatibility as release_stale_claims above — piped
@@ -1243,6 +1280,7 @@ redispatch_unresolved_reviews() {
     reviewed_this_head=$(gh pr view "$pr" --repo "$REPO" --json comments \
       | jq -r --arg m "<!-- brain-reviewed: ${head_sha}" '[.comments[].body | select(contains($m))] | length')
     local trigger="reviewed at ${head_sha:0:8} and left draft"
+    [[ "$mode" == nonblockers ]] && trigger="passed review at ${head_sha:0:8} with ${NB_COUNT} non-blocking finding(s)"
     if [[ "${reviewed_this_head:-0}" -eq 0 ]]; then
       # Not reviewed at this head. pr-brain spends no review on a head whose REQUIRED CI is red (a review cannot
       # clear it), so nothing will ever stamp it, and without this the executor would never hear that its PR fails
@@ -1257,6 +1295,8 @@ redispatch_unresolved_reviews() {
       | jq -r --arg p "$ATTEMPT_PREFIX" '[.comments[].body | select(startswith($p)) | ltrimstr($p) | ltrimstr(" ") | split(" ")[0] | tonumber] | max // 0')
     attempts="${attempts:-0}"
 
+    # A PASS is never turned into a block: at the cap the non-blocking pass is simply not sent.
+    [[ "$mode" == nonblockers && "$attempts" -ge "$MAX_ATTEMPTS" ]] && continue
     if [[ "$attempts" -ge "$MAX_ATTEMPTS" ]]; then
       if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY RUN would mark #${issue}/PR #${pr} agent:blocked (attempts=${attempts})"
@@ -1277,6 +1317,10 @@ redispatch_unresolved_reviews() {
     ename="$(engine_display "$engine")"
     engine_ready "$engine" || continue
 
+    if [[ "$DRY_RUN" -eq 1 && "$mode" == nonblockers ]]; then
+      log "DRY RUN would send the non-blocking findings of PR #${pr} to ${ename} (issue #${issue}, attempt $((attempts + 1)))"
+      continue
+    fi
     if [[ "$DRY_RUN" -eq 1 ]]; then
       log "DRY RUN would re-dispatch ${ename} for PR #${pr} (issue #${issue}, attempt $((attempts + 1)))"
       continue
@@ -1285,12 +1329,23 @@ redispatch_unresolved_reviews() {
     log "PR #${pr} ${trigger} — re-dispatching ${ename} (attempt $((attempts + 1)))"
     local checks_state; checks_state=$(gh pr checks "$pr" --repo "$REPO" --json state --jq \
       'if any(.[]; .state=="FAILURE") then "ci_failed" else "ci_ok_or_pending" end' 2>/dev/null || echo "ci_ok_or_pending")
+    [[ "$mode" == nonblockers ]] && checks_state="ci_ok_or_pending" # required CI is not red (checked above)
 
     local branch prompt_file
     branch=$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq .headRefName)
     prompt_file="$(mktemp /tmp/agent-dispatch-redispatch-XXXXXX.txt)"
     chmod 644 "$prompt_file"
-    if [[ "$checks_state" == "ci_failed" ]]; then
+    if [[ "$mode" == nonblockers ]]; then
+      {
+        echo "PR #${pr} in ${REPO} PASSED pr-brain's review and is cleared. The review also listed ${NB_COUNT} NON-BLOCKING finding(s)."
+        echo "Read the review comment via 'gh pr view ${pr} --json comments' yourself: the fenced json block whose head_sha is ${head_sha}"
+        echo "lists them (severity major or minor). Fix ONLY those listed findings: no scope creep, no refactors, no other files,"
+        echo "nothing the review did not name. If a finding is wrong or not worth fixing, leave it and say why in your final message."
+        echo "Re-run the verify commands from the original issue, then push to the existing branch ${branch}. Do not open a new PR."
+        echo "Do not merge. Do not change the PR's draft or ready state."
+        echo "${UNTRUSTED_GH_NOTE}"
+      } >"$prompt_file"
+    elif [[ "$checks_state" == "ci_failed" ]]; then
       {
         echo "PR #${pr} in ${REPO} has a FAILING CI check, not a review finding. Read the failing job log via"
         echo "'gh pr checks ${pr}' and 'gh run view <run-id> --log-failed', fix the actual failure, run the"
@@ -1358,7 +1413,13 @@ redispatch_unresolved_reviews() {
     fi
     rm -f "$prompt_file" "$agy_log"
 
-    gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked ${ename} ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
+    if [[ "$mode" == nonblockers ]]; then
+      # One comment carries both the counted attempt and the once-only stamp, so a half-written pair cannot loop.
+      gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked ${ename} once on the review's ${NB_COUNT} non-blocking finding(s). Awaiting the next pr-brain pass.
+<!-- nonblockers-sent:${head_sha} -->" >/dev/null
+    else
+      gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked ${ename} ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
+    fi
     # What happened is read from the PR, not from agy's say-so (a run can end "done" having pushed nothing:
     # the 2026-09-22 audit found attempt 1/3 burned by a run that changed no file). The attempt still counts:
     # three runs that change nothing are a PR Antigravity cannot fix, and that is exactly when to ask a human.

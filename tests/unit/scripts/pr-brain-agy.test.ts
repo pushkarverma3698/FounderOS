@@ -361,6 +361,10 @@ describe("where and how the reviewer runs", () => {
     expect(prompt).toContain(`--repo ${SLUG}`);
     expect(prompt).toContain("BRAIN-VERDICT: PASS");
     expect(prompt).toContain("BRAIN-VERDICT: FAIL");
+    // The review comment carries the typed verdict, so agent-dispatch can hand the non-blockers to the executor.
+    expect(prompt).toContain('"version":1');
+    expect(prompt).toContain(`"head_sha":"${head}"`);
+    expect(prompt).toMatch(/every non-blocking finding as severity major or minor/);
     expect(prompt).not.toMatch(/Invoke the pr-adversary skill/);
   });
 

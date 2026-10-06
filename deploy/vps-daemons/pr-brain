@@ -741,6 +741,13 @@ HOW THIS RUN DIFFERS FROM THE PROTOCOL ABOVE. These rules win wherever they conf
 4. Post your review as ONE pull request comment: gh pr comment ${pr} --repo ${slug} --body "...". GitHub refuses a
    formal approve or request-changes on your own account's PR; that is expected, a comment is the record.
    Do NOT post a "brain-reviewed" marker comment: the runner posts it.
+   End that comment with ONE fenced json block, the typed verdict agent-dispatch reads to pass non-blockers on:
+\`\`\`json
+{"version":1,"head_sha":"${head}","decision":"APPROVE","findings":[{"severity":"minor","file":"path","line":1,"claim":"what is wrong","evidence":"what shows it"}]}
+\`\`\`
+   decision is APPROVE when your BRAIN-VERDICT is PASS and REQUEST_CHANGES when it is FAIL.
+   List every non-blocking finding as severity major or minor, and every blocker as severity blocker.
+   head_sha is exactly ${head}.
 5. You do not set the PR's draft/ready state either: the runner makes it match your verdict. Do not run gh pr ready.
 6. You are headless and unattended. Never end without a verdict.
 
