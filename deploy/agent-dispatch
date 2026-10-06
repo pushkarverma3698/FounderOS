@@ -49,7 +49,8 @@
 #   AGENT_DISPATCH_LEASE_MIN    minutes before a stale agent:working claim is released, default: 60
 #   AGENT_DISPATCH_TIMEOUT_SEC  per-agy-invocation timeout, default: 2400 (keep the lease >= 10 min longer)
 #   AGENT_DISPATCH_ENV_FILE     dotenv with TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID for escalation, and
-#                               GOOGLE_GENERATIVE_AI_API_KEY (the "key file": its mtime is watched)
+#                               GOOGLE_GENERATIVE_AI_API_KEY (the "key file": its mtime is watched), and
+#                               AGENT_PIPELINE_V2 when the environment does not set it
 #   AGENT_DISPATCH_PROGRESS_POLL_SEC  seconds between "what's the CLI doing
 #                               right now" Telegram edits while it runs, default: 20
 #   AGENT_DISPATCH_CLAUDE_MODEL model Claude Code writes with, default: sonnet
@@ -152,6 +153,12 @@ KEY_MTIME_AT_START=0
 if [[ -f "$ENV_FILE" ]]; then
   KEY_MTIME_AT_START=$(file_mtime "$ENV_FILE")
   GEMINI_API_KEY=$(grep -m1 '^GOOGLE_GENERATIVE_AI_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  # The coding pipeline switch lives in .env on prod, not in cron's env (issue #956: Pass P was a silent no-op).
+  # The process env wins when it sets it; exported because scripts/pipeline-*.ts read it from their own env.
+  if [[ -z "${AGENT_PIPELINE_V2+x}" ]]; then
+    AGENT_PIPELINE_V2=$(grep -m1 '^AGENT_PIPELINE_V2=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+    export AGENT_PIPELINE_V2
+  fi
 fi
 CLAIM_PREFIX="<!-- agent-claimed:"
 ATTEMPT_PREFIX="<!-- agent-attempt:"
