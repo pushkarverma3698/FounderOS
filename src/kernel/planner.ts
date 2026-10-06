@@ -106,7 +106,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
         `- A message that needs several commands, or a command plus reasoning over its output, is a plan, not a command.`,
         ...(commands.some((c) => c.name === "goal")
           ? [
-              `- A goal in plain words ("my goal this month is 20 applications") is command goal with args "add <title> | target=<n>" plus by=YYYY-MM-DD when he gave a deadline (work it out from the clock line). Leave metric out: the founder picks how it is measured with buttons. Do not ask him for a metric key.`,
+              `- A goal in plain words ("my goal this month is 20 applications") is command goal with args shaped exactly like "add Apply to 20 jobs | target=20 by=2026-10-31": a short title, then a literal | before the options, then target=<n> and by=YYYY-MM-DD only when he gave a deadline (work it out from the clock line). Never drop the |. Leave metric out: the founder picks how it is measured with buttons. Do not ask him for a metric key.`,
             ]
           : []),
       ]
