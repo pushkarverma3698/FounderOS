@@ -225,3 +225,15 @@ describe("githubTool — list_commits ref default", () => {
     ]);
   });
 });
+
+describe("githubTool — get_pr input checks", () => {
+  beforeEach(() => {
+    process.env["GITHUB_TOKEN"] = "ghp_test";
+  });
+
+  it("rejects get_pr without a PR number instead of calling GitHub", async () => {
+    const result = await githubTool.execute({ action: "get_pr", owner: "o", repo: "r" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("number");
+  });
+});
