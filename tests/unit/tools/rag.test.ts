@@ -231,6 +231,13 @@ describe("searchTuricksBrainTool", () => {
     expect(result.data).toContain("ADR-001.md");
   });
 
+  it("excludes founder-only rows: a UnifiedTool has no thread, so it cannot tell the founder DM from a group (AG-027)", async () => {
+    mockSuccess([]);
+    await searchTuricksBrainTool.execute({ query: "capture" });
+
+    expect(mockSearchRagTable.mock.calls[0]![3]).toEqual({ filter: { excludeFounderOnly: true } });
+  });
+
   it("calls searchRagTable with the 'brain_memories' table and correct top_k", async () => {
     // The tool keeps its name (golden sets key on it) but the store moved under
     // it in ADR-038. See tests/unit/db/brain-store-parity.

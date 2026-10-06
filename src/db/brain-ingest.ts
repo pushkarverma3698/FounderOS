@@ -24,7 +24,7 @@ export interface IngestOptions {
  * Unified ingestion pipeline for the Turicks Brain (ADR-038).
  * Normalizes, embeds, and inserts memories into the canonical PostgreSQL store.
  */
-export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> {
+export async function brainIngest(opts: IngestOptions): Promise<{ id: string; outcome: "inserted" | "updated" | "unchanged" }> {
   // 1. Normalize
   const content = opts.content.trim();
   if (!content) {
@@ -53,7 +53,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
     const record = existing[0]!;
     if (record.content === content) {
       // Content unchanged, skip embedding and update
-      return { id: record.id };
+      return { id: record.id, outcome: "unchanged" };
     }
     
     // 3 & 4. Embed and Update
@@ -71,7 +71,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
       })
       .where(eq(brainMemories.id, record.id));
     
-    return { id: record.id };
+    return { id: record.id, outcome: "updated" };
   }
 
   // 3 & 4. Embed and Insert
@@ -94,5 +94,5 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
     })
     .returning({ id: brainMemories.id });
 
-  return { id: inserted[0]!.id };
+  return { id: inserted[0]!.id, outcome: "inserted" };
 }
