@@ -103,6 +103,33 @@ describe("flag off: nothing changes", () => {
     expect(sb.claudeRuns()).toBe(0);
     expect(sb.labelsOf(1)).toEqual([SPEC]);
   });
+
+  it("a flag in the process env wins over the env file", () => {
+    sb.writeEnvFile(`${readFileSync(sb.envFile, "utf8")}AGENT_PIPELINE_V2=1\n`);
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(writes(), { AGENT_PIPELINE_V2: "0" });
+    expect(sb.claudeRuns()).toBe(0);
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+  });
+});
+
+describe("flag only in the env file (prod: /opt/founderos/.env, nothing in cron's env)", () => {
+  it("turns Pass P on, and the spec CLI it spawns sees it too", () => {
+    // Issue #956: the flag lived only in .env, so Pass P was a silent no-op. The label reaching agent:spec-review
+    // needs scripts/pipeline-spec.ts (a child process reading process.env) to agree the flag is on.
+    sb.writeEnvFile(`${readFileSync(sb.envFile, "utf8")}AGENT_PIPELINE_V2="1"\n`);
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    // sb.tick builds the daemon's env from scratch, so AGENT_PIPELINE_V2 is absent unless passed here.
+    const r = sb.tick({
+      claudeHook: writes(),
+      claudeRc: 0,
+      env: { ...sb.gitEnv(), AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(), AGENT_DISPATCH_SPEC_WORK: work, FOUNDEROS_CONTRACTS_DIR: contracts },
+    });
+    expect(r.status).toBe(0);
+    expect(sb.claudeRuns()).toBe(1);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+    expect(sb.labelsOf(1)).not.toContain(SPEC);
+  });
 });
 
 describe("PASS: a verified spec becomes a committed test, a pending record and a card", () => {
