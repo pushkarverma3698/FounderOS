@@ -224,9 +224,10 @@ notify_photo() {
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with agent-dispatch)
+#   evidence-card.sh  ec_run: AGENT_PIPELINE_V2 only, a reviewed PR with an approved contract gets an evidence card instead of an auto-merge
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh ci-state.sh evidence-card.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -989,6 +990,18 @@ pr_verdict() {
 # (which starts on push, long before the next 20-min sweep) has already
 # finished — so an immediate merge attempt either succeeds because they're
 # actually green, or fails loud because they are not.
+# A PR with an approved contract (AGENT_PIPELINE_V2) is merged only by the founder's [Merge] tap on its evidence card:
+# ec_run builds and sends the card, and this sets merge_result without calling merge_cleared. Every other PR merges as before.
+merge_or_card() {
+  local pr="$1" head="$2" head_ref="$3" verdict="$4"
+  ec_run "$pr" "$head" "$head_ref" "$verdict"
+  case "$EC_STATE" in
+    carded) merge_result="held for your Merge button on the evidence card in Telegram" ;;
+    held) merge_result="HELD, not merged: ${EC_NOTE}" ;;
+    *) merge_cleared "$pr" "$verdict" ;;
+  esac
+}
+
 merge_cleared() {
   local pr="$1" verdict="$2" base promo_pr promo_url
   merge_result="not attempted (verdict was not CLEARED)"
@@ -1291,9 +1304,9 @@ while IFS= read -r repo; do
         gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->
 Carried forward from \`${last:0:8}\`: every commit since is pr-brain's own fix or a clean merge of \`${pr_base}\`, so no second review was spent." >>"$LOG" 2>&1 || true
         verdict=$(pr_verdict "$pr")
-        merge_cleared "$pr" "$verdict"
+        merge_or_card "$pr" "$head" "$head_ref" "$verdict"
         case "$merge_result" in
-          merged*|FAILED*) notify "🧠 ${repo_name}#${pr}: ${verdict}
+          merged*|FAILED*|HELD*) notify "🧠 ${repo_name}#${pr}: ${verdict}
 Merge: ${merge_result} (no new review — only pr-brain's own commits since the last one)
 $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
         esac
@@ -1407,7 +1420,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       log "$repo_name#$pr gate finished"
       verdict=$(pr_verdict "$pr")
       log "$repo_name#$pr verdict: $verdict"
-      merge_cleared "$pr" "$verdict"
+      merge_or_card "$pr" "$head" "$head_ref" "$verdict"
 
       notify "🧠 Gate done — ${repo_name}#${pr}
 ${verdict}
