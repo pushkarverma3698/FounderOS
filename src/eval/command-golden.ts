@@ -49,6 +49,7 @@ export const COMMAND_GOLDEN_TASKS: GoldenTask[] = [
   cmd("focus-show", "what am I supposed to be focused on", "focus"),
   cmd("projects-show", "list my active projects", "projects"),
   cmd("goals-show", "how am I doing against my goals", "goals"),
+  cmd("goal-add", "my goal this month is 20 applications", "goal"),
   cmd("remind-call", "remind me to call the landlord at 3pm", "remind"),
   cmd("newproject-site", "start a new project called naggar-site, a brochure site for a client", "newproject"),
   cmd("commands-list", "what can you do, list every command", "commands"),
