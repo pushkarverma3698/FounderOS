@@ -112,9 +112,10 @@ export function parseMetricSpec(
   spec: string,
   ctx: Pick<ParseContext, "resolveProfile">,
 ): { ok: true; key: MetricKey; arg: string | null } | { ok: false; issue: ParseIssue } {
-  const colon = spec.indexOf(":");
-  const keyText = (colon === -1 ? spec : spec.slice(0, colon)).toLowerCase();
-  const argText = colon === -1 ? null : spec.slice(colon + 1);
+  const trimmed = spec.trim();
+  const colon = trimmed.indexOf(":");
+  const keyText = (colon === -1 ? trimmed : trimmed.slice(0, colon)).trim().toLowerCase();
+  const argText = colon === -1 ? null : trimmed.slice(colon + 1).trim();
   const bad = (message: string, choices?: ChoiceRequest) => ({
     ok: false as const,
     issue: { field: "metric", message, ...(choices ? { choices } : {}) },
@@ -322,7 +323,11 @@ export function parseGoalCommand(rawArgs: string, ctx: ParseContext): ParseResul
  */
 export function goalArgsOf(messageText: string): string | null {
   const text = messageText.trim();
-  const first = words(text)[0] ?? "";
-  const name = first.split("@")[0] ?? "";
-  return name.toLowerCase() === "/goal" ? text.slice(first.length).trim() : null;
+  const match = /\/goal(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*)|$)/i.exec(text);
+  if (!match) return null;
+  let raw = (match[1] ?? "").trim();
+  const tagIdx = raw.search(/<\/[a-zA-Z0-9]+>/);
+  if (tagIdx !== -1) raw = raw.slice(0, tagIdx).trim();
+  return raw;
 }
+

@@ -298,6 +298,12 @@ describe("goalArgsOf — the arguments of a /goal message, read back from a mess
     expect(goalArgsOf("/goal")).toBe("");
   });
 
+  it("extracts /goal command from confirmation cards and wrapped messages", () => {
+    expect(goalArgsOf("Run this?\n/goal add Apply to 20 jobs | target=20")).toBe("add Apply to 20 jobs | target=20");
+    expect(goalArgsOf("Run this?\n<code>/goal add Apply to 20 jobs | target=20</code>")).toBe("add Apply to 20 jobs | target=20");
+    expect(goalArgsOf("❌ Not done. 1 thing to fix:\nCommand: <code>/goal add Ship a fix | target=1</code>")).toBe("add Ship a fix | target=1");
+  });
+
   it("does not read other commands or plain text as a /goal message", () => {
     expect(goalArgsOf("/goals")).toBeNull();
     expect(goalArgsOf("/task fix it")).toBeNull();
@@ -305,3 +311,4 @@ describe("goalArgsOf — the arguments of a /goal message, read back from a mess
     expect(goalArgsOf("")).toBeNull();
   });
 });
+
