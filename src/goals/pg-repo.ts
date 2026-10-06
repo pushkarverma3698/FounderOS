@@ -13,8 +13,13 @@
  *   - a row whose run died before sending (sent_at NULL, claimed_at older than the lease) is retaken
  *     (attempts + 1) — the plan's insert-and-do-nothing claim would have kept it forever, losing the day;
  *   - a delivered row, or one another run holds inside its lease, is left alone.
- * Two runs that start together serialise on the first contended row (same order, so no deadlock): the
- * second finds every row claimed and takes none, which is why one standup is one message.
+ * The second of two runs that start together finds every row claimed and takes none, which is why one
+ * standup is one message.
+ *
+ * ONE LOCK PER REVIEW DAY. Every transaction that writes a day's review rows (claim, save, finalize) first
+ * takes `lockReviewDay`. Without it they deadlocked (CI, 2026-10-05): the claim's ON CONFLICT DO UPDATE locks
+ * each row in goal-id order, even a row its WHERE refuses, while the other run's save locked the same rows
+ * in priority order. With the day lock, none of them can hold one review row while waiting for another.
  */
 
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
@@ -25,6 +30,12 @@ import type { ClaimSummary, FinalizeInput, GoalRepo, StatusChange } from "./repo
 import { GOAL_STATUSES, PACES, type GoalRow, type GoalStatus, type NewGoal, type Pace, type ReviewResult, type ReviewRow } from "./types.js";
 
 type Db = ReturnType<typeof getDb>;
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/** Serialises every writer of one day's review rows; released when the transaction ends. */
+async function lockReviewDay(tx: Tx, reviewDate: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agents.goal_reviews'), hashtext(${reviewDate}))`);
+}
 
 const OPEN: GoalStatus[] = ["active", "blocked"];
 
@@ -138,15 +149,18 @@ export function createPgGoalRepo(db: Db = getDb()): GoalRepo {
       if (ids.length === 0) return { claimed: [], alreadySent: [], leased: [] };
 
       const cutoff = new Date(now.getTime() - leaseMs);
-      const taken = await db
-        .insert(goalReviews)
-        .values(ids.map((goal_id) => ({ goal_id, review_date: reviewDate, claimed_at: now })))
-        .onConflictDoUpdate({
-          target: [goalReviews.goal_id, goalReviews.review_date],
-          set: { claimed_at: now, attempts: sql`${goalReviews.attempts} + 1` },
-          setWhere: and(isNull(goalReviews.sent_at), lt(goalReviews.claimed_at, cutoff)),
-        })
-        .returning({ goalId: goalReviews.goal_id, attempts: goalReviews.attempts });
+      const taken = await db.transaction(async (tx) => {
+        await lockReviewDay(tx, reviewDate);
+        return tx
+          .insert(goalReviews)
+          .values(ids.map((goal_id) => ({ goal_id, review_date: reviewDate, claimed_at: now })))
+          .onConflictDoUpdate({
+            target: [goalReviews.goal_id, goalReviews.review_date],
+            set: { claimed_at: now, attempts: sql`${goalReviews.attempts} + 1` },
+            setWhere: and(isNull(goalReviews.sent_at), lt(goalReviews.claimed_at, cutoff)),
+          })
+          .returning({ goalId: goalReviews.goal_id, attempts: goalReviews.attempts });
+      });
 
       const takenIds = new Set(taken.map((t) => t.goalId));
       const rest = ids.filter((id) => !takenIds.has(id));
@@ -168,6 +182,7 @@ export function createPgGoalRepo(db: Db = getDb()): GoalRepo {
     async saveReviewResults(reviewDate: string, results: readonly ReviewResult[]): Promise<void> {
       if (results.length === 0) return;
       await db.transaction(async (tx) => {
+        await lockReviewDay(tx, reviewDate);
         for (const r of results) {
           await tx
             .update(goalReviews)
@@ -180,6 +195,7 @@ export function createPgGoalRepo(db: Db = getDb()): GoalRepo {
     async finalizeReviews(input: FinalizeInput): Promise<void> {
       if (input.goalIds.length === 0 && input.transitions.length === 0) return;
       await db.transaction(async (tx) => {
+        await lockReviewDay(tx, input.reviewDate);
         if (input.goalIds.length > 0) {
           await tx
             .update(goalReviews)
