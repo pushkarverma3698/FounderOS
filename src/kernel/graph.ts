@@ -45,6 +45,8 @@ export interface KernelConfig {
   clock?: Clock;
   /** Durable log of finished turns, read by recall_conversation (Postgres in prod, absent in tests). */
   turnLog?: TurnLog;
+  /** Tools that pause for founder approval (the live HITL set): "what can you do" marks them "asks first". */
+  gatedTools?: ReadonlySet<string>;
   /** What the founder saw in Telegram outside the conversation (the screen log in prod, absent in tests). */
   screen?: ScreenSource;
 }
@@ -61,7 +63,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen, config.gatedTools))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))
