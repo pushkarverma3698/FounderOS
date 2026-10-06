@@ -76,7 +76,7 @@ const TOOLS = [
   "bash", "sh", "env", "awk", "sed", "grep", "tr", "cut", "head", "tail", "wc", "date", "mkdir", "rm", "mv", "cp",
   "cat", "find", "sleep", "basename", "dirname", "mktemp", "chmod", "chown", "hostname", "readlink", "stat", "git",
   "jq", "sort", "uniq", "touch", "ls", "id", "ln", "tee", "xargs", "comm", "diff", "sha256sum", "shasum", "realpath",
-  "true", "false", "test", "expr", "printf", "seq", "uname",
+  "true", "false", "test", "expr", "printf", "seq", "uname", "tar",
 ];
 
 /** git with its chatter captured: a local bare origin makes protocol-v2 push print warnings that are not test output. */
@@ -319,6 +319,7 @@ for a in "$@"; do case "$a" in
   */editMessageText) kind=edit ;;
   */deleteMessage) kind=delete ;;
   text=*) text="\${a#text=}" ;;
+  reply_markup=*) printf '%s\\n' "\${a#reply_markup=}" >>"$SENDS.markup" ;;
 esac; done
 printf '%s\\t%s\\n@@\\n' "$kind" "$text" >>"$SENDS"
 [ "\${CURL_RC:-0}" -ne 0 ] && exit "$CURL_RC"
@@ -327,6 +328,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   }
 
   private installTools(): void {
+    // The TS scripts the pipeline passes run on the node that runs the tests.
+    symlinkSync(process.execPath, join(this.tools, "node"));
     for (const t of TOOLS) {
       // /usr/sbin: macOS keeps chown there (Linux has it in /bin), and onboard-repo.sh needs it.
       for (const dir of ["/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]) {
@@ -644,6 +647,12 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     return this.telegram()
       .filter((c) => c.kind === "send" && !c.text.startsWith("🔧"))
       .map((c) => c.text);
+  }
+
+  /** The reply_markup of every Telegram call that carried one (inline keyboards), one JSON string per call. */
+  markups(): string[] {
+    const f = `${this.sends}.markup`;
+    return existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean) : [];
   }
 
   ghLog(): string {
