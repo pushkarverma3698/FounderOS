@@ -105,7 +105,12 @@ describe("nextBoardHealth — what a sweep's answers do to each board's streak",
     // "nothing answered" test below.
     const first = nextBoardHealth({}, [ok("greenhouse", "good"), notFound("greenhouse", "dead")], T0);
     expect(first).toEqual({
-      "greenhouse:dead": { streak: 1, first_failed_at: T0.toISOString(), last_probe_at: T0.toISOString() },
+      "greenhouse:dead": {
+        streak: 1,
+        first_failed_at: T0.toISOString(),
+        last_probe_at: T0.toISOString(),
+        reason: "HTTP 404",
+      },
     });
 
     const second = nextBoardHealth(first, [ok("greenhouse", "good"), notFound("greenhouse", "dead")], later(HALF_HOUR));
@@ -113,6 +118,7 @@ describe("nextBoardHealth — what a sweep's answers do to each board's streak",
       streak: 2,
       first_failed_at: T0.toISOString(),
       last_probe_at: later(HALF_HOUR).toISOString(),
+      reason: "HTTP 404",
     });
   });
 
