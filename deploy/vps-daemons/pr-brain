@@ -448,6 +448,9 @@ leave_down() {
 # that is the model that wrote the PR is not independent (ADR-046). A model whose quota is spent is skipped for
 # the rest of this sweep; the next tick asks again, because quota comes back.
 EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
+# Every model the executor may have fallen back to (AGENT_DISPATCH_MODELS), not only the first: the PR does not record which ran.
+EXECUTOR_MODELS=" ${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODELS} "
+EXECUTOR_MODELS="${EXECUTOR_MODELS//,/ }"
 SPENT_MODELS=" "
 RETIRED_MODELS=" "   # candidates agy does not know (a subset of SPENT_MODELS)
 QUOTA_SEEN=0         # 1 once any candidate hit a quota wall this sweep
@@ -460,7 +463,7 @@ REVIEW_EXCLUDE_PREFIX=""
 select_review_model() {
   local m
   for m in $REVIEW_MODELS; do
-    [[ "$m" == "$EXECUTOR_MODEL" ]] && continue
+    [[ "$EXECUTOR_MODELS" == *" $m "* ]] && continue
     [[ -n "$REVIEW_EXCLUDE_PREFIX" && "$m" == "$REVIEW_EXCLUDE_PREFIX"* ]] && continue
     [[ "$SPENT_MODELS" == *" $m "* ]] && continue
     MODEL="$m"
@@ -741,6 +744,13 @@ HOW THIS RUN DIFFERS FROM THE PROTOCOL ABOVE. These rules win wherever they conf
 4. Post your review as ONE pull request comment: gh pr comment ${pr} --repo ${slug} --body "...". GitHub refuses a
    formal approve or request-changes on your own account's PR; that is expected, a comment is the record.
    Do NOT post a "brain-reviewed" marker comment: the runner posts it.
+   End that comment with ONE fenced json block, the typed verdict agent-dispatch reads to pass non-blockers on:
+\`\`\`json
+{"version":1,"head_sha":"${head}","decision":"APPROVE","findings":[{"severity":"minor","file":"path","line":1,"claim":"what is wrong","evidence":"what shows it"}]}
+\`\`\`
+   decision is APPROVE when your BRAIN-VERDICT is PASS and REQUEST_CHANGES when it is FAIL.
+   List every non-blocking finding as severity major or minor, and every blocker as severity blocker.
+   head_sha is exactly ${head}.
 5. You do not set the PR's draft/ready state either: the runner makes it match your verdict. Do not run gh pr ready.
 6. You are headless and unattended. Never end without a verdict.
 
