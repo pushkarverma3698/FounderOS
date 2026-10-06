@@ -166,7 +166,7 @@ function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
-  async ({ action, owner, repo }, config) => {
+  async ({ action, owner, repo, number }, config) => {
     const threadId = threadIdFrom(config);
     const repeatGuard = _githubRepeatGuards.get(threadId);
     const failureCounter = _githubFailureCounters.get(threadId);
@@ -175,14 +175,14 @@ export const githubRead = tool(
     // input twice, stop hitting the API and force it to answer with what it has.
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
-    if (repeatGuard.shouldBlock("github_read", { action, owner, repo })) {
+    if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number })) {
       return (
         `You have already called github_read (action="${action}") with these exact ` +
         `arguments and the result is in the conversation above. Do NOT call github_read ` +
         `again — answer the founder now using the data you already retrieved.`
       );
     }
-    const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
+    const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}), ...(number ? { number } : {}) });
     if (!res.success) {
       return capConsecutiveToolFailures(
         failureCounter,
@@ -196,12 +196,15 @@ export const githubRead = tool(
     name: "github_read",
     description:
       "Read from GitHub (no approval needed). Actions: list_repos (optional owner), get_readme (owner+repo), get_stats, " +
-      "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo → recent commits). " +
+      "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo → recent commits), " +
+      "list_prs (owner+repo → open PRs), get_pr (owner+repo+number → state, draft, CI checks, diff, reviews, latest comments " +
+      "including pr-brain's GATE verdicts; use it for any 'review / is PR N ready' question). " +
       "For FounderOS queries use owner='pushkarverma3698' repo='FounderOS'.",
     schema: z.object({
-      action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits"]),
+      action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr"]),
       owner: z.string().optional().nullable(),
       repo: z.string().optional().nullable(),
+      number: z.number().int().optional().nullable().describe("PR number, for get_pr"),
     }),
   },
 );
@@ -347,7 +350,7 @@ export const projectWorkflow = tool(
         "Shell command for run_command. E.g. 'pnpm test', 'git checkout -b feat/x', 'gh pr create --title ...' "
       ),
       path: z.string().optional().nullable().describe("File/dir path for read_file or list_files (within ~/Projects)"),
-      cwd: z.string().optional().nullable().describe("Working dir for run_command (default: ~/Projects/founderos)"),
+      cwd: z.string().optional().nullable().describe("Working dir for run_command: a project name (e.g. \"oplify-messaging-api\") or an absolute path. Default: the running app's own tree."),
     }),
   },
 );
