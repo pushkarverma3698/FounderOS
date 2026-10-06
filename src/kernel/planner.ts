@@ -104,6 +104,11 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
         `- Choose "command" when the message asks for exactly what one command does ("where are we on oplify" → where, "what is the agent loop doing" → tasks, "build X" / "fix X in oplify" → task with the description as args). It beats a plan: the command is the tested path.`,
         `- args carry only what the command's usage line shows (a repo name, a row number, "tashi", a window like 2d). Never invent an argument; if a required one (which row, which text) is missing, reply asking for it instead.`,
         `- A message that needs several commands, or a command plus reasoning over its output, is a plan, not a command.`,
+        ...(commands.some((c) => c.name === "goal")
+          ? [
+              `- A goal in plain words ("my goal this month is 20 applications") is command goal with args "add <title> | target=<n>" plus by=YYYY-MM-DD when he gave a deadline (work it out from the clock line). Leave metric out: the founder picks how it is measured with buttons. Do not ask him for a metric key.`,
+            ]
+          : []),
       ]
     : [];
   return [
