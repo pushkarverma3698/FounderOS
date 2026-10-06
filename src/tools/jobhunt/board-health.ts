@@ -13,14 +13,17 @@
  * every seven days, so a revived board comes back without anyone editing the registry,
  * and the sweep says "skipped N dead boards" instead of listing them.
  *
- * WHAT COUNTS. Only a 404. A 429 is a rate limit, a 5xx is a host having a bad hour,
- * a timeout is a network: none of them says the board is gone, and treating one as
- * dead is how a healthy employer silently leaves the registry (see free-ats-source.ts,
- * RETRYABLE_STATUSES, which draws the same line). A neutral answer neither advances
- * nor resets a streak. A 200 removes the board from the record.
+ * WHAT COUNTS. A permanent-looking answer: a 4xx the host means as "no" (404, 403, 422,
+ * 400 ...) or a 200 that is not JSON (board-failure.ts has the rule and the 2026-10-05 prod
+ * numbers behind it; until then only 404 counted, so 5-6 boards failed every sweep for ever).
+ * A 429 is a rate limit, a 5xx is a host having a bad hour, a timeout is a network: none of
+ * them says the board is gone, and treating one as dead is how a healthy employer silently
+ * leaves the registry (see free-ats-source.ts, RETRYABLE_STATUSES, which draws the same line).
+ * A neutral answer neither advances nor resets a streak. A 200 removes the board from the record.
  *
- * THE PLATFORM GUARD. A 404 only counts on a platform where at least one board
- * answered in the same sweep. If Ashby moves its API, every ashby board 404s at once
+ * THE PLATFORM GUARD. A failure only counts on a platform where at least one board
+ * answered in the same sweep, and not where most of its boards failed permanently at once
+ * (platformsInOutage). If Ashby moves its API, every ashby board 404s at once
  * — that is a broken adapter, and counting it would mark the whole platform dead in
  * five hours and silence it for a week. (A platform whose every polled board is
  * really dead is never skipped either; it keeps being asked, which costs nothing.)
@@ -57,13 +60,15 @@ import { z } from "zod";
 
 import { dataRoot } from "../../core/data-root.js";
 import { childLogger } from "../../infra/logger.js";
+import { failureReason, platformsInOutage, type FailureFacts } from "./board-failure.js";
 
 const log = childLogger({ module: "jobhunt:board-health" });
 
 /**
- * Consecutive 404s after which a board stops being asked. Ten sweeps, half an hour
- * apart, is five hours: long enough that one bad hour at a host cannot fake it, short
- * enough that the noise ends the same working day.
+ * Consecutive permanent-looking failures after which a board stops being asked. Ten sweeps,
+ * half an hour apart (FREE_SWEEP_CRON), is five hours: long enough that one bad hour at a host
+ * (a CDN serving an HTML maintenance page, a WAF 403) cannot fake it, short enough that the
+ * noise ends the same working day. Fewer would let a single outage window retire live boards.
  */
 export const DEAD_BOARD_STREAK = 10;
 
@@ -84,7 +89,10 @@ export interface BoardRef {
  * the boards currently failing; the ones with `streak >= DEAD_BOARD_STREAK` are the
  * skipped ones.
  *
- * `last_probe_at` is the last time the board gave a DEFINITIVE 404, which is what the
+ * `reason` is why it last failed permanently ("HTTP 403", "HTML instead of JSON"), so the
+ * sweep can say why a board was retired; an entry written before it existed was a 404.
+ *
+ * `last_probe_at` is the last time the board gave a DEFINITIVE answer, which is what the
  * seven-day re-probe clock runs from. An inconclusive answer (429, 5xx) leaves it alone,
  * so a re-probe that met a rate limit is tried again on the next sweep rather than pushed
  * out another week.
@@ -93,17 +101,17 @@ export interface BoardHealthEntry {
   readonly streak: number;
   readonly first_failed_at: string;
   readonly last_probe_at: string;
+  readonly reason?: string;
 }
 
 /** `"<ats>:<token>"` → its streak. */
 export type BoardHealth = Readonly<Record<string, BoardHealthEntry>>;
 
 /** What one board's poll came back with, reduced to the two facts this module needs. */
-export interface BoardOutcome {
+export interface BoardOutcome extends FailureFacts {
   readonly board: BoardRef;
   readonly ok: boolean;
-  /** The HTTP status of a failed poll, when there was one. Absent for a timeout or a parse error. */
-  readonly status?: number;
+  /** The HTTP status of a failed poll, when there was one (FailureFacts). Absent for a timeout or a parse error. */
 }
 
 /** Everything the record needs from the outside world, so a test can inject both. */
@@ -162,6 +170,7 @@ export function nextBoardHealth(
 ): BoardHealth {
   // The platform guard: see the file header.
   const answered = new Set(outcomes.filter((o) => o.ok).map((o) => o.board.ats));
+  const outage = platformsInOutage(outcomes);
   const stamp = now.toISOString();
   const next: Record<string, BoardHealthEntry> = { ...health };
 
@@ -169,12 +178,15 @@ export function nextBoardHealth(
     const key = boardKey(outcome.board);
     if (outcome.ok) {
       delete next[key];
-    } else if (outcome.status === 404 && answered.has(outcome.board.ats)) {
+    } else if (answered.has(outcome.board.ats) && !outage.has(outcome.board.ats)) {
+      const reason = failureReason(outcome);
+      if (reason === undefined) continue;
       const prior = next[key];
       next[key] = {
         streak: (prior?.streak ?? 0) + 1,
         first_failed_at: prior?.first_failed_at ?? stamp,
         last_probe_at: stamp,
+        reason,
       };
     }
   }
@@ -213,6 +225,7 @@ const entrySchema = z.object({
   streak: z.number().int().nonnegative(),
   first_failed_at: z.string(),
   last_probe_at: z.string(),
+  reason: z.string().optional(),
 });
 const healthSchema = z.record(z.string(), entrySchema);
 
@@ -312,12 +325,12 @@ function inOrder<T>(task: () => Promise<T>): Promise<T> {
 
 /**
  * Read the record and split the registry into the boards to ask and the boards that sit
- * this sweep out. Never throws.
+ * this sweep out. Never throws. `health` is the record as read, for the caller's summary.
  */
 export async function planBoardPolls<T extends BoardRef>(
   boards: readonly T[],
   deps: BoardHealthDeps,
-): Promise<{ poll: T[]; skipped: T[] }> {
+): Promise<{ poll: T[]; skipped: T[]; health: BoardHealth }> {
   const health = await loadBoardHealth(deps.root);
   const plan = splitBySkip(boards, health, deps.now());
   const reprobing = plan.poll.filter((b) => (health[boardKey(b)]?.streak ?? 0) >= DEAD_BOARD_STREAK).length;
@@ -327,11 +340,18 @@ export async function planBoardPolls<T extends BoardRef>(
       "Dead boards sat out this sweep; those due a weekly re-probe were asked again",
     );
   }
-  return plan;
+  return { ...plan, health };
+}
+
+/** The record after a sweep, and the boards that crossed the threshold in it ("<ats>/<token>"). */
+export interface RecordedOutcomes {
+  readonly health: BoardHealth;
+  readonly newlyRetired: readonly string[];
 }
 
 /**
- * Fold a sweep's answers into the record and write it. Never throws.
+ * Fold a sweep's answers into the record and write it. Never throws; resolves to undefined when
+ * the record could not be written, so the caller falls back to the record it read.
  *
  * The record is RE-READ inside the queue rather than carried over from `planBoardPolls`,
  * so an overlapping sweep's increments are composed, not overwritten. Nothing is written
@@ -340,15 +360,15 @@ export async function planBoardPolls<T extends BoardRef>(
 export async function recordBoardOutcomes(
   outcomes: readonly BoardOutcome[],
   deps: BoardHealthDeps,
-): Promise<void> {
+): Promise<RecordedOutcomes | undefined> {
   const path = boardHealthPath(deps.root);
   try {
-    await inOrder(async () => {
+    return await inOrder(async () => {
       const current = await loadBoardHealth(deps.root);
       const next = nextBoardHealth(current, outcomes, deps.now());
-      if (serialise(current) === serialise(next)) return;
+      if (serialise(current) === serialise(next)) return { health: next, newlyRetired: [] };
       await saveBoardHealth(deps.root, next);
-      announceNewlyDead(current, next);
+      return { health: next, newlyRetired: announceNewlyDead(current, next) };
     });
   } catch (err) {
     // allow-failopen: a record that cannot be written costs only the skip (the dead boards are asked again, as before); it must not cost the sweep.
@@ -358,18 +378,22 @@ export async function recordBoardOutcomes(
       `Could not persist ${BOARD_HEALTH_FILE} at ${path} — dead boards keep being asked every sweep. ` +
         `Fix: make FOUNDEROS_DATA_ROOT (default /opt/founderos-data) writable by the service user.`,
     );
+    return undefined;
   }
 }
 
 /** One log line per board, the moment it crosses the threshold: the trail that says which token to remove. */
-function announceNewlyDead(before: BoardHealth, after: BoardHealth): void {
+function announceNewlyDead(before: BoardHealth, after: BoardHealth): string[] {
+  const newly: string[] = [];
   for (const [key, entry] of Object.entries(after)) {
     if (entry.streak >= DEAD_BOARD_STREAK && (before[key]?.streak ?? 0) < DEAD_BOARD_STREAK) {
+      newly.push(key.replace(":", "/"));
       log.warn(
-        { board: key, since: entry.first_failed_at },
-        `Board ${key} answered 404 on ${entry.streak} consecutive sweeps and is marked dead — skipped from now on, ` +
-          `asked again once a week. If it stays dead, remove it from docs/strategy/data/free-ats-boards.csv.`,
+        { board: key, since: entry.first_failed_at, reason: entry.reason },
+        `Board ${key} failed (${entry.reason ?? "HTTP 404"}) on ${entry.streak} consecutive sweeps and is marked dead — ` +
+          `skipped from now on, asked again once a week. If it stays dead, remove it from docs/strategy/data/free-ats-boards.csv.`,
       );
     }
   }
+  return newly;
 }

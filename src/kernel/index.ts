@@ -39,6 +39,7 @@ export {
   retryMessage,
   MAX_ATTEMPTS_PER_STEP,
 } from "./supervisor.js";
+export { answerSelfKnowledge, type SelfKnowledgeDepartment } from "./self-knowledge.js";
 export { isKernelTerminalError, describeInterceptedError } from "./errors.js";
 export {
   makeAgentNode,
