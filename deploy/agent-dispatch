@@ -241,9 +241,10 @@ notify_long() {
 #   claude-run.sh   claude_run: one Claude Code turn the same way; the token travels on stdin
 #   engine.sh       which CLI an issue goes to, and Claude Code's wall (claude_blocked / record_claude_block)
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
+#   pass-p.sh       pass_p_run: AGENT_PIPELINE_V2 only, writes the spec + locked test for a new coding ask (a no-op otherwise)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -1403,6 +1404,8 @@ run_tick() {
     release_stale_claims
     # A wall the claim just hit is already on disk, so engine_ready keeps this pass off that CLI.
     redispatch_unresolved_reviews
+    # Flag off: returns at once. Flag on: at most one new coding ask gets its spec written and sent for approval.
+    pass_p_run
   done
 
   total_claims=0
