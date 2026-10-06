@@ -30,8 +30,9 @@ import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
-import { HttpStatusError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
-import { planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
+import { HttpStatusError, NotJsonError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
+import { DEAD_BOARD_STREAK, planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
+import { describeFailedBoards, retiredBoards, type BoardReason } from "./board-failure.js";
 import { getAdapter } from "./adapters/index.js";
 import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
@@ -175,7 +176,14 @@ const boardCache: EtagCache = createEtagCache();
 
 export type BoardFetch =
   | { readonly ok: true; readonly board: FreeBoard; readonly candidates: readonly FreeCandidate[] }
-  | { readonly ok: false; readonly board: FreeBoard; readonly error: string; readonly status?: number };
+  | {
+      readonly ok: false;
+      readonly board: FreeBoard;
+      readonly error: string;
+      readonly status?: number;
+      /** Set when a 200 came back that was not JSON (board-failure.ts counts it as permanent). */
+      readonly kind?: "not-json";
+    };
 
 /**
  * Whether asking this host again could plausibly produce a different answer.
@@ -186,6 +194,7 @@ export type BoardFetch =
  * is taken as final.
  */
 function isRetryable(err: unknown): boolean {
+  if (err instanceof NotJsonError) return false; // the same page comes back; three asks is three times the traffic
   return err instanceof HttpStatusError ? RETRYABLE_STATUSES.has(err.status) : true;
 }
 
@@ -245,7 +254,8 @@ export async function fetchBoard(
     }
   } catch (err) {
     const status = err instanceof HttpStatusError ? err.status : undefined;
-    return { ok: false, board, error: (err as Error).message, ...(status === undefined ? {} : { status }) };
+    const kind = err instanceof NotJsonError ? ({ kind: "not-json" } as const) : {};
+    return { ok: false, board, error: (err as Error).message, ...(status === undefined ? {} : { status }), ...kind };
   }
 
   try {
@@ -259,47 +269,12 @@ export interface BoardSweep {
   readonly candidates: readonly FreeCandidate[];
   /** One entry per board that failed, named so a rotated token is findable. */
   readonly failures: readonly string[];
-  /** Boards that sat out after ten straight 404s ("<ats>/<token>"), or absent when no record was kept. */
+  /** Boards that sat out after ten straight permanent failures ("<ats>/<token>"), or absent when no record was kept. */
   readonly skippedDead?: readonly string[];
+  /** Every retired board and why, including one being re-probed this sweep. Absent when no record was kept. */
+  readonly retired?: readonly BoardReason[];
   /** Boards actually asked this sweep, not boards on file. */
   readonly boardsPolled: number;
-}
-
-/** Patterns beyond this are folded into a "+N more" tail rather than dropped. */
-const SUMMARY_PATTERN_CAP = 6;
-
-/**
- * Every failure in the sweep, as counts per (platform, reason).
- *
- * REPLACES `failures.slice(0, 3)`, which was the reporting half of the bug this
- * module's fourth failure rule describes: the ledger stored three strings, and
- * because the sweep polls Greenhouse first those three were always the same
- * harmless 404s. Thirty-six Recruitee rate limits per sweep never once appeared
- * anywhere the founder looks.
- *
- * Counts rather than names, because the founder's question is "is a platform
- * broken", not "which of 623 tokens". The names are still in the logs, and
- * `failures` itself is untouched for the callers that want them. Bounded on
- * purpose: a total outage must write a readable line to the ledger, not 623 of
- * them.
- */
-export function summariseFailures(failures: readonly string[]): string {
-  if (failures.length === 0) return "";
-
-  const counts = new Map<string, number>();
-  for (const failure of failures) {
-    // Our own format, produced in sweepBoards: "<ats>/<token>: <error>".
-    const match = /^([^/]+)\/[^:]*:\s*(.*)$/.exec(failure);
-    const key = match ? `${match[1]} ${match[2]}` : failure;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-
-  const ranked = [...counts].sort((a, b) => b[1] - a[1]);
-  const shown = ranked.slice(0, SUMMARY_PATTERN_CAP).map(([key, n]) => `${key} ×${n}`);
-  const hidden = ranked.length - shown.length;
-  if (hidden > 0) shown.push(`+${hidden} other pattern(s)`);
-
-  return `${failures.length} board(s) failed: ${shown.join("; ")}`;
 }
 
 /**
@@ -342,7 +317,7 @@ export async function sweepBoards(
     )
   ).flat();
 
-  if (health) await recordBoardOutcomes(results, health);
+  const recorded = health ? await recordBoardOutcomes(results, health) : undefined;
 
   const candidates: FreeCandidate[] = [];
   const failures: string[] = [];
@@ -364,8 +339,21 @@ export async function sweepBoards(
     log.warn({ ...skips }, `Board registry rows dropped at parse — ${describeSkips(skips)}`);
   }
 
+  // The registry boards past the threshold, from the record AFTER this sweep (or the one read, if it could not be written).
+  const retired = "health" in plan ? retiredBoards(boards, recorded?.health ?? plan.health, DEAD_BOARD_STREAK) : undefined;
+
+  // Each failure NAMED, because "5 failed" is not something anyone can fix: board id + reason, and the retired ids.
   log.info(
-    { boards: plan.poll.length, failed: failures.length, skippedDead: plan.skipped.length, candidates: candidates.length },
+    {
+      boards: plan.poll.length,
+      failed: failures.length,
+      failedBoards: describeFailedBoards(results),
+      skippedDead: plan.skipped.length,
+      retired: retired?.length ?? 0,
+      retiredBoards: (retired ?? []).map((r) => r.board),
+      newlyRetired: recorded?.newlyRetired ?? [],
+      candidates: candidates.length,
+    },
     "Free board sweep complete",
   );
 
@@ -373,6 +361,7 @@ export async function sweepBoards(
     candidates,
     failures,
     skippedDead: plan.skipped.map((b) => `${b.ats}/${b.token}`),
+    ...(retired === undefined ? {} : { retired }),
     boardsPolled: plan.poll.length,
   };
 }
@@ -383,6 +372,7 @@ export async function sweepBoards(
 // past the 400-line budget. Re-exported so every existing import site and test
 // keeps resolving here, same as the transport and mapper splits before it.
 export { hydrateDescriptions, DESCRIPTION_TIMEOUT_MS } from "./free-ats-hydrate.js";
+export { summariseFailures } from "./free-ats-failure-summary.js";
 
 // decodeJobBody moved to free-ats-mappers.ts (2026-08-20) — Recruitee's
 // mapper needs the same tag-to-space HTML decode this Greenhouse hydration
