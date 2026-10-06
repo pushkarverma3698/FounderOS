@@ -49,3 +49,21 @@ export async function jobIdsByDedupeKey(
     );
   return new Map(rows.map((r) => [r.key, shortJobId(r.id)] as [string, string]));
 }
+
+/** The stored rows (full id, company) for a set of postings, keyed by dedupe identity: what a 📝 Draft button needs. */
+export async function jobRowsByDedupeKey(
+  keys: readonly string[],
+  opts: { tenantId?: string; profileId: string },
+): Promise<{ key: string; id: string; company: string }[]> {
+  if (keys.length === 0) return [];
+  return getDb()
+    .select({ key: jobApplications.dedupe_key, id: jobApplications.id, company: jobApplications.company })
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.profile_id, opts.profileId),
+        inArray(jobApplications.dedupe_key, [...keys]),
+      ),
+    );
+}

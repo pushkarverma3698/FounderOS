@@ -16,6 +16,7 @@ import {
   sendDueDigest,
   EMPTY_PENDING,
   type DigestDeps,
+  type DigestKeyboard,
   type DigestState,
 } from "../../../src/tools/jobhunt/alert-digest.js";
 import { DEFAULT_PROFILE_ID, getProfile } from "../../../src/tools/jobhunt/profile-config.js";
@@ -23,6 +24,11 @@ import { DEFAULT_PROFILE_ID, getProfile } from "../../../src/tools/jobhunt/profi
 const TZ = "Asia/Kolkata";
 const at = (iso: string) => new Date(iso);
 const WIFE_ID = "wife-nl-finance";
+/** A valid uuid made from a key, stable per key. */
+const UUID_OF = (key: string): string => {
+  const hex = Buffer.from(key).toString("hex").padEnd(32, "0").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 
 function row(company: string, outcome: "pass" | "flag" = "pass") {
   const key = company.toLowerCase() + "::finance controller";
@@ -77,6 +83,7 @@ describe("mergePending", () => {
 function harness(profileIds: readonly string[]) {
   const store = new Map<string, DigestState>();
   const sent: string[] = [];
+  const keyboards: (DigestKeyboard | undefined)[] = [];
   const failNext = { value: false };
   for (const id of profileIds) store.set(id, { pending: EMPTY_PENDING, lastDigestAt: null });
   const deps: DigestDeps = {
@@ -84,12 +91,15 @@ function harness(profileIds: readonly string[]) {
     tz: TZ,
     load: async () => new Map(store),
     ids: async (_profile, keys) => new Map(keys.map((k) => [k, "j" + k.length.toString(16).padStart(7, "0")])),
-    send: async (text) => {
+    // A row's uuid is derived from its dedupe key so a test can name the button it expects.
+    drafts: async (_profile, keys) => keys.map((k) => ({ key: k, id: UUID_OF(k), company: (k.split("::")[0] ?? k).replace(/^./, (c) => c.toUpperCase()) })),
+    send: async (text, keyboard) => {
       if (failNext.value) {
         failNext.value = false;
         throw new Error("telegram down");
       }
       sent.push(text);
+      keyboards.push(keyboard);
     },
     mark: async (profileId, when) => {
       store.set(profileId, { pending: EMPTY_PENDING, lastDigestAt: when });
@@ -99,7 +109,7 @@ function harness(profileIds: readonly string[]) {
     const prev = store.get(profileId) ?? { pending: EMPTY_PENDING, lastDigestAt: null };
     store.set(profileId, { ...prev, pending: mergePending(prev.pending, rows, backfill) });
   };
-  return { deps, store, sent, buffer, failNext };
+  return { deps, store, sent, keyboards, buffer, failNext };
 }
 
 describe("a whole day of sweeps", () => {
@@ -208,5 +218,40 @@ describe("what the digest says", () => {
     h.buffer(DEFAULT_PROFILE_ID, [], 9);
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
     expect(h.sent[0]).toContain("9 older roles");
+  });
+});
+
+describe("the Draft buttons under the batch", () => {
+  const buttonsOf = (kb: DigestKeyboard | undefined) => (kb ?? []).flat();
+
+  it("carries a 📝 Draft button for the first three passing roles, so the apply loop starts with a tap", async () => {
+    const h = harness([DEFAULT_PROFILE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, ["Alpha", "Beta", "Gamma", "Delta"].map((c) => row(c)));
+    await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
+    const buttons = buttonsOf(h.keyboards[0]);
+    expect(buttons.map((b) => b.text)).toEqual(["📝 Draft — Alpha", "📝 Draft — Beta", "📝 Draft — Gamma"]);
+    expect(buttons[0]?.callback_data).toBe(`jh:d:${UUID_OF("alpha::finance controller")}`);
+  });
+
+  it("skips flagged roles and sends no keyboard when no role passed", async () => {
+    const h = harness([DEFAULT_PROFILE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, [row("Flagged", "flag")]);
+    await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
+    expect(h.sent.length).toBe(1);
+    expect(buttonsOf(h.keyboards[0])).toEqual([]);
+  });
+
+  it("still sends the batch, without buttons, when the row lookup fails", async () => {
+    const h = harness([DEFAULT_PROFILE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
+    const failing: DigestDeps = {
+      ...h.deps,
+      drafts: async () => {
+        throw new Error("db down");
+      },
+    };
+    await sendDueDigest(at("2026-10-05T04:00:00Z"), failing);
+    expect(h.sent.length).toBe(1);
+    expect(buttonsOf(h.keyboards[0])).toEqual([]);
   });
 });
