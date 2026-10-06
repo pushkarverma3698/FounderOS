@@ -20,17 +20,12 @@
 import { InlineKeyboard } from "grammy";
 import type { JobApplication } from "../db/schema.js";
 import { updateApplicationStage } from "../db/job-queries.js";
+import { JOB_CALLBACK_PREFIX, jobCallbackData, type JobAction } from "../tools/jobhunt/job-ref.js";
 
-/** Callback prefix. Short: Telegram caps callback_data at 64 bytes and a UUID is 36. */
-export const JOB_CALLBACK_PREFIX = "jh:";
-
-export type JobAction = "draft" | "applied";
+// The payload format is shared with the batched digest (tools), so it is defined there.
+export { JOB_CALLBACK_PREFIX, jobCallbackData, type JobAction };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function jobCallbackData(action: JobAction, rowId: string): string {
-  return `${JOB_CALLBACK_PREFIX}${action === "draft" ? "d" : "a"}:${rowId}`;
-}
 
 /** Parse a tapped payload; null for anything that is not ours or has a malformed id. */
 export function parseJobCallback(data: string): { action: JobAction; rowId: string } | null {
