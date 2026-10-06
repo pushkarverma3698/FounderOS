@@ -136,6 +136,7 @@ describe("planner prompt — goals from plain words", () => {
     const prompt = buildPlannerPrompt([], [goal]);
     expect(prompt).toContain("goal add");
     expect(prompt).toContain("Leave metric out");
+    expect(prompt).toContain("add Apply to 20 jobs | target=20");
   });
 
   it("says nothing about goals when the command is not offered", () => {
