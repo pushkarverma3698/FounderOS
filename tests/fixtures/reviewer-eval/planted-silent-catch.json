@@ -1,0 +1,14 @@
+{
+  "id": "planted-silent-catch",
+  "source": "planted",
+  "context": "Task: record an audit row after a calendar invite is sent. Repo rule: fail-open catches need an allow-failopen tag with a reason.",
+  "diff": "diff --git a/src/agents/agent-tools/calendar-invite.ts b/src/agents/agent-tools/calendar-invite.ts\n--- a/src/agents/agent-tools/calendar-invite.ts\n+++ b/src/agents/agent-tools/calendar-invite.ts\n@@ -48,5 +48,11 @@ export async function sendInvite(input: InviteInput, deps: InviteDeps): Promise<ToolResult> {\n   const sent = await deps.calendar.insert(input.event);\n   if (!sent.ok) return fail(\"calendar\", sent.error);\n \n+  try {\n+    await deps.db.insertActionLog({ tool: \"calendar_invite\", ref: sent.id, at: deps.now() });\n+  } catch {\n+    // best effort\n+  }\n+\n   return ok({ id: sent.id, link: sent.htmlLink });\n }\n",
+  "planted_defects": [
+    {
+      "file": "src/agents/agent-tools/calendar-invite.ts",
+      "line": 53,
+      "description": "An empty catch swallows a failed action_log insert with no allow-failopen tag. The invite is reported as done while the audit row that proves it is silently missing.",
+      "keyword": "catch|swallow|allow-failopen|fail-open|silent"
+    }
+  ]
+}

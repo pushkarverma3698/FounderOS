@@ -36,11 +36,11 @@ describe("provider-config", () => {
     expect(getGmailBackend()).toBe("gws");
   });
 
-  it("honours GMAIL_BACKEND=composio for rollback", async () => {
+  it("treats a leftover GMAIL_BACKEND=composio as gws (Composio is gone)", async () => {
     process.env["GMAIL_BACKEND"] = "composio";
     vi.resetModules();
     const { getGmailBackend } = await import("../../../src/infra/provider-config.js");
-    expect(getGmailBackend()).toBe("composio");
+    expect(getGmailBackend()).toBe("gws");
   });
 
   it("defaults Calendar backend to gws", async () => {

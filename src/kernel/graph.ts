@@ -24,6 +24,7 @@ import type { PlannedCommand } from "./contracts.js";
 import { makePlanNode, type CommandCatalogEntry, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
 import type { Clock } from "../core/time.js";
 import type { TurnLog } from "./turn-log.js";
+import type { ScreenSource } from "./screen.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -46,6 +47,8 @@ export interface KernelConfig {
   turnLog?: TurnLog;
   /** Tools that pause for founder approval (the live HITL set): "what can you do" marks them "asks first". */
   gatedTools?: ReadonlySet<string>;
+  /** What the founder saw in Telegram outside the conversation (the screen log in prod, absent in tests). */
+  screen?: ScreenSource;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -60,7 +63,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.gatedTools))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.gatedTools, config.screen))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))

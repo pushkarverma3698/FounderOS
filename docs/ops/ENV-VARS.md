@@ -26,7 +26,6 @@ the model/runtime keys intentionally differ.
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Google GenAI (legacy direct path) | as needed |
 | `ANTHROPIC_API_KEY` | Claude-judge gate (rule #21) | ⚠️ **PLACEHOLDER in both — needs a real key** |
 | `GITHUB_TOKEN` | engineering dept github_r/w | rotate per GitHub PAT expiry |
-| `COMPOSIO_API_KEY` | Composio (gmail/calendar/linkedin) | see email gap below |
 | `FIRECRAWL_API_KEY` | web search/scrape | as needed |
 
 ## Email / calendar (currently DOWN in prod — see audit)
@@ -35,7 +34,6 @@ the model/runtime keys intentionally differ.
 | `GMAIL_BACKEND` / `CALENDAR_BACKEND` | `gws` | backend selected |
 | `GWS_BIN` | path to Google Workspace CLI | ⚠️ **EMPTY in prod** → gws "file cannot be empty" |
 | `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` | gws OAuth creds file | missing on box |
-| `COMPOSIO_ENTITY_GMAIL` / `COMPOSIO_ENTITY_LINKEDIN` | Composio entity IDs | set (`turicks-work` / `turicks-internal`) |
 
 ## LinkedIn
 | Key | Purpose | Status |

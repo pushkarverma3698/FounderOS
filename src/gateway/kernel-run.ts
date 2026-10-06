@@ -22,6 +22,7 @@ import { getPendingInterrupt, resolveInterrupt, logLlmCost } from "../db/queries
 import { BudgetExceededError, enforceRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
+import { screenQuiet } from "../infra/screen-log.js";
 import { kernelPromptHash } from "./prompt-version.js";
 import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
@@ -239,7 +240,8 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       // A failed turn goes out as the plain-words card with 🔁 Retry (failure-card.ts).
       const card = failureCardFor(res as never, { turnId: trace.turnId, profileId });
-      await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
+      // Quiet: the reply is already in history; the screen log holds what the founder saw outside it.
+      await screenQuiet(() => (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply)));
     } catch (err) {
       await ack.remove(); // a gate or getKernel() failed before the stream took the ack over; idempotent otherwise
       const failure = budget ? failureFor(err, budget) : err;
@@ -329,7 +331,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
         const reply = kernelReply(res as never);
         trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
         const card = failureCardFor(res as never, { turnId: trace.turnId });
-        await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
+        await screenQuiet(() => (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply)));
 
       } finally {
         // AG-015/B7: runs on every exit above — success, re-pause, timeout,

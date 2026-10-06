@@ -26,7 +26,6 @@ export interface BootCapabilityInput {
   OPENAI_API_KEY?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
   OPENROUTER_API_KEY?: string | undefined;
-  COMPOSIO_API_KEY?: string | undefined;
   GMAIL_BACKEND?: string | undefined;
   CALENDAR_BACKEND?: string | undefined;
   LINKEDIN_BACKEND?: string | undefined;
@@ -100,30 +99,16 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
     },
     {
       name: "Google Workspace (gws)",
-      live: (env.GMAIL_BACKEND?.trim() || "gws") !== "composio" || has(env.COMPOSIO_API_KEY),
+      live: true,
       detail: `GMAIL_BACKEND=${env.GMAIL_BACKEND?.trim() || "gws"} CALENDAR_BACKEND=${env.CALENDAR_BACKEND?.trim() || env.GMAIL_BACKEND?.trim() || "gws"} — gws requires CLI + auth on host`,
     },
     {
       name: "LinkedIn (direct API)",
-      live:
-        (env.LINKEDIN_BACKEND?.trim() || "direct") === "composio"
-          ? has(env.COMPOSIO_API_KEY)
-          : has(env.LINKEDIN_ACCESS_TOKEN) && has(env.LINKEDIN_AUTHOR_URN),
+      live: has(env.LINKEDIN_ACCESS_TOKEN) && has(env.LINKEDIN_AUTHOR_URN),
       detail:
-        (env.LINKEDIN_BACKEND?.trim() || "direct") === "composio"
-          ? has(env.COMPOSIO_API_KEY)
-            ? "LINKEDIN_BACKEND=composio"
-            : "set COMPOSIO_API_KEY or switch to direct"
-          : has(env.LINKEDIN_ACCESS_TOKEN) && has(env.LINKEDIN_AUTHOR_URN)
-            ? "LINKEDIN_ACCESS_TOKEN + AUTHOR_URN set"
-            : "set LINKEDIN_ACCESS_TOKEN + LINKEDIN_AUTHOR_URN",
-    },
-    {
-      name: "Composio (legacy fallback)",
-      live: has(env.COMPOSIO_API_KEY),
-      detail: has(env.COMPOSIO_API_KEY)
-        ? "COMPOSIO_API_KEY set — rollback path available"
-        : "not configured (expected when using gws + direct LinkedIn)",
+        has(env.LINKEDIN_ACCESS_TOKEN) && has(env.LINKEDIN_AUTHOR_URN)
+          ? "LINKEDIN_ACCESS_TOKEN + AUTHOR_URN set"
+          : "set LINKEDIN_ACCESS_TOKEN + LINKEDIN_AUTHOR_URN",
     },
     {
       name: "GitHub tools",

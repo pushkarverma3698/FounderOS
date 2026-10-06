@@ -74,12 +74,16 @@ _agy_tg_creds() {
 agy_tg_send() {
   tg_is_quiet 2>/dev/null && return 0
   _agy_tg_creds || return 0
-  curl -s --max-time 20 \
+  local mid
+  mid="$(curl -s --max-time 20 \
     "https://api.telegram.org/bot${AGY_TG_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${AGY_TG_CHAT}" \
     --data-urlencode "text=$1" \
     --data "disable_web_page_preview=true" 2>/dev/null \
-    | jq -r '.result.message_id // empty' 2>/dev/null
+    | jq -r '.result.message_id // empty' 2>/dev/null || true)"
+  [[ -n "$mid" ]] || return 0
+  declare -F tg_screen_log >/dev/null && tg_screen_log "$1" "$AGY_TG_CHAT" "$mid"
+  printf '%s\n' "$mid"
   return 0
 }
 
@@ -88,11 +92,13 @@ agy_tg_edit() {
   tg_is_quiet 2>/dev/null && return 0
   [[ -n "${1:-}" ]] || return 0
   _agy_tg_creds || return 0
-  curl -s -o /dev/null --max-time 20 \
+  if curl -sf -o /dev/null --max-time 20 \
     "https://api.telegram.org/bot${AGY_TG_TOKEN}/editMessageText" \
     --data-urlencode "chat_id=${AGY_TG_CHAT}" \
     --data "message_id=$1" \
-    --data-urlencode "text=$2" || true
+    --data-urlencode "text=$2"; then
+    declare -F tg_screen_log >/dev/null && tg_screen_log "$2" "$AGY_TG_CHAT" "$1"
+  fi
   return 0
 }
 

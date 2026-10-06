@@ -11,7 +11,7 @@
  * always-too-short draft and proves it reaches the gate in ≤ BRAND_MAX_RETRIES+1
  * calls — never an unbounded loop.
  *
- * interrupt() and the Composio send are mocked so we exercise the bounding logic,
+ * interrupt() and the send are mocked so we exercise the bounding logic,
  * not the network (the note in the task: the real send 401s on an invalid key —
  * irrelevant here; we test that the validator loop terminates).
  */
