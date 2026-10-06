@@ -128,10 +128,12 @@ function unreachableNotice(err: unknown): string {
 export async function sendToJobsChat(
   text: string,
   parseMode: "HTML" | "Markdown" = "HTML",
+  keyboard: readonly (readonly { readonly text: string; readonly callback_data: string }[])[] = [],
 ): Promise<void> {
   const target = jobsChatId();
+  const markup = keyboard.length > 0 ? { reply_markup: { inline_keyboard: keyboard.map((row) => row.map((b) => ({ ...b }))) } } : {};
   try {
-    await api().sendMessage(target, text, { parse_mode: parseMode });
+    await api().sendMessage(target, text, { parse_mode: parseMode, ...markup });
   } catch (err) {
     if (target === defaultChatId() || !isChatUnreachable(err)) throw err;
     log.error(
@@ -141,7 +143,7 @@ export async function sendToJobsChat(
     // Two sends, the notice as plain text: the reason comes from Telegram and must not be able to break
     // an HTML parse, and the job message keeps its own formatting.
     await api().sendMessage(defaultChatId(), unreachableNotice(err));
-    await api().sendMessage(defaultChatId(), text, { parse_mode: parseMode });
+    await api().sendMessage(defaultChatId(), text, { parse_mode: parseMode, ...markup });
   }
 }
 

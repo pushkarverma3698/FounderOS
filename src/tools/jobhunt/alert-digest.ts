@@ -22,6 +22,7 @@ import type { IngestLine } from "./ingest-batch.js";
 import { profileSelector, type JobSearchProfile } from "./profile-config.js";
 import { formatBackfillLine, formatNewRowsAlert } from "./sweep-heartbeat.js";
 import type { PendingAlertRow, PendingAlerts } from "../../db/job-digest-schema.js";
+import { jobCallbackData } from "./job-ref.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -30,6 +31,9 @@ export const DIGEST_HOURS: readonly number[] = [9, 14, 19];
 
 /** A batch names more roles than the old per-sweep alert, because it replaces several of them. */
 export const DIGEST_NAMED = 8;
+
+/** 📝 Draft buttons under a batch: the first roles worth applying to, across both candidates. */
+export const DIGEST_DRAFT_BUTTONS = 3;
 
 /** Roles kept per candidate between batches; past this they are counted in `overflow`, never dropped silently. */
 export const PENDING_CAP = 50;
@@ -107,13 +111,18 @@ export async function bufferAlerts(profileId: string, fresh: readonly IngestLine
   await queries.savePendingAlerts(profileId, mergePending(stored?.pending ?? EMPTY_PENDING, rows, backfill));
 }
 
+/** Inline keyboard rows, in the shape Telegram's Bot API takes. */
+export type DigestKeyboard = readonly (readonly { readonly text: string; readonly callback_data: string }[])[];
+
 export interface DigestDeps {
   readonly profiles: readonly JobSearchProfile[];
   readonly tz?: string;
   readonly load: (profileIds: readonly string[]) => Promise<Map<string, DigestState>>;
   /** dedupeKey to short role id, for the roles the batch names. */
   readonly ids: (profile: JobSearchProfile, keys: readonly string[]) => Promise<Map<string, string>>;
-  readonly send: (text: string) => Promise<void>;
+  /** dedupeKey to the stored row (full id and company), for the roles that get a 📝 Draft button. */
+  readonly drafts: (profile: JobSearchProfile, keys: readonly string[]) => Promise<readonly { key: string; id: string; company: string }[]>;
+  readonly send: (text: string, keyboard?: DigestKeyboard) => Promise<void>;
   readonly mark: (profileId: string, at: Date) => Promise<void>;
 }
 
@@ -121,6 +130,7 @@ async function realDeps(): Promise<DigestDeps> {
   const { listProfiles } = await import("./profile-config.js");
   const queries = await import("../../db/job-digest-queries.js");
   const { sendToJobsChat } = await import("../../infra/telegram-send.js");
+  const { jobRowsByDedupeKey } = await import("../../db/job-ref-queries.js");
   return {
     profiles: listProfiles(),
     load: async (profileIds) => {
@@ -138,7 +148,8 @@ async function realDeps(): Promise<DigestDeps> {
         return new Map();
       }
     },
-    send: (text) => sendToJobsChat(text),
+    drafts: (profile, keys) => jobRowsByDedupeKey([...keys], { tenantId: profile.tenantId, profileId: profile.id }),
+    send: (text, keyboard) => sendToJobsChat(text, "HTML", keyboard),
     mark: queries.markDigestSent,
   };
 }
@@ -166,6 +177,36 @@ async function sectionFor(profile: JobSearchProfile, pending: PendingAlerts, dep
 }
 
 /**
+ * One 📝 Draft button per top passing role, so the apply loop starts with a tap. Without them the digest was
+ * plain text and nobody typed `/draft`: 3,160 roles screened, no application since 08-06. A failed lookup
+ * costs the buttons, never the batch.
+ */
+async function draftKeyboardFor(
+  due: readonly { profile: JobSearchProfile; state: DigestState }[],
+  deps: DigestDeps,
+): Promise<DigestKeyboard | undefined> {
+  const picked: { id: string; company: string }[] = [];
+  try {
+    for (const { profile, state } of due) {
+      const keys = state.pending.rows.filter((r) => r.outcome === "pass").map((r) => r.key);
+      if (keys.length === 0) continue;
+      const byKey = new Map((await deps.drafts(profile, keys.slice(0, DIGEST_DRAFT_BUTTONS))).map((r) => [r.key, r]));
+      for (const key of keys) {
+        const hit = byKey.get(key);
+        if (hit && picked.length < DIGEST_DRAFT_BUTTONS) picked.push(hit);
+      }
+    }
+  } catch (err) {
+    // allow-failopen: the batch is the deliverable; a missing button leaves `/draft <id>` in the text.
+    log.warn({ err: (err as Error).message }, "Draft buttons not built for batch");
+    return undefined;
+  }
+  return picked.length === 0
+    ? undefined
+    : picked.map((r) => [{ text: `📝 Draft — ${r.company.slice(0, 40)}`, callback_data: jobCallbackData("draft", r.id) }]);
+}
+
+/**
  * Send the batch if a slot has started and anything is buffered. ONE message for every candidate that is due,
  * so two lanes do not double the count. Returns normally when there is nothing to send; throws when the send
  * fails, with every buffer left as it was.
@@ -182,7 +223,7 @@ export async function sendDueDigest(now: Date, deps?: DigestDeps): Promise<void>
 
   const sections: string[] = [];
   for (const { profile, state } of due) sections.push(await sectionFor(profile, state.pending, d));
-  await d.send(sections.join("\n\n"));
+  await d.send(sections.join("\n\n"), await draftKeyboardFor(due, d));
   for (const { profile } of due) await d.mark(profile.id, now);
   log.info({ profiles: due.map((x) => x.profile.id) }, "Batched new-role alert sent");
 }
