@@ -35,6 +35,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
+import { recentActivityBlockFor, type RecentActivitySource } from "./recent-activity.js";
 import { stripFalsePromises } from "./promise-guard.js";
 import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
@@ -283,6 +284,7 @@ export function makePlanNode(
   turnLog?: TurnLog,
   screen?: ScreenSource,
   gatedTools: ReadonlySet<string> = new Set(),
+  recentActivity?: RecentActivitySource,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
@@ -324,11 +326,9 @@ export function makePlanNode(
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
-          // What the founder saw outside this conversation (daemon alerts, command output), after the
-          // clock line so the static prompt prefix stays cacheable. "" when there is nothing to show.
-          const screenBlock = await screenBlockFor(screen, config?.configurable?.["thread_id"], clock());
+          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock())];
           const base: BaseMessage[] = [
-            new SystemMessage([systemPrompt, plannerNowLine(clock), screenBlock].filter(Boolean).join("\n\n")),
+            new SystemMessage([systemPrompt, plannerNowLine(clock), ...(await Promise.all(dataBlocks))].filter(Boolean).join("\n\n")),
             ...historyMessages(conversation),
             new HumanMessage(input),
           ];

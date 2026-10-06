@@ -17,6 +17,9 @@ import {
   type KernelBindableModel,
   type KernelChatModel,
   type KernelTool,
+  AGENT_ORIGINS,
+  RECENT_ACTIVITY_WINDOW_HOURS,
+  type RecentActivitySource,
   type ScreenSource,
   type TurnLog,
   type WorkerSpec,
@@ -34,6 +37,7 @@ import {
 } from "../agents/model.js";
 import { recordConversationTurn } from "../db/conversation-turns.js";
 import { readScreen } from "../infra/screen-log.js";
+import { readRecentBrainActivity } from "../db/recent-activity.js";
 import { chatIdFromThreadId } from "../infra/telegram-send.js";
 import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
@@ -214,6 +218,14 @@ export function buildScreenSource(): ScreenSource {
   };
 }
 
+/** Other agents' recent brain rows (one SQL query, no embedding), for the founder's DM thread only. */
+export function buildRecentActivitySource(founderChatId: string = env.TELEGRAM_CHAT_ID): RecentActivitySource {
+  return {
+    appliesTo: (threadId) => chatIdFromThreadId(threadId) === founderChatId,
+    recent: (_threadId, now) => readRecentBrainActivity({ now, windowHours: RECENT_ACTIVITY_WINDOW_HOURS, origins: AGENT_ORIGINS }),
+  };
+}
+
 /**
  * Postgres-backed LessonStore (the Hermes learning seam). Failure-tolerant on
  * every edge: lessons are an accelerant — a DB blip must degrade to "no
@@ -335,6 +347,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     lessons: buildLessonStore(),
     turnLog: buildTurnLog(),
     screen: buildScreenSource(),
+    ...(env.RECENT_ACTIVITY_ENABLED === "true" ? { recentActivity: buildRecentActivitySource() } : {}),
   });
 }
 

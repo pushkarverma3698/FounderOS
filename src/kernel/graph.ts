@@ -25,6 +25,7 @@ import { makePlanNode, type CommandCatalogEntry, type KernelChatModel, type Work
 import type { Clock } from "../core/time.js";
 import type { TurnLog } from "./turn-log.js";
 import type { ScreenSource } from "./screen.js";
+import type { RecentActivitySource } from "./recent-activity.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -49,6 +50,8 @@ export interface KernelConfig {
   gatedTools?: ReadonlySet<string>;
   /** What the founder saw in Telegram outside the conversation (the screen log in prod, absent in tests). */
   screen?: ScreenSource;
+  /** Other agents' recent work for the founder DM (brain rows in prod, absent in tests; AG-029). */
+  recentActivity?: RecentActivitySource;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -63,7 +66,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen, config.gatedTools))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen, config.gatedTools, config.recentActivity))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))
