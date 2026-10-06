@@ -6,7 +6,7 @@
  *
  *   node --import tsx/esm --env-file=.env scripts/journey-where.ts
  */
-import { botUsername, connect, sendAndCollect } from "./lib/mtproto.js";
+import { probePeer, connect, sendAndCollect } from "./lib/mtproto.js";
 import { judgeWhere, parseWhereReply, type WhereCounts } from "./lib/journey-where.js";
 import { appendScreenEntry } from "../src/infra/screen-log.js";
 
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   const client = await connect();
   let replies: string[];
   try {
-    const sent = await sendAndCollect(client, await botUsername(), `/where ${REPO.split("/")[1]}`, 60);
+    const sent = await sendAndCollect(client, await probePeer(client), `/where ${REPO.split("/")[1]}`, 60);
     if (sent.sendError) throw new Error(`could not send /where: ${sent.sendError}`);
     replies = sent.replies.map((r) => r.text);
   } finally {

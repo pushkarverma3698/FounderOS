@@ -24,6 +24,7 @@
 
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { probePeerFor, type ProbePeer } from "./probe-peer.js";
 
 const API_ID = parseInt(process.env["TELEGRAM_TESTER_API_ID"] ?? "", 10);
 const API_HASH = process.env["TELEGRAM_TESTER_API_HASH"] ?? "";
@@ -65,6 +66,16 @@ export async function botUsername(): Promise<string> {
   return json.result.username;
 }
 
+/**
+ * Where this probe posts: the bot's own chat, or TELEGRAM_TEST_CHAT_ID (see probe-peer.ts).
+ * A numeric group id is only resolvable once the dialogs are cached, so load them first.
+ */
+export async function probePeer(client: TelegramClient): Promise<ProbePeer> {
+  const peer = probePeerFor(await botUsername(), process.env);
+  if (typeof peer === "number") await client.getDialogs({ limit: 200 });
+  return peer;
+}
+
 export async function connect(): Promise<TelegramClient> {
   assertMtprotoConfigured();
   const client = new TelegramClient(new StringSession(SESSION), API_ID, API_HASH, {
@@ -92,7 +103,7 @@ function toReply(msg: Api.Message): BotReply {
   return { id: msg.id, text: msg.message ?? "(media)", buttons };
 }
 
-async function history(client: TelegramClient, peer: string, limit: number): Promise<Api.Message[]> {
+async function history(client: TelegramClient, peer: ProbePeer, limit: number): Promise<Api.Message[]> {
   const msgs = await client.getMessages(peer, { limit });
   return [...msgs].reverse(); // oldest → newest
 }
@@ -115,7 +126,7 @@ export interface SendResult {
  */
 export async function sendAndCollect(
   client: TelegramClient,
-  peer: string,
+  peer: ProbePeer,
   text: string,
   waitS: number,
 ): Promise<SendResult> {
