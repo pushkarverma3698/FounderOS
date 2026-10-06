@@ -45,6 +45,7 @@ vi.mock("../../../src/infra/logger.js", () => ({
 const { embedTextCached } = await import("../../../src/lib/embed.js");
 const { searchRagTable, keywordSearchRagTable } = await import("../../../src/db/rag-search.js");
 const { searchKnowledge } = await import("../../../src/tools/knowledge.js");
+const { env, TENANT } = await import("../../../src/core/config.js");
 
 const mockEmbed = vi.mocked(embedTextCached);
 const mockVector = vi.mocked(searchRagTable);
@@ -98,15 +99,39 @@ describe("searchKnowledge — delegates to the hybrid engine", () => {
     mockSuccess([makeHit({ metadata: { source_path: "x.md", entry_type: "adr" } })]);
     await searchKnowledge.invoke({ query: "composio", entry_type: "adr" });
 
-    expect(mockVector.mock.calls[0]![3]).toEqual({ filter: { entry_type: "adr" } });
-    expect(mockKeyword.mock.calls[0]![3]).toEqual({ filter: { entry_type: "adr" } });
+    expect(mockVector.mock.calls[0]![3]).toEqual({ filter: { entry_type: "adr", excludeFounderOnly: true } });
+    expect(mockKeyword.mock.calls[0]![3]).toEqual({ filter: { entry_type: "adr", excludeFounderOnly: true } });
   });
 
-  it("passes no filter when entry_type is omitted", async () => {
+  it("with no thread and no entry_type, the only filter is the founder-only exclusion", async () => {
     mockSuccess([makeHit()]);
     await searchKnowledge.invoke({ query: "composio" });
 
+    expect(mockVector.mock.calls[0]![3]).toEqual({ filter: { excludeFounderOnly: true } });
+  });
+
+  // AG-027 group privacy: rows with metadata.visibility = 'founder' (Mac capture) are for the founder DM only.
+  it("the family group thread excludes founder-only rows on both legs", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio" }, { configurable: { thread_id: `${TENANT}:-5319642142` } });
+
+    expect(mockVector.mock.calls[0]![3]).toEqual({ filter: { excludeFounderOnly: true } });
+    expect(mockKeyword.mock.calls[0]![3]).toEqual({ filter: { excludeFounderOnly: true } });
+  });
+
+  it("the founder DM thread passes no visibility filter and no filter at all", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio" }, { configurable: { thread_id: `${TENANT}:${env.TELEGRAM_CHAT_ID}` } });
+
     expect(mockVector.mock.calls[0]![3]).toBeUndefined();
+  });
+
+  it("the unfiltered retry keeps the group exclusion", async () => {
+    mockEmbed.mockResolvedValue(DUMMY_VEC);
+    mockVector.mockResolvedValueOnce([]).mockResolvedValueOnce([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", entry_type: "adr" }, { configurable: { thread_id: `${TENANT}:-5319642142` } });
+
+    expect(mockVector.mock.calls[1]![3]).toEqual({ filter: { excludeFounderOnly: true } });
   });
 });
 
@@ -169,8 +194,8 @@ describe("searchKnowledge — entry_type is a forgiving post-filter", () => {
     const result = await searchKnowledge.invoke({ query: "ICP", entry_type: "strategic_pillar" });
 
     expect(mockVector).toHaveBeenCalledTimes(2);
-    // Retry call carries no filter.
-    expect(mockVector.mock.calls[1]![3]).toBeUndefined();
+    // Retry call drops entry_type but keeps the founder-only exclusion (no thread = not the founder DM).
+    expect(mockVector.mock.calls[1]![3]).toEqual({ filter: { excludeFounderOnly: true } });
     expect(result).toContain("Turicks ICP is seed-Series A");
   });
 

@@ -10,14 +10,18 @@ import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
 import { fetchRepoStatus, resolveRepoArg, type RepoStatusView } from "../tools/repo-status.js";
 import { renderWhere } from "../tools/repo-status-render.js";
 import { splitForTelegram } from "./format.js";
+import { fetchCaptureStatus, renderCaptureLine, type CaptureStatus } from "../db/brain-capture-status.js";
+import { appTimeZone } from "../core/time.js";
 
 export interface WhereDeps {
   readonly fetch: (repos: readonly string[]) => Promise<RepoStatusView>;
+  /** Mac capture heartbeat (AG-027). Omitted = no line. */
+  readonly capture?: () => Promise<CaptureStatus>;
 }
 
 export async function handleWhere(
   ctx: Context,
-  deps: WhereDeps = { fetch: (repos) => fetchRepoStatus(repos) },
+  deps: WhereDeps = { fetch: (repos) => fetchRepoStatus(repos), capture: () => fetchCaptureStatus(appTimeZone()) },
 ): Promise<void> {
   const arg = typeof ctx.match === "string" ? ctx.match : "";
   const resolved = resolveRepoArg(arg, DISPATCH_REPO_ALLOWLIST);
@@ -34,6 +38,13 @@ export async function handleWhere(
   for (const section of renderWhere(view.summaries, view.unreachable)) {
     for (const part of splitForTelegram(section)) {
       await ctx.reply(part, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    }
+  }
+  if (deps.capture) {
+    try {
+      await ctx.reply(renderCaptureLine(await deps.capture(), new Date()));
+    } catch (err) {
+      await ctx.reply(`Mac capture: status unavailable (${err instanceof Error ? err.message : String(err)})`);
     }
   }
 }
