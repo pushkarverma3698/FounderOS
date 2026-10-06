@@ -26,6 +26,15 @@ export interface RagHit {
   /** brain_memories only — undefined for personal_rag/research_cache. */
   memory_type?: string;
   project?: string | null;
+  /** brain_memories only: the `source` column (e.g. "ide_mcp" for agent-written rows). */
+  source?: string | null;
+  /** brain_memories only: when the row was written. */
+  created_at?: Date | string | null;
+  /**
+   * Cosine similarity from the vector leg. Unset on keyword-only hits, whose `score` is a term-overlap fraction
+   * and not comparable. The abstain (src/db/brain-hit-view.ts) reads this, never `score`.
+   */
+  cosine?: number;
 }
 
 /** Metadata-column equality filter, ANDed onto a search's WHERE clause. */
@@ -115,7 +124,7 @@ export async function searchRagTable(
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
   }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
   const isBrainMemories = table === "brain_memories";
-  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
+  const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
   const rows = await db.execute(sql`
     SELECT content, metadata${extraCols}, 1 - (embedding <=> ${vec}::vector) AS score
@@ -134,12 +143,17 @@ export async function searchRagTable(
       score: number;
       memory_type?: string;
       project?: string | null;
+      source?: string | null;
+      created_at?: Date | string | null;
     }>
   ).map((r) => ({
     content: r.content,
     metadata: r.metadata ?? {},
     score: Number(r.score),
-    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+    cosine: Number(r.score),
+    ...(isBrainMemories
+      ? { memory_type: r.memory_type, project: r.project, source: r.source, created_at: r.created_at }
+      : {}),
   }));
 }
 
@@ -196,7 +210,7 @@ export async function keywordSearchRagTable(
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
   }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
   const isBrainMemories = table === "brain_memories";
-  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
+  const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
 
   // The SQL mirror of scoreByTerms: one CASE arm per term, summed. Ordering by
   // it makes the LIMIT keep the highest-overlap rows instead of arbitrary ones.
@@ -219,18 +233,24 @@ export async function keywordSearchRagTable(
       metadata: Record<string, unknown> | null;
       memory_type?: string;
       project?: string | null;
+      source?: string | null;
+      created_at?: Date | string | null;
     }>
   ).map((r) => ({
     content: r.content,
     metadata: r.metadata ?? {},
-    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+    ...(isBrainMemories
+      ? { memory_type: r.memory_type, project: r.project, source: r.source, created_at: r.created_at }
+      : {}),
   }));
 
   return rankByTerms(candidates, terms, (c) => c.content, limit).map((c) => ({
     content: c.content,
     metadata: c.metadata,
     score: Math.min(1, scoreByTerms(c.content, terms) / terms.length),
-    ...(isBrainMemories ? { memory_type: c.memory_type, project: c.project } : {}),
+    ...(isBrainMemories
+      ? { memory_type: c.memory_type, project: c.project, source: c.source, created_at: c.created_at }
+      : {}),
   }));
 }
 
