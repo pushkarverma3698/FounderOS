@@ -16,6 +16,7 @@ import { listUpcomingReminders, cancelReminder, rescheduleReminder } from "../..
 import { formatInZone, describeRecurrence, appTimeZone, type Recurrence } from "../../core/time.js";
 import { childLogger } from "../../infra/logger.js";
 import { idemKey } from "./hitl.js";
+import { chatIdFromThreadId } from "../../infra/telegram-send.js";
 
 const log = childLogger({ module: "agent-tools:reminders" });
 
@@ -36,12 +37,13 @@ const recurrenceSchema = z
 
 /** Set a reminder — pure ping, no approval needed. */
 export const setReminder = tool(
-  async ({ text, remind_at, recurrence }) => {
+  async ({ text, remind_at, recurrence }, config) => {
     const res = await setReminderTool.execute({
       text,
       ...(remind_at ? { remind_at } : {}),
       ...(recurrence ? { recurrence } : {}),
-      chat_id: env.TELEGRAM_CHAT_ID,
+      // The chat that asked: a reminder set in the family group pings the group, not the founder's DM.
+      chat_id: chatIdFromThreadId(config?.configurable?.["thread_id"]) ?? env.TELEGRAM_CHAT_ID,
       idempotency_key: idemKey("reminder", text, remind_at ?? JSON.stringify(recurrence ?? {})),
       tenant_id: TENANT,
       timezone: appTimeZone(),
