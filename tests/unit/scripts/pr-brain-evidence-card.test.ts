@@ -156,6 +156,24 @@ describe("pr-brain + evidence card: legacy paths stay as they were", () => {
   });
 });
 
+describe("pr-brain + evidence card: the flag read from PR_BRAIN_ENV_FILE", () => {
+  // Issue #956: on prod the flag lives only in /opt/founderos/.env, not in cron's env.
+  it("flag only in the env file: the card path runs and the PR is not auto-merged", () => {
+    writeFileSync(f(".env"), 'TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nAGENT_PIPELINE_V2="1"\n');
+    sweep({ ec: CARD });
+    expect(read("ec-args.log")).toContain("--issue 7");
+    expect(merged()).toBe(false);
+    expect(cardSends()).toHaveLength(2);
+  });
+
+  it("the process env wins over the env file", () => {
+    writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nAGENT_PIPELINE_V2=1\n");
+    sweep({ ec: CARD, flag: "0" });
+    expect(read("ec-args.log")).toBe("");
+    expect(merged()).toBe(true);
+  });
+});
+
 describe("pr-brain + evidence card: a contract exists", () => {
   it("sends the card with the keyboard on the LAST part, and does not merge", () => {
     sweep({ ec: CARD, flag: "1" });
