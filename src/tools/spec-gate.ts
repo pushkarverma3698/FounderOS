@@ -203,7 +203,7 @@ function normalizeAsk(ask: string): string {
   return ask.normalize("NFC").replace(/\s+/g, " ").trim();
 }
 
-function fingerprintOf(c: TaskContract): string {
+export function fingerprintOf(c: TaskContract): string {
   const sortedUnique = (xs: string[]) => [...new Set(xs)].sort();
   const material = JSON.stringify([
     "founderos.task-contract.v1",

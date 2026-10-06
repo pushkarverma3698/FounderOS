@@ -27,6 +27,8 @@ import {
 import { isGreenCI, isPrBrainReviewed } from "./tasks-ready.js";
 
 export { MERGE_CALLBACK_PREFIX };
+// The cp: buttons share this module's seat in the callback chain; telegram.ts is at its line cap.
+export { CODING_CALLBACK_PREFIX, handleCodingCallback } from "./coding-callbacks.js";
 
 const log = childLogger({ module: "gateway:merge-digest-callback" });
 
