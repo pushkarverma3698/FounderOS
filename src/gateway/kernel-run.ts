@@ -32,6 +32,7 @@ import { streamKernelTurn, progressLabelFor, sendTurnAck } from "./kernel-progre
 import { passTurnGates, sendApprovalCard, HITL_RESTORE_MAX_AGE_MS } from "./turn-gates.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
+import { sendCapabilityHint } from "./capability-hint.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
 import { engineFromApprovalCard, type Engine } from "../tools/coding-engine.js";
 
@@ -242,6 +243,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       const card = failureCardFor(res as never, { turnId: trace.turnId, profileId });
       // Quiet: the reply is already in history; the screen log holds what the founder saw outside it.
       await screenQuiet(() => (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply)));
+      if (!card) await sendCapabilityHint(ctx, res as never); // never throws
     } catch (err) {
       await ack.remove(); // a gate or getKernel() failed before the stream took the ack over; idempotent otherwise
       const failure = budget ? failureFor(err, budget) : err;

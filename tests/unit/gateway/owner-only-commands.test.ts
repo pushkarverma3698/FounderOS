@@ -13,7 +13,7 @@ import { OWNER_ONLY_COMMANDS } from "../../../src/gateway/chat-access.js";
 /** /claude and /agy dispatch work exactly as /task does; /engine decides where every unlabelled task goes; /review pauses the PR gate for every repo. */
 const SYSTEM_COMMANDS = ["halt", "resume", "task", "claude", "agy", "engine", "review", "newproject", "connect", "where", "login"];
 /** Commands that read or write the founder's own data: his focus and projects, his goals. */
-const FOUNDER_DATA_COMMANDS = ["focus", "projects", "goal", "goals"];
+const FOUNDER_DATA_COMMANDS = ["focus", "projects", "goal", "goals", "now"];
 
 describe("OWNER_ONLY_COMMANDS", () => {
   it.each([...SYSTEM_COMMANDS, ...FOUNDER_DATA_COMMANDS])("refuses a guest the /%s command", (command) => {
