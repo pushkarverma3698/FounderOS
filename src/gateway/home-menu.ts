@@ -35,8 +35,13 @@ import { labelForRepo } from "./repo-picker.js";
 import { buildWifeCommandsHelp } from "./wife-commands.js";
 import { CAPABILITIES_CALLBACK, DEPARTMENT_LABELS, sendCapabilities } from "./capabilities-screen.js";
 import { WORKERS } from "../kernel/contracts.js";
+import { buildCommandsHelp } from "./command-menu.js";
+import { splitForTelegram } from "./format.js";
 
 export const MENU_CALLBACK_PREFIX = "menu:";
+
+/** The ➕ button on the home screen: the complete command list, one message per section. */
+export const FULL_LIST_CALLBACK = `${MENU_CALLBACK_PREFIX}full`;
 
 /** `wife` is Tashi's commands, reached from the Jobs screen — the same text as /wife_commands. */
 export type MenuSection = "home" | "build" | "jobs" | "system" | "wife";
@@ -146,6 +151,7 @@ function jobsText(): string {
 function systemText(): string {
   return (
     `⚡ <b>System</b>\n\n` +
+    `🔹 <code>/now</code> — coding, jobs and approvals in three lines, a button each\n` +
     `🔹 <code>/status</code> — health and anything waiting on your approval\n` +
     `🔹 <code>/budget</code> — today's spend against the daily cap\n` +
     `🔹 <code>/focus</code> — what you are focused on, with the date you last confirmed it. <code>/focus close the Acme pilot</code> replaces it\n` +
@@ -155,12 +161,27 @@ function systemText(): string {
     `🔹 <code>/goal add …</code> — set a goal, report a value, finish, drop or block one (send <code>/goal</code> for the grammar)\n` +
     `🔹 <code>/connect</code> — search and add an MCP server\n` +
     `🔹 <code>/reset</code> — clear this thread's mission state\n` +
-    `🔹 <code>/commands</code> — the full list, every command, in text\n` +
+    `🔹 <code>/commands</code> — this screen; its 📜 button has every command\n` +
     `🔹 <code>/start</code> — this home screen\n\n` +
     `🛑 <code>/halt</code> — emergency stop, refuse all new work\n` +
     `▶️ <code>/resume</code> — lift a halt\n\n` +
     `<i>Every command is also in the ☰ button next to the message box.</i>`
   );
+}
+
+/**
+ * Every command with what it does, rendered from COMMAND_MENU. `/commands` used to send this wall; it now
+ * sends the home screen and this sits behind its 📜 button.
+ */
+export async function sendFullCommandList(ctx: Context): Promise<void> {
+  const chunks = splitForTelegram(buildCommandsHelp().join("\n\n"));
+  for (let i = 0; i < chunks.length; i += 1) {
+    await ctx.reply(chunks[i] as string, {
+      parse_mode: "HTML",
+      disable_notification: i > 0,
+      ...(i === chunks.length - 1 ? { reply_markup: menuKeyboard("home") } : {}),
+    });
+  }
 }
 
 export function buildMenuSection(section: MenuSection, firstName?: string): string {
@@ -195,6 +216,7 @@ export function buildMenuKeyboardRows(active: MenuSection): { text: string; call
       [button("build")],
       [button("jobs"), button("system")],
       [{ text: "🧭 Everything I can do", callback_data: CAPABILITIES_CALLBACK }],
+      [{ text: "📜 All commands", callback_data: FULL_LIST_CALLBACK }],
     ];
   }
   if (active === "wife") {
@@ -225,6 +247,12 @@ export function menuKeyboard(active: MenuSection): {
 export async function handleMenuCallback(ctx: Context): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(MENU_CALLBACK_PREFIX)) return false;
+
+  if (data === FULL_LIST_CALLBACK) {
+    await ctx.answerCallbackQuery();
+    await sendFullCommandList(ctx);
+    return true;
+  }
 
   // Not a section: ~85 rows is several messages, so it is sent below, not edited in.
   if (data === CAPABILITIES_CALLBACK) {

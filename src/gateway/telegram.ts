@@ -22,11 +22,11 @@ import {
   handleBudget,
   handleHalt,
   handleResume,
-  handleCommands,
   handleConnect,
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { registerHomeCommands } from "./now-command.js";
 import { injectSenderProfile, parseSenderProfiles } from "./jobhunt-sender-profile.js";
 import { weeklyApplicationGoal } from "./jobhunt-goal.js";
 import { handleJobCallback } from "./jobhunt-callbacks.js";
@@ -169,7 +169,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("projects", (ctx: Context) => handleProjects(ctx));
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
-  bot.command("commands", (ctx: Context) => handleCommands(ctx));
+  registerHomeCommands(bot, access); // /commands, /now and the /now buttons
   bot.command("remind", (ctx: Context) => {
     const text = ctx.match?.toString().trim();
     if (!text) {

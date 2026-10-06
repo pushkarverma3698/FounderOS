@@ -38,7 +38,7 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CANONICAL } from "./verify-benchmark-run.js";
-import { connect, botUsername, sendAndCollect, sleep, type BotReply } from "./lib/mtproto.js";
+import { connect, probePeer, sendAndCollect, sleep, type BotReply } from "./lib/mtproto.js";
 
 const OUT_DIR = "docs/product-recovery/benchmark-runs";
 const DIMENSIONS = "intent source completeness artifact delivery truthfulness leakage friction";
@@ -192,8 +192,8 @@ async function cmdRun(argv: string[]): Promise<void> {
   console.log(`      > ${outPath}.evidence.jsonl\n`);
 
   const client = await connect();
-  const peer = await botUsername();
-  console.log(`Connected. Sending as the founder to @${peer}.\n`);
+  const peer = await probePeer(client);
+  console.log(`Connected. Sending as the founder to ${peer}.\n`);
 
   const collected: Collected[] = [];
   const rawPath = `${outPath}.raw.jsonl`;

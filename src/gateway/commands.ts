@@ -14,9 +14,7 @@ import { cancelPendingApprovals, getTodayCostUsd, getCostBreakdown } from "../db
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { buildMenuSection, menuKeyboard } from "./home-menu.js";
-import { buildCommandsHelp } from "./command-menu.js";
 import { replySkippedStandups } from "./goal-resume.js";
-import { splitForTelegram } from "./format.js";
 import { safeHtml } from "./approval-card.js";
 import { TENANT, DAILY_BUDGET_USD, MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import { assessDailyBudget, formatBudgetDashboard, getRunBudgetCaps } from "../infra/daily-budget.js";
@@ -101,24 +99,12 @@ export async function handleResume(ctx: Context): Promise<void> {
 }
 
 /**
- * `/commands` — the full list, rendered from `COMMAND_MENU`.
- *
- * The text used to live here as a hand-maintained array, which is how `/start`
- * came to advertise twelve deleted commands. There is now exactly one list
- * (src/gateway/command-menu.ts) and a test that checks it against the real
- * `bot.command(...)` registrations, so this surface cannot drift from the bot.
+ * `/commands` — the home screen: three lanes, a few commands each, Tashi's variants behind Jobs, and a 📜
+ * button for the full list (home-menu.ts, rendered from `COMMAND_MENU`). It used to send that whole list as
+ * three or four messages, and the founder's verdict on a wall of text was the reason the home screen exists.
  */
 export async function handleCommands(ctx: Context): Promise<void> {
-  const parts = buildCommandsHelp();
-  const full = parts.join("\n\n");
-  const chunks = splitForTelegram(full);
-  for (let i = 0; i < chunks.length; i += 1) {
-    await ctx.reply(chunks[i] as string, {
-      parse_mode: "HTML",
-      disable_notification: i > 0,
-      ...(i === chunks.length - 1 ? { reply_markup: menuKeyboard("home") } : {}),
-    });
-  }
+  await handleStart(ctx);
 }
 
 // ── /connect — registry discovery + install (ADR-041 Tier 3) ─────────────────

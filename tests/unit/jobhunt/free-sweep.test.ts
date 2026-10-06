@@ -64,7 +64,7 @@ vi.mock("../../../src/db/job-digest-queries.js", () => ({
     mockDigestStore.set(profileId, { pending: null, lastDigestAt: at });
   },
 }));
-vi.mock("../../../src/db/job-ref-queries.js", () => ({ jobIdsByDedupeKey: async () => new Map() }));
+vi.mock("../../../src/db/job-ref-queries.js", () => ({ jobIdsByDedupeKey: async () => new Map(), jobRowsByDedupeKey: async () => [] }));
 
 /** 09:30 in Asia/Kolkata: the first digest slot of the day has started. */
 const SLOT_OPEN = new Date("2026-08-06T04:00:00Z");
