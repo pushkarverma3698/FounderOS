@@ -77,6 +77,7 @@ import { getAdapter } from "./adapters/index.js";
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { classifyTrack } from "./tracks.js";
+import type { BoardReason } from "./board-failure.js";
 
 const log = childLogger({ module: "jobhunt:free-ingest" });
 
@@ -126,6 +127,8 @@ export interface FreeIngestResult {
   /** What was filtered and why, with counts. Never silent. */
   readonly notes: readonly string[];
   readonly boardsPolled: number;
+  /** Boards retired by the dead-board record, with why; absent when no record was kept. */
+  readonly retired?: readonly BoardReason[];
   readonly sweepId: string;
   /** Structured per-stage funnel summary. */
   readonly funnel: FreeFunnel;
@@ -332,6 +335,7 @@ export async function runFreeIngest(
     failures: sweep.failures,
     notes,
     boardsPolled: sweep.boardsPolled,
+    ...(sweep.retired === undefined ? {} : { retired: sweep.retired }),
     sweepId,
     funnel,
   };

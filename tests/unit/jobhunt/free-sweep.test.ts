@@ -387,6 +387,27 @@ describe("runFreeSweep", () => {
     expect(text).toContain("285");
   });
 
+  it("names how many boards are retired and why in the same alive ping, in one line", async () => {
+    await resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
+    vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
+    mockRunFreeIngest.mockResolvedValue(
+      result({
+        lines: [line({ isNew: false })],
+        boardsPolled: 285,
+        retired: [
+          { board: "bamboohr/a", reason: "HTML instead of JSON" },
+          { board: "bamboohr/b", reason: "HTML instead of JSON" },
+          { board: "workday/c", reason: "HTTP 403" },
+        ],
+      } as never),
+    );
+
+    await runFreeSweep();
+
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(text).toContain("Retired 3 dead boards, no longer polled: HTML instead of JSON ×2, HTTP 403 ×1.");
+  });
+
   it("DMs the founder an outage alert when boards failed and the sweep fetched nothing at all", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
