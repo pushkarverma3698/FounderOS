@@ -32,6 +32,7 @@ import {
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { askInstruction, draftInstruction } from "./jobhunt-instructions.js";
 import { sendCoverLetter } from "./cover-letter-delivery.js";
+import { applyLinkLine, sendStoredDraft } from "./jobhunt-stored-draft.js";
 import {
   buildApplicationPacket,
   DRAFT_SECTIONS,
@@ -166,12 +167,7 @@ export function packetMessage(packet: ApplicationPacket, rank?: number): string 
   const asked = packet.matchedSkills.length + packet.missingSkills.length;
   const overlap =
     asked > 0 ? `${packet.matchedSkills.length}/${asked} of the skills it asks for` : "no skill list on the posting";
-
-  const linkLine = packet.applyUrl.length === 0
-    ? "⚠ No URL on file for this posting — search the company's careers page."
-    : packet.opensTheForm
-      ? "Tap <b>Open the form</b>, send the CV above, then tap <b>I applied</b>."
-      : "Tap <b>Open the form</b> <i>(this ATS hides the form behind its own button)</i>, send the CV above, then tap <b>I applied</b>.";
+  const linkLine = applyLinkLine(packet.applyUrl, packet.opensTheForm);
 
   const top = packet.matchedSkills.slice(0, 6).join(", ");
 
@@ -283,6 +279,7 @@ export async function draftRow(
     { command: "draft", rank, company: row.company, id: row.id, profile: profile.id },
     "Brief row command resolved",
   );
+  if (await sendStoredDraft(ctx, row, artifactDirFor(ctx), rank)) return; // built by the morning pre-tailor step: no wait, no model call
   await ctx.reply(`📝 ${progress}Tailoring your CV for ${row.company}… this takes 20–40s.`);
 
   const built = await buildApplicationPacket(row, artifactDirFor(ctx));

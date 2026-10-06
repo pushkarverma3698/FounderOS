@@ -30,6 +30,7 @@ const EXPECTED_CRONS = {
   // 2026-09-29: NOT the disabled 3-day dispatch coming back. This runs only the jobhunt analyzer
   // (zero LLM, at most one issue a day); the code-health analyzers stay off. See jobhunt-findings-cron.ts.
   "daily jobhunt findings check": "30 9 * * *",
+  "daily jobhunt pre-tailor (CV + letter for the top 3 roles)": "30 5 * * *",
 } as const;
 
 /** Disabled 2026-08-21 — must NOT be registered. */
@@ -64,6 +65,13 @@ describe("startScheduler — jobs are wired, not merely written", () => {
     const withExecutor = mockSchedule.mock.calls.filter((c) => c[0] === "* * * * *").length;
 
     expect(withExecutor).toBe(withoutExecutor + 1);
+  });
+
+  it("registers the pre-tailor cron exactly once, in the founder timezone", () => {
+    startScheduler();
+    const calls = mockSchedule.mock.calls.filter((call) => call[0] === "30 5 * * *");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![2]).toEqual({ timezone: appTimeZone() });
   });
 
   it("registers the daily jobhunt findings check exactly once, in the founder's timezone", () => {

@@ -83,6 +83,7 @@ import {
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 import { scheduleGoalStandup } from "../goals/standup-schedule.js";
 import { startJobhuntFindingsCron } from "../evolution/jobhunt-findings-cron.js";
+import { startJobhuntPretailorCron } from "../tools/jobhunt/pretailor-cron.js";
 
 // Re-exported so existing import sites (and tests) that read these off
 // scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
@@ -366,6 +367,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     ).catch((err) => log.error({ err: (err as Error).message }, "Monthly import-boards reminder failed"));
   });
   startJobhuntFindingsCron(); // daily 09:30, jobhunt analyzer only, zero LLM; NOT the disabled 3-day dispatch above
+  startJobhuntPretailorCron(); // daily 05:30: CV + letter for the top 3 apply-today roles per profile, stops at the daily budget, sends nothing
   const taskExecutor = opts?.taskExecutor;
   if (taskExecutor) {
     cron.schedule("* * * * *", () => {

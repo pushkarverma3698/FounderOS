@@ -15,6 +15,7 @@ import { FREE_SWEEP_CRON } from "../../../src/tools/jobhunt/sweep-runner.js";
 import { STANDUP_CRON } from "../../../src/goals/standup-schedule.js";
 import { MERGE_DIGEST_CRON } from "../../../src/gateway/merge-digest-run.js";
 import { JOBHUNT_FINDINGS_CRON } from "../../../src/evolution/jobhunt-findings-cron.js";
+import { PRETAILOR_CRON } from "../../../src/tools/jobhunt/pretailor-cron.js";
 import { CLAUDE_EXPIRY_CRON } from "../../../src/infra/claude-login-expiry.js";
 
 const SCHEDULER = readFileSync(fileURLToPath(new URL("../../../src/infra/scheduler.ts", import.meta.url)), "utf8");
@@ -45,6 +46,7 @@ describe("scheduler registry", () => {
     const own = (id: string) => SCHEDULED_ROUTINES.find((r) => r.id === id)?.cron;
     expect(own("goal-standup")).toBe(STANDUP_CRON);
     expect(own("jobhunt-findings")).toBe(JOBHUNT_FINDINGS_CRON);
+    expect(own("jobhunt-pretailor")).toBe(PRETAILOR_CRON);
     expect(own("free-board-sweep")).toBe(FREE_SWEEP_CRON);
     expect(own("merge-digest")).toBe(MERGE_DIGEST_CRON);
     expect(own("claude-login-expiry")).toBe(CLAUDE_EXPIRY_CRON);
@@ -59,6 +61,7 @@ describe("scheduler registry", () => {
   it("scheduler.ts still starts the two routines that register themselves", () => {
     expect(SCHEDULER).toContain("scheduleGoalStandup(");
     expect(SCHEDULER).toContain("startJobhuntFindingsCron(");
+    expect(SCHEDULER).toContain("startJobhuntPretailorCron(");
   });
 
   it("every entry has a unique id and a plain sentence for the founder", () => {
