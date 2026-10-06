@@ -40,6 +40,7 @@ import {
   type HeartbeatState,
 } from "./sweep-heartbeat.js";
 import { loadLaneHeartbeat, saveLaneHeartbeat } from "../../db/job-heartbeat-queries.js";
+import { retiredLine } from "./board-failure.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -181,7 +182,9 @@ export async function runFreeSweepForProfile(
       profile
     );
     await saveLaneHeartbeat(profile.id, next);
-    if (ping !== null) await sendLaneOps(ping);
+    // One line on how many boards are retired and why (#26), so a board gone for good is not silent.
+    const retired = retiredLine(result.retired);
+    if (ping !== null) await sendLaneOps(retired === "" ? ping : `${ping}\n${esc(retired)}`);
     return;
   }
 

@@ -33,6 +33,7 @@ import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { recordTurnSafely, type TurnLog } from "./turn-log.js";
+import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { stripFalsePromises } from "./promise-guard.js";
 
@@ -104,6 +105,11 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
         `- Choose "command" when the message asks for exactly what one command does ("where are we on oplify" → where, "what is the agent loop doing" → tasks, "build X" / "fix X in oplify" → task with the description as args). It beats a plan: the command is the tested path.`,
         `- args carry only what the command's usage line shows (a repo name, a row number, "tashi", a window like 2d). Never invent an argument; if a required one (which row, which text) is missing, reply asking for it instead.`,
         `- A message that needs several commands, or a command plus reasoning over its output, is a plan, not a command.`,
+        ...(commands.some((c) => c.name === "goal")
+          ? [
+              `- A goal in plain words ("my goal this month is 20 applications") is command goal with args shaped exactly like "add Apply to 20 jobs | target=20 by=2026-10-31": a short title, then a literal | before the options, then target=<n> and by=YYYY-MM-DD only when he gave a deadline (work it out from the clock line). Never drop the |. Leave metric out: the founder picks how it is measured with buttons. Do not ask him for a metric key.`,
+            ]
+          : []),
       ]
     : [];
   return [
@@ -275,6 +281,7 @@ export function makePlanNode(
   commands: readonly CommandCatalogEntry[] = [],
   turnLog?: TurnLog,
   screen?: ScreenSource,
+  gatedTools: ReadonlySet<string> = new Set(),
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
@@ -308,6 +315,11 @@ export function makePlanNode(
     }
 
     const override = parseRouteOverride(input);
+    // "What can you do / list your tools": answered from the registry in code, never by the model (P2-5).
+    const selfKnowledge = override ? null : answerSelfKnowledge(input, catalog.map((w) => ({ id: w.id, toolNames: w.toolNames })), gatedTools);
+    if (selfKnowledge !== null) {
+      return { ...base, mission: { goal: input, status: "done", plan: null, cursor: 0 }, reply: selfKnowledge };
+    }
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
