@@ -49,7 +49,8 @@
 #   AGENT_DISPATCH_LEASE_MIN    minutes before a stale agent:working claim is released, default: 60
 #   AGENT_DISPATCH_TIMEOUT_SEC  per-agy-invocation timeout, default: 2400 (keep the lease >= 10 min longer)
 #   AGENT_DISPATCH_ENV_FILE     dotenv with TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID for escalation, and
-#                               GOOGLE_GENERATIVE_AI_API_KEY (the "key file": its mtime is watched)
+#                               GOOGLE_GENERATIVE_AI_API_KEY (the "key file": its mtime is watched), and
+#                               AGENT_PIPELINE_V2 when the environment does not set it
 #   AGENT_DISPATCH_PROGRESS_POLL_SEC  seconds between "what's the CLI doing
 #                               right now" Telegram edits while it runs, default: 20
 #   AGENT_DISPATCH_CLAUDE_MODEL model Claude Code writes with, default: sonnet

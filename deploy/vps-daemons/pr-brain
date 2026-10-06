@@ -50,7 +50,8 @@
 #   PR_BRAIN_ROOT              where to auto-discover repos (default ~/Projects)
 #   PR_BRAIN_ENV_FILE          dotenv holding TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.
 #                              Set it and every gate action is announced on Telegram.
-#                              Unset => silent (log only).
+#                              Unset => silent (log only). AGENT_PIPELINE_V2 is read from it too
+#                              when the environment does not set it.
 #   PR_BRAIN_MAX_ATTEMPTS      failed gates on one head before it stops retrying (default 3)
 #   PR_BRAIN_MERGE             0 = review and clear, but never merge (default 1). For a manual review of a PR you
 #                              want to merge yourself, e.g. a change to this loop: a cleared PR on beta is otherwise
