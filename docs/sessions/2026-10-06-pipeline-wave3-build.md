@@ -23,7 +23,7 @@ Stack: #926 (pending store) → A → P → I → EV → J → chain. GW is a si
 The chain test exists because slice tests do not prove the seams. It checks that the fingerprint Pass P records is the one Approve checks, that the contract Approve stores is what the executor prompt and the evidence card read, that the merge sha the Merge tap writes is the one the report selects, and that a moved head or a spent card stops the chain. Three seam mutations (no `merged_sha`, stale head ignored, no spec commit) each fail it.
 
 ## Metrics
-- chain: 6 tests; unit suites 262 files, 3499 passed; scripts suite at the macOS baseline of 12 failures (midrun 1, down-state 1, pr-brain-notify 2, pr-brain-token 5, tg-quiet 3) — same on main.
+- chain: 6 tests; unit suites 262 files, 3499 passed; scripts suite at the macOS baseline of 12 failures (midrun 1, down-state 1, pr-brain-notify 2, pr-brain-token 5, tg-quiet 3) — the baseline measured earlier in this session on this machine; those 12 are macOS-only bash-test failures, none in files these slices touch.
 - Zero paid calls.
 
 ## Outstanding
