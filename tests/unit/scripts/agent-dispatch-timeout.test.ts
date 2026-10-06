@@ -37,6 +37,6 @@ describe("agent-dispatch — time budget", () => {
     sb.tick({ agyOut: "done" });
     const prompt = sb.agyPrompts()[0] ?? "";
     expect(prompt).toMatch(/only the test files you added or changed/i);
-    expect(prompt).toMatch(/do not run the full `?pnpm test`?/i);
+    expect(prompt).toMatch(/do not run the full\s+`?pnpm test`?/i);
   });
 });
