@@ -166,6 +166,12 @@ write_effective() {
 # that never ran. Every action this script takes on GitHub is announced.
 TG_DAEMON_NAME="${TG_DAEMON_NAME:-pr-brain}"
 ENV_FILE="${PR_BRAIN_ENV_FILE:-}"
+# The coding pipeline switch lives in .env on prod, not in cron's env (issue #956). The process env wins when it
+# sets it; exported because scripts/pipeline-evidence-card.ts reads it from its own env.
+if [[ -z "${AGENT_PIPELINE_V2+x}" && -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
+  AGENT_PIPELINE_V2=$(grep -m1 '^AGENT_PIPELINE_V2=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  export AGENT_PIPELINE_V2
+fi
 notify() {
   if tg_should_hold "$1"; then
     tg_hold "$1"

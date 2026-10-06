@@ -152,6 +152,12 @@ KEY_MTIME_AT_START=0
 if [[ -f "$ENV_FILE" ]]; then
   KEY_MTIME_AT_START=$(file_mtime "$ENV_FILE")
   GEMINI_API_KEY=$(grep -m1 '^GOOGLE_GENERATIVE_AI_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  # The coding pipeline switch lives in .env on prod, not in cron's env (issue #956: Pass P was a silent no-op).
+  # The process env wins when it sets it; exported because scripts/pipeline-*.ts read it from their own env.
+  if [[ -z "${AGENT_PIPELINE_V2+x}" ]]; then
+    AGENT_PIPELINE_V2=$(grep -m1 '^AGENT_PIPELINE_V2=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+    export AGENT_PIPELINE_V2
+  fi
 fi
 CLAIM_PREFIX="<!-- agent-claimed:"
 ATTEMPT_PREFIX="<!-- agent-attempt:"
