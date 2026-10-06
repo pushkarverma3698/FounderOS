@@ -23,6 +23,7 @@ import {
 } from "../../db/queries.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { chatIdFromThreadId } from "../../infra/telegram-send.js";
 
 const log = childLogger({ module: "agent-tools:scheduling" });
 
@@ -66,7 +67,8 @@ export const scheduleTask = tool(
       prompt,
       scheduled_at,
       recurrence,
-      chat_id: env.TELEGRAM_CHAT_ID,
+      // The chat that asked: the fired turn runs on, and reports to, that chat (the family group, not the DM).
+      chat_id: chatIdFromThreadId(config?.configurable?.["thread_id"]) ?? env.TELEGRAM_CHAT_ID,
       // Deterministic key so an interrupt() resume never schedules twice.
       idempotency_key: idemKey("schedtask", prompt, scheduled_at ?? `every:${recurrence ?? ""}`),
       tenant_id: TENANT,
