@@ -323,11 +323,19 @@ export function parseGoalCommand(rawArgs: string, ctx: ParseContext): ParseResul
  */
 export function goalArgsOf(messageText: string): string | null {
   const text = messageText.trim();
-  const match = /\/goal(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*)|$)/i.exec(text);
+  if (!text) return null;
+
+  const commandIdx = text.indexOf("Command:");
+  const targetText = commandIdx !== -1 ? text.slice(commandIdx) : text;
+
+  const match = /(?:^|\n)\s*(?:Command:\s*)?(?:<code>)?\s*\/goal(?:@[a-zA-Z0-9_]+)?(?:\s+([^\r\n]*?))?\s*(?:<\/code>)?\s*(?:\r?\n|$)/i.exec(targetText);
   if (!match) return null;
-  let raw = (match[1] ?? "").trim();
-  const tagIdx = raw.search(/<\/[a-zA-Z0-9]+>/);
-  if (tagIdx !== -1) raw = raw.slice(0, tagIdx).trim();
-  return raw;
+
+  let raw = match[1] ?? "";
+  if (raw.endsWith("</code>")) {
+    raw = raw.slice(0, -7);
+  }
+  return raw.trim();
 }
+
 
