@@ -18,6 +18,7 @@
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
+import { getPullRequest, listPullRequests } from "./github-pr.js";
 
 const log = childLogger({ module: "tool:github" });
 
@@ -175,14 +176,14 @@ async function createRepo(
 export const githubTool: UnifiedTool = {
   name: "github_mcp",
   description:
-    "Interact with GitHub: list repos, read README, get profile stats, list issues/branches/commits, create issues and repos.",
+    "Interact with GitHub: list repos, read README, get profile stats, list issues/branches/commits/PRs, read one PR (diff, CI, reviews, comments), create issues and repos.",
   input_schema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "list_issues", "list_branches", "list_commits", "create_issue", "create_repo"],
-        description: "The GitHub operation to perform. list_issues/list_branches/list_commits require owner+repo.",
+        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr", "create_issue", "create_repo"],
+        description: "The GitHub operation to perform. list_issues/list_branches/list_commits/list_prs require owner+repo; get_pr also needs number.",
       },
       owner: {
         type: "string",
@@ -207,6 +208,10 @@ export const githubTool: UnifiedTool = {
       private: {
         type: "string",
         description: "For create_repo: 'true' to create a private repo, omit or 'false' for public.",
+      },
+      number: {
+        type: "number",
+        description: "For get_pr: the pull request number.",
       },
       labels: {
         type: "string",
@@ -308,6 +313,22 @@ export const githubTool: UnifiedTool = {
               date: c.commit.author?.date,
             })),
           };
+        }
+
+        case "list_prs": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          if (!owner || !repo) return { success: false, error: "list_prs requires owner and repo" };
+          return await listPullRequests(octokit, owner, repo);
+        }
+
+        case "get_pr": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          const number = Number(args["number"]);
+          if (!owner || !repo || !Number.isInteger(number) || number <= 0)
+            return { success: false, error: "get_pr requires owner, repo, and number (the PR number)" };
+          return await getPullRequest(octokit, owner, repo, number);
         }
 
         case "create_issue": {

@@ -237,7 +237,7 @@ export const projectWorkflowTool: UnifiedTool = {
       },
       command: {
         type: "string",
-        description: "Shell command for run_command. Run from the specified cwd (default: ~/Projects/founderos).",
+        description: "Shell command for run_command. Runs in cwd: a project name or absolute path (default: the running app's own tree).",
       },
       path: {
         type: "string",
@@ -319,14 +319,19 @@ export const projectWorkflowTool: UnifiedTool = {
       const command = args["command"] as string | undefined;
       if (!command) return { success: false, error: "run_command requires a command argument." };
 
+      // resolveProjectPath expands ~/ — a plain join turned "~/Projects" into
+      // <root>/~/Projects, which made every such command fail with ENOENT.
       const rawCwd = (args["cwd"] as string | undefined) ?? defaultCwd;
-      const absCwd = rawCwd.startsWith("/") ? rawCwd : join(root, rawCwd);
+      const absCwd = resolveProjectPath(rawCwd);
 
       if (!isProjectPath(absCwd) && absCwd !== root) {
         return {
           success: false,
-          error: `Access denied: cwd ${absCwd} is outside ~/Projects.`,
+          error: `Access denied: cwd ${absCwd} is outside the allowed roots (${projectRoots().join(", ")}).`,
         };
+      }
+      if (!existsSync(absCwd)) {
+        return { success: false, error: `cwd ${absCwd} does not exist. Pass an existing directory under ${root}.` };
       }
 
       try {
@@ -353,7 +358,8 @@ export const projectWorkflowTool: UnifiedTool = {
       } catch (err) {
         const execErr = err as { stdout?: string | Buffer; stderr?: string | Buffer; message: string };
         const stdout = execErr.stdout?.toString().trim() ?? "";
-        const stderr = execErr.stderr?.toString().trim() ?? execErr.message;
+        // `||`, not `??`: exec reports an empty stderr as "", which hid the real reason.
+        const stderr = execErr.stderr?.toString().trim() || execErr.message;
         return {
           success: false,
           error: `Command failed.\n${stderr ? `stderr: ${stderr}` : ""}${stdout ? `\nstdout: ${stdout}` : ""}`,
