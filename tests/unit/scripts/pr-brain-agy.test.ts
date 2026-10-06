@@ -555,6 +555,15 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
 
     expect(agyLog("model")).toEqual([FALLBACK]);
   });
+
+  it("also keeps off every executor FALLBACK candidate: a PR does not record which AGENT_DISPATCH_MODELS entry wrote it", () => {
+    sweep({
+      agyOut: review("BRAIN-VERDICT: PASS"),
+      env: { AGENT_DISPATCH_MODELS: `gemini-3.6-flash-medium,${FALLBACK}`, PR_BRAIN_MODELS: `${FALLBACK} ${SPENT}` },
+    });
+
+    expect(agyLog("model")).toEqual([SPENT]);
+  });
 });
 
 describe("a reviewer model agy no longer has (2026-10-03: claude-sonnet-4-6 became claude-sonnet-5-5-*, and the reviewer paused itself on it)", () => {

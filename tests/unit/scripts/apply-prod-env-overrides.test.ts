@@ -157,6 +157,14 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "JOBHUNT_CHAT_ID")).toBe("-100333");
   });
 
+  it("preserves the on-box AGENT_PIPELINE_V2 and ORACLE_ALLOWED_HOSTS — the pipeline switch survives every deploy", () => {
+    // 2026-10-06: the deploy of #941 re-rendered .env and dropped both, switching the coding pipeline off
+    // right after the founder turned it on. They are founder-set on the box, so they are not in the snapshot.
+    const rendered = render("AGENT_PIPELINE_V2=1\nORACLE_ALLOWED_HOSTS=app.example.test\n", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "AGENT_PIPELINE_V2")).toBe("1");
+    expect(valueOf(rendered, "ORACLE_ALLOWED_HOSTS")).toBe("app.example.test");
+  });
+
   it("preserves the on-box AGENT_DISPATCH_BIN — a filed issue starts in seconds, not at the next cron tick", () => {
     const rendered = render("AGENT_DISPATCH_BIN=/home/founderos/bin/agent-dispatch\n", SNAPSHOT_BASE);
     expect(valueOf(rendered, "AGENT_DISPATCH_BIN")).toBe("/home/founderos/bin/agent-dispatch");
