@@ -73,7 +73,7 @@ export const searchKnowledge = tool(
   {
     name: "search_knowledge",
     description:
-      "Search the turicks-brain knowledge base — architectural decisions (ADRs), brand rules, past case studies, strategic pillars, and phase notes. Use when you need company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', 'what we decided about direct integrations', 'FinTech client case studies'.",
+      "Search the shared brain — architectural decisions (ADRs), brand rules, past case studies, strategic pillars, phase notes, and the decisions, bugs and work that Claude and Antigravity recorded (each hit shows its date and origin; a weak match is labelled 'No strong match', so say that rather than guess). Use for 'what did we decide about X', 'what did Claude/Antigravity do', and when you need company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', 'what we decided about direct integrations', 'FinTech client case studies'.",
     schema: z.object({
       query: z.string().describe("Keyword search query — what to look for"),
       entry_type: z
