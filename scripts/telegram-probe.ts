@@ -26,7 +26,7 @@
  *   node --import tsx/esm --env-file=.env scripts/telegram-probe.ts "your prompt" [waitSeconds]
  */
 
-import { connect, botUsername, sleep, POLL_INTERVAL_MS, assertMtprotoConfigured } from "./lib/mtproto.js";
+import { connect, probePeer, sleep, POLL_INTERVAL_MS, assertMtprotoConfigured } from "./lib/mtproto.js";
 
 const DEFAULT_WAIT_S = 360;
 
@@ -53,10 +53,10 @@ async function main(): Promise<void> {
   const waitS = Number(process.argv[3] ?? DEFAULT_WAIT_S);
 
   assertMtprotoConfigured();
-  const peer = await botUsername();
   const client = await connect();
+  const peer = await probePeer(client);
 
-  console.log(`→ as founder, to @${peer} (waiting up to ${waitS}s)\n   ${prompt}\n`);
+  console.log(`→ as founder, to ${typeof peer === "string" && !peer.startsWith("@") ? "@" : ""}${peer} (waiting up to ${waitS}s)\n   ${prompt}\n`);
   const startedAt = Date.now();
   const sent = await client.sendMessage(peer, { message: prompt });
 
