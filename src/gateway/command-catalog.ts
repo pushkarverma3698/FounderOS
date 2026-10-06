@@ -20,7 +20,7 @@ export const NEVER_FROM_PLAIN_WORDS: ReadonlySet<string> = new Set(["reset", "st
 /** Commands that only read: they run the moment the planner picks them. */
 export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "where", "tasks", "jobs", "today", "fresh", "csv", "gaps", "status", "budget", "goals", "commands",
-  "focus", "projects", "profile", "review",
+  "focus", "projects", "profile", "review", "now",
 ]);
 
 /** Read-only with no argument, a write with one: `/focus` shows it, `/focus close the pilot` replaces it. */
