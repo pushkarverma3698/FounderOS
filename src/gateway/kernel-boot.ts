@@ -17,6 +17,7 @@ import {
   type KernelBindableModel,
   type KernelChatModel,
   type KernelTool,
+  type ScreenSource,
   type TurnLog,
   type WorkerSpec,
   WORKERS,
@@ -32,6 +33,8 @@ import {
   resolveTemperature,
 } from "../agents/model.js";
 import { recordConversationTurn } from "../db/conversation-turns.js";
+import { readScreen } from "../infra/screen-log.js";
+import { chatIdFromThreadId } from "../infra/telegram-send.js";
 import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
 import { withModelRetry } from "./model-retry.js";
@@ -201,6 +204,16 @@ export function buildTurnLog(): TurnLog {
   return { record: (turn, threadId) => recordConversationTurn(threadId, turn) };
 }
 
+/** The founder's Telegram screen (infra/screen-log.ts), read for the thread's own chat only. */
+export function buildScreenSource(): ScreenSource {
+  return {
+    recent: async (threadId, now) => {
+      const chat = chatIdFromThreadId(threadId);
+      return chat ? readScreen(chat, now) : [];
+    },
+  };
+}
+
 /**
  * Postgres-backed LessonStore (the Hermes learning seam). Failure-tolerant on
  * every edge: lessons are an accelerant — a DB blip must degrade to "no
@@ -320,6 +333,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     checkpointer,
     lessons: buildLessonStore(),
     turnLog: buildTurnLog(),
+    screen: buildScreenSource(),
   });
 }
 

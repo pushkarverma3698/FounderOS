@@ -24,6 +24,7 @@ import type { PlannedCommand } from "./contracts.js";
 import { makePlanNode, type CommandCatalogEntry, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
 import type { Clock } from "../core/time.js";
 import type { TurnLog } from "./turn-log.js";
+import type { ScreenSource } from "./screen.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -44,6 +45,8 @@ export interface KernelConfig {
   clock?: Clock;
   /** Durable log of finished turns, read by recall_conversation (Postgres in prod, absent in tests). */
   turnLog?: TurnLog;
+  /** What the founder saw in Telegram outside the conversation (the screen log in prod, absent in tests). */
+  screen?: ScreenSource;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -58,7 +61,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))

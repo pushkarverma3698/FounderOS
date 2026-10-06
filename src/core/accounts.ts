@@ -16,7 +16,7 @@ export const PLATFORMS = ["google", "linkedin", "instagram", "facebook", "github
 export type Platform = (typeof PLATFORMS)[number];
 
 /** How credentials are obtained for a platform account. */
-export const AUTH_BACKENDS = ["gws", "direct", "meta_graph", "composio", "pat"] as const;
+export const AUTH_BACKENDS = ["gws", "direct", "meta_graph", "pat"] as const;
 export type AuthBackend = (typeof AUTH_BACKENDS)[number];
 
 export const ACCOUNT_STATUSES = ["active", "expired", "disabled"] as const;
@@ -40,9 +40,6 @@ export interface CredentialRefs {
   /** Env var holding the impersonation subject — the mailbox to act as
    *  (googleapis domain-wide delegation). */
   google_subject_env?: string;
-  /** Composio rollback — env vars for connection + user id. */
-  composio_connection_id_env?: string;
-  composio_user_id_env?: string;
   /** GitHub PAT env var. */
   github_token_env?: string;
   /** Meta Graph API app id / page id env vars. */

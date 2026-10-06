@@ -2,7 +2,7 @@
  * FounderOS — LinkedIn Tool
  * =========================
  * Posting + analytics via provider backend (direct API default).
- * Connection requests remain Composio-only and are policy-blocked on direct.
+ * Connection requests are policy-blocked (ADR-009).
  *
  * See ADR-009 (ban risk) and ADR-029 (direct integrations).
  */

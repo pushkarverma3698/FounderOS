@@ -53,20 +53,13 @@ TELEGRAM_BOT_TOKEN=<your bot token>
 TELEGRAM_CHAT_ID=<your numeric chat id>
 GOOGLE_GENERATIVE_AI_API_KEY=<Gemini key>
 
-# Platform integrations (ADR-029 — direct APIs; Composio = legacy rollback)
+# Platform integrations (ADR-029 — direct APIs)
 # Google: npm install -g @googleworkspace/cli && gws auth login (on VPS)
 # GMAIL_BACKEND=gws          # default
 # CALENDAR_BACKEND=gws         # default (follows GMAIL_BACKEND)
 LINKEDIN_ACCESS_TOKEN=<founder OAuth token>
 LINKEDIN_AUTHOR_URN=urn:li:person:...
 # LINKEDIN_BACKEND=direct      # default
-
-# Legacy rollback (only if direct APIs fail):
-# COMPOSIO_API_KEY=<key>
-# GMAIL_BACKEND=composio
-# LINKEDIN_BACKEND=composio
-# COMPOSIO_GMAIL_CONN_ID=ca_...
-# COMPOSIO_LINKEDIN_CONN_ID=ca_...
 
 # Optional
 FIRECRAWL_API_KEY=<key>   # web search
@@ -148,7 +141,7 @@ pnpm brain:sync
 Full checklist: `../rules/TOOL-STANDARDS.md`
 
 1. `src/tools/{name}.ts` — implement `UnifiedTool`
-2. `tests/unit/tools/{name}.test.ts` — mock Composio, test soft-failure path
+2. `tests/unit/tools/{name}.test.ts` — mock the provider layer, test soft-failure path
 3. `src/agents/agent-tools.ts` — add LangChain wrapper with `hitlGate()`
 4. `src/agents/office.ts` — wire into the right department's `tools: []` array
 5. `pnpm test` + `pnpm lint` green
@@ -185,8 +178,7 @@ node --env-file=.env --import tsx/esm scripts/probe-direct-integrations.ts
 ```
 
 **LinkedIn token expired:**
-Set fresh `LINKEDIN_ACCESS_TOKEN` in `.env` (founder re-OAuth). Or rollback:
-`LINKEDIN_BACKEND=composio` + `COMPOSIO_API_KEY`.
+Set fresh `LINKEDIN_ACCESS_TOKEN` in `.env` (founder re-OAuth).
 
 **Calendar not creating:**
 ```bash
@@ -200,7 +192,6 @@ node --env-file=.env --import tsx/esm scripts/probe-direct-integrations.ts
 ```bash
 npx tsx --env-file=.env scripts/probe-direct-integrations.ts  # gws + LinkedIn direct
 npx tsx --env-file=.env scripts/probe-providers.ts            # all provider probes
-npx tsx --env-file=.env scripts/probe-gcal.ts                 # calendar (legacy Composio)
 npx tsx --env-file=.env scripts/probe-real-task.ts            # run task through real office
 pnpm graph:gen                                                # regenerate .claude/graph.json
 ```

@@ -254,7 +254,6 @@ The app runs without Redis (caching degrades gracefully) but quota checks and re
 | `LANGCHAIN_API_KEY` | Optional | LangSmith observability |
 | `LANGCHAIN_TRACING_V2` | Optional | `"true"` to enable tracing |
 | `FIRECRAWL_API_KEY` | Optional | Web scraping for lead intel |
-| `COMPOSIO_API_KEY` | Optional | Gmail + LinkedIn tools |
 | `LM_STUDIO_URL` | Optional | Local model server (default: localhost:1234) |
 | `BUDGET_DAILY_USD` | Optional | Daily LLM spend cap (default: $5.00) |
 | `LOG_LEVEL` | Optional | `debug`/`info`/`warn` (default: `info`) |

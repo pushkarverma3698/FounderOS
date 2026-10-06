@@ -70,6 +70,7 @@ export {
   SCRATCH_KEEP_RECENT_TOOL_RESULTS,
 } from "./tool-output-guard.js";
 export { recordTurnSafely, type TurnLog } from "./turn-log.js";
+export { renderScreenBlock, screenBlockFor, type ScreenSource } from "./screen.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

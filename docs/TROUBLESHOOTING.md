@@ -15,7 +15,7 @@ A `FailureReport` tells you the stage. Map it to where to look:
 | `validation` | A contract didn't parse | The offending `schema_ref`; the planner or worker output |
 | `planning` | The planner produced no valid plan | `src/kernel/planner.ts`; the model + prompt |
 | `routing` | Dispatch couldn't route a step | The `worker` id in the envelope vs the worker registry |
-| `tool` | A tool failed | The `component` field names it (composio, github, db, …) |
+| `tool` | A tool failed | The `component` field names it (github, db, …) |
 | `model` | Provider error | Status class (`src/agents/model.ts`); see below |
 | `budget` | Cap hit | `RUN_BUDGET_USD` / `BUDGET_DAILY_USD`; `ai_call_costs` |
 | `timeout` | Step/turn exceeded time | The slow tool; provider latency |

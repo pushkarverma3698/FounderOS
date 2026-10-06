@@ -406,12 +406,10 @@ comms-send path only. Related awareness is real and scattered:
 `src/mcp/bridge-classify.ts` (untrusted server annotations are hints, not
 guarantees).
 
-## C7. Composio remains a shared failure domain — **MEDIUM**
+## C7. Composio — **RESOLVED 2026-10-05**
 
-Unchanged from the previous revision and still accurate: one invalid Composio key
-takes down multiple send paths at once, surfacing only at send time.
-**Direction (ADR-041): do not expand Composio.** New integrations go through the
-MCP bridge, where a dead server isolates to its own tools.
+Composio was removed from the code and the dependency. The shared failure domain
+is gone; new integrations go through the MCP bridge (ADR-041).
 
 ## C8. No memory decay — **LOW today**
 
