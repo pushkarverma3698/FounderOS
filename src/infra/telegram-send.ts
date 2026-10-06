@@ -13,14 +13,18 @@
 import { Bot, InputFile } from "grammy";
 import { env } from "../core/config.js";
 import { childLogger } from "./logger.js";
+import { installScreenCapture } from "./screen-log.js";
 
 const log = childLogger({ module: "telegram-send" });
 
 let _bot: Bot | undefined;
 
-/** Lazy api-only bot singleton (constructed from the validated token). */
+/** Lazy api-only bot singleton (constructed from the validated token). Its sends go to the screen log. */
 function api() {
-  if (!_bot) _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+  if (!_bot) {
+    _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+    installScreenCapture(_bot.api, "bot");
+  }
   return _bot.api;
 }
 

@@ -68,6 +68,12 @@ export const TOMBSTONES: string[] = [
   "src/tools/jobhunt/apply-driver.ts",
   "src/tools/jobhunt/apply-scrape.ts",
   "src/tools/jobhunt/apply-fill.ts",
+  // Composio (founder decision 2026-10-05, "delete composio as we don't use it"):
+  // gws + LinkedIn direct are the only backends; ADR-029's rollback path is retired.
+  "src/infra/composio.ts",
+  "src/infra/providers/google-composio.ts",
+  "src/infra/providers/linkedin-composio.ts",
+  "src/types/composio.d.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */

@@ -4,7 +4,7 @@
  * Centralizes which integration adapter is active per platform.
  * Departments and agent-tools stay unchanged — only provider adapters switch.
  *
- * Defaults (ADR-029): gws (Google), direct (LinkedIn). Composio = legacy rollback.
+ * Defaults (ADR-029): gws (Google), direct (LinkedIn). 
  * See docs/decisions/029-direct-platform-integrations.md
  */
 
@@ -45,13 +45,11 @@ function envOr(key: string): string | undefined {
 function parseGoogleBackend(raw: string | undefined, fallback: GoogleBackend): GoogleBackend {
   const v = (raw ?? fallback).toLowerCase();
   if (v === "googleapis") return "googleapis";
-  if (v === "composio") return "composio";
   return "gws";
 }
 
-function parseLinkedInBackend(raw: string | undefined): LinkedInBackend {
-  const v = (raw ?? "direct").toLowerCase();
-  return v === "composio" ? "composio" : "direct";
+function parseLinkedInBackend(): LinkedInBackend {
+  return "direct";
 }
 
 /** Active Gmail backend. Default: gws (direct Google Workspace CLI). */
@@ -68,7 +66,7 @@ export function getCalendarBackend(): CalendarBackend {
 
 /** Active LinkedIn backend. Default: direct (LinkedIn Posts API). */
 export function getLinkedInBackend(): LinkedInBackend {
-  return parseLinkedInBackend(envOr("LINKEDIN_BACKEND"));
+  return parseLinkedInBackend();
 }
 
 /**
@@ -94,7 +92,7 @@ export function getGwsBin(): string {
 }
 
 /**
- * Run reachability probes at boot (gws + legacy Composio when configured).
+ * Run reachability probes at boot (gws, googleapis, LinkedIn direct).
  * Default: on in production, off in dev/test unless forced.
  */
 export function shouldRunProviderSmoke(): boolean {

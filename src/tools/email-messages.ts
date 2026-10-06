@@ -1,7 +1,7 @@
 /**
  * FounderOS — Shared email message types + formatting
  * ====================================================
- * Pure helpers shared by Composio and gws Gmail read backends.
+ * Pure helpers for the gws Gmail read backend.
  */
 
 export interface EmailMessage {
@@ -24,27 +24,6 @@ export function normalizeEmailMessage(raw: Record<string, unknown>): EmailMessag
   };
 }
 
-/** Extract messages from a Composio GMAIL_FETCH_EMAILS response. */
-export function extractComposioMessages(result: Record<string, unknown>): EmailMessage[] {
-  const data = result["data"];
-  if (Array.isArray(data)) {
-    return data.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
-  }
-  if (data && typeof data === "object") {
-    const nested = data as { messages?: unknown[] };
-    if (Array.isArray(nested.messages)) {
-      return nested.messages.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
-    }
-  }
-  if (Array.isArray(result["messages"])) {
-    return (result["messages"] as unknown[]).map((m) =>
-      normalizeEmailMessage(m as Record<string, unknown>),
-    );
-  }
-  return [];
-}
-
-/** Read a Gmail API header value from a gws messages.get payload. */
 export function headerFromGwsPayload(payload: unknown, name: string): string | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const headers = (payload as { headers?: Array<{ name?: string; value?: string }> }).headers;

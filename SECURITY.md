@@ -31,7 +31,7 @@ VPS). Security fixes land on `main`. There is no back-port branch.
 | **Path-guard on file/shell tools** | `src/infra` path safety | File access is `$HOME`-confined; `.ssh`, `.env`, `*.pem`, `/etc` are blocked even on read. |
 | **Least privilege per worker** | `src/agents/capabilities.ts` | The `personal` worker's shell/file/browser access is isolated from business workers; each worker carries only the tools it needs. |
 | **Zero-hallucination receipts** | `validateStepResult` | An action claim without a code-recorded successful receipt is rejected — the agent cannot *say* it did something it didn't. |
-| **Secrets are env-only** | `src/core/config.ts`, `src/infra/composio.ts` | No credentials in source. Missing required secrets fail loudly at startup. |
+| **Secrets are env-only** | `src/core/config.ts` | No credentials in source. Missing required secrets fail loudly at startup. |
 | **Audit trail** | `action_log` (Postgres) | Every action is written with tenant + idempotency key on real success only. |
 | **Budget caps** | `src/infra/budget.ts`, `daily-budget` | Per-run and per-day USD ceilings bound blast radius and cost. |
 | **Determinism** | temperature 0, pure routing | Behavior is reproducible; routing/guards are unit-tested code, not prompt text. |

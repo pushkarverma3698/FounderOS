@@ -4,20 +4,10 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  extractComposioMessages,
   extractGwsMessageIds,
   emailFromGwsGet,
   formatEmailList,
 } from "../../../src/tools/email-messages.js";
-
-describe("extractComposioMessages", () => {
-  it("reads nested data.messages shape", () => {
-    const msgs = extractComposioMessages({
-      data: { messages: [{ sender: "a@b.com", subject: "Hi" }] },
-    });
-    expect(msgs[0]?.sender).toBe("a@b.com");
-  });
-});
 
 describe("extractGwsMessageIds", () => {
   it("extracts ids from Gmail API list response", () => {

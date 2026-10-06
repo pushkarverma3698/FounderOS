@@ -1,7 +1,7 @@
 {
   "name": "founderos",
   "version": "0.1.0",
-  "description": "FounderOS \u2014 Multi-agent AI operating system for Turicks",
+  "description": "FounderOS — Multi-agent AI operating system for Turicks",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -71,7 +71,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
     "@aws-sdk/s3-request-presigner": "^3.1075.0",
-    "@composio/core": "0.10.0",
     "@googleapis/calendar": "^15.0.0",
     "@googleapis/gmail": "^17.0.0",
     "@langchain/anthropic": "^1.4.1",
