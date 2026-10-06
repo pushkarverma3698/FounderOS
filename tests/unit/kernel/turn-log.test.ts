@@ -125,3 +125,18 @@ describe("what a stored turn keeps", () => {
     expect(summary!.user_input).toHaveLength(2000);
   });
 });
+
+describe("a planner-routed command is already a recorded turn (so the gateway must not record it twice)", () => {
+  it("files the routed command's turn at the next plan, as what ran", async () => {
+    const { log, calls } = recordingLog();
+    const routed = stateAfterTurn({
+      last_turn: { id: "t1", chat_id: "c1", received_at: "2026-10-03T16:11:00Z", raw_input: "what is running" },
+      reply: "Ran /tasks",
+      command: { name: "tasks", args: "" },
+    });
+    await makePlanNode(model, catalog, undefined, [], log)(routed, withThread("turicks:42"));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.turn).toMatchObject({ turn_id: "t1", user_input: "what is running", outcome: "replied", reply: "Ran /tasks" });
+  });
+});

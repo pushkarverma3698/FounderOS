@@ -25,6 +25,7 @@ import {
   handleCommands,
   handleConnect,
   unknownCommandReply,
+  threadIdFor,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { injectSenderProfile, parseSenderProfiles } from "./jobhunt-sender-profile.js";
@@ -158,7 +159,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     await next();
   });
 
-  registerCommandDispatch(bot);
+  registerCommandDispatch(bot, threadIdFor);
   bot.command("start", (ctx: Context) => handleStart(ctx));
   bot.command("reset", (ctx: Context) => handleReset(ctx));
   bot.command("halt", (ctx: Context) => handleHalt(ctx));

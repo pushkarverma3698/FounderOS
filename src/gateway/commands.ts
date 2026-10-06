@@ -27,7 +27,7 @@ import type { McpServerEntry } from "../mcp/bridge-manifest.js";
 
 const log = logger.child({ module: "commands" });
 
-function threadIdFor(chatId: number | string): string {
+export function threadIdFor(chatId: number | string): string {
   return `${TENANT}:${chatId}`;
 }
 

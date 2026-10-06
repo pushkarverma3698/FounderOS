@@ -20,6 +20,7 @@ import type { Update } from "grammy/types";
 import { randomBytes } from "node:crypto";
 import type { PlannedCommand } from "../kernel/index.js";
 import { needsConfirmation } from "./command-catalog.js";
+import { commandTurnRecorder, markSyntheticUpdate } from "./command-turns.js";
 import { esc } from "../tools/jobhunt/telegram-format.js";
 import { logger } from "../infra/logger.js";
 
@@ -39,9 +40,14 @@ interface Origin {
 const pending = new Map<string, { command: PlannedCommand; origin: Origin; expires: number }>();
 let botRef: Bot | undefined;
 
-/** Called once from registerHandlers: the dispatcher needs the bot to re-enter its handlers. */
-export function registerCommandDispatch(bot: Bot): void {
+/**
+ * Called once from registerHandlers: the dispatcher needs the bot to re-enter its handlers.
+ * With `threadIdFor` it also files every command the founder TYPES as a turn (command-turns.ts); the
+ * updates this module replays are marked, so the planner-routed ones the kernel already recorded are skipped.
+ */
+export function registerCommandDispatch(bot: Bot, threadIdFor?: (chatId: number | string) => string): void {
   botRef = bot;
+  if (threadIdFor) bot.use(commandTurnRecorder(threadIdFor));
 }
 
 export function commandText(command: PlannedCommand): string {
@@ -50,7 +56,7 @@ export function commandText(command: PlannedCommand): string {
 
 /** The update Telegram would have sent had the founder typed the command himself. Pure. */
 export function syntheticCommandUpdate(origin: Origin, command: PlannedCommand): Update {
-  return {
+  return markSyntheticUpdate({
     update_id: Date.now(),
     message: {
       message_id: origin.messageId,
@@ -61,7 +67,7 @@ export function syntheticCommandUpdate(origin: Origin, command: PlannedCommand):
       text: commandText(command),
       entities: [{ type: "bot_command", offset: 0, length: command.name.length + 1 }],
     },
-  } as Update;
+  } as Update);
 }
 
 function originOf(ctx: Context): Origin | null {

@@ -19,6 +19,7 @@ import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
 import { getPendingInterrupt, resolveInterrupt, logLlmCost } from "../db/queries.js";
+import { recordHitlDecisionTurn } from "./hitl-decision-turn.js";
 import { BudgetExceededError, enforceRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
@@ -283,6 +284,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       }
       if (pending) {
         await resolveInterrupt(pending.interrupt_id, decision);
+        recordHitlDecisionTurn(threadId, { interruptId: pending.interrupt_id, decision, cardJson: pending.callback_data, now: new Date() });
       }
       const kernel = await getKernel();
       budget = makeRunBudget();

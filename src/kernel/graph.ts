@@ -4,6 +4,7 @@
  * plan (LLM) → dispatch (pure) → agent (LLM) ⇄ tools → collect (pure)
  *                     ↑______________________________________|
  *                     └→ synthesize (LLM) → evaluate → END   └→ finish (failure reply)
+ * plan also goes straight to evaluate when it answers directly (no step ran): that reply is judged too.
  *
  * `evaluate` is the async answer-quality sink: it starts a judge call and returns
  * immediately without awaiting it, so it scores the turn without delaying it.
@@ -28,7 +29,8 @@ import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
 import { makeSynthesizeNode } from "./synthesizer.js";
-import { evaluateNode } from "./evaluate.js";
+import { makeEvaluateNode } from "./evaluate.js";
+import type { AnswerEvalDeps } from "../infra/answer-eval.js";
 
 export interface KernelConfig {
   plannerModel: KernelChatModel;
@@ -44,6 +46,8 @@ export interface KernelConfig {
   clock?: Clock;
   /** Durable log of finished turns, read by recall_conversation (Postgres in prod, absent in tests). */
   turnLog?: TurnLog;
+  /** Answer-evaluation seams (fake judge and writer in tests). Absent in prod: real free-tier judge and table. */
+  answerEval?: AnswerEvalDeps;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -64,9 +68,9 @@ export function buildKernel(config: KernelConfig) {
     .addNode("tools", makeToolsNode(specs))
     .addNode("collect", collect)
     .addNode("synthesize", makeSynthesizeNode(config.synthesizerModel))
-    .addNode("evaluate", evaluateNode)
+    .addNode("evaluate", makeEvaluateNode(config.answerEval))
     .addEdge(START, "plan")
-    .addConditionalEdges("plan", routeAfterPlan, { dispatch: "dispatch", finish: END })
+    .addConditionalEdges("plan", routeAfterPlan, { dispatch: "dispatch", evaluate: "evaluate", finish: END })
     .addConditionalEdges("dispatch", routeAfterDispatch, { agent: "agent", synthesize: "synthesize", finish: END })
     .addConditionalEdges("agent", routeAfterAgent, { tools: "tools", collect: "collect" })
     .addEdge("tools", "agent")

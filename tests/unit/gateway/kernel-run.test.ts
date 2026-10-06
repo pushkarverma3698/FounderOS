@@ -38,6 +38,11 @@ vi.mock("../../../src/infra/halt.js", () => ({
   formatHaltNotice: vi.fn(() => "halted"),
 }));
 
+const recordHitlDecisionTurn = vi.fn();
+vi.mock("../../../src/gateway/hitl-decision-turn.js", () => ({
+  recordHitlDecisionTurn: (...a: unknown[]) => recordHitlDecisionTurn(...a),
+}));
+
 const { runKernelText, resumeKernel, progressLabelFor } = await import("../../../src/gateway/kernel-run.js");
 import { Command } from "@langchain/langgraph";
 import type { KernelStateType } from "../../../src/kernel/index.js";
@@ -518,6 +523,26 @@ describe("withChatTurnLock queue-ack", () => {
 });
 
 describe("resumeKernel", () => {
+  it("files the approve or reject tap as a turn under the chat's thread, keyed on the pending interrupt", async () => {
+    recordHitlDecisionTurn.mockClear();
+    const card = JSON.stringify({ title: "Send email to Anna" });
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-9", created_at: new Date().toISOString(), callback_data: card });
+    await resumeKernel(fakeCtx().ctx, "rejected");
+    expect(recordHitlDecisionTurn).toHaveBeenCalledTimes(1);
+    const [threadId, input] = recordHitlDecisionTurn.mock.calls[0]! as [string, Record<string, unknown>];
+    expect(threadId).toMatch(/:/);
+    expect(input).toMatchObject({ interruptId: "int-9", decision: "rejected", cardJson: card });
+  });
+
+  it("files nothing for a stale card tap or when no approval is pending", async () => {
+    recordHitlDecisionTurn.mockClear();
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "current-1", created_at: new Date().toISOString() });
+    await resumeKernel(fakeCtx().ctx, "approved", "stale123");
+    getPendingInterrupt.mockResolvedValue(null);
+    await resumeKernel(fakeCtx().ctx, "approved");
+    expect(recordHitlDecisionTurn).not.toHaveBeenCalled();
+  });
+
   it("resolves the DB approval row and resumes the graph with the decision", async () => {
     getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
     const { ctx, replies } = fakeCtx();

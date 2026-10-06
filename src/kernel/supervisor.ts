@@ -213,7 +213,23 @@ export function routeAfterDispatch(state: KernelStateType): "agent" | "synthesiz
   }
 }
 
-/** Conditional edge after the plan node. */
-export function routeAfterPlan(state: KernelStateType): "dispatch" | "finish" {
-  return state.mission.status === "executing" ? "dispatch" : "finish";
+/**
+ * Conditional edge after the plan node.
+ *
+ * A direct reply (the planner answered without a plan, a failure or a routed command) goes to "evaluate"
+ * so the answer judge scores it like any synthesized answer. Those replies are where unsupported claims
+ * about system state come from, and they used to be the one kind of turn nothing graded. The evaluate
+ * node is fire-and-forget and writes no state, so the reply is delivered unchanged. A routed command
+ * ("Ran /tasks") is not an answer, a failure already carries its own evidence, and a blank reply has
+ * nothing to score: all three still finish.
+ */
+export function routeAfterPlan(state: KernelStateType): "dispatch" | "evaluate" | "finish" {
+  if (state.mission.status === "executing") return "dispatch";
+  const isDirectReply =
+    state.mission.status === "done" &&
+    state.mission.plan === null &&
+    state.failure === null &&
+    state.command === null &&
+    (state.reply ?? "").trim().length > 0;
+  return isDirectReply ? "evaluate" : "finish";
 }

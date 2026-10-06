@@ -21,6 +21,7 @@ import type { Channel } from "./brand-validator.js";
 import { getJudgeModel, isJudgeEnabled, resolveJudgeModelId } from "./judge-model.js";
 import { recordJudgeFailure, recordJudgeSuccess } from "./judge-health.js";
 import { childLogger } from "./logger.js";
+import { NO_STEPS_NOTE, isDirectReply } from "./judge-direct-reply.js";
 
 // Provider wiring lives in judge-model.ts; re-exported so importers and the
 // existing test seams keep their current entry point.
@@ -283,7 +284,7 @@ function buildAnswerJudgePrompt(input: AnswerJudgeInput): string {
     "",
     `GOAL: ${input.goal}`,
     "",
-    steps.length > 0 ? `STEP RESULTS (the only ground truth):\n${steps.join("\n")}` : "STEP RESULTS: none were produced.",
+    steps.length > 0 ? `STEP RESULTS (the only ground truth):\n${steps.join("\n")}` : NO_STEPS_NOTE,
     "",
     "ANSWER:",
     '"""',
@@ -354,6 +355,7 @@ export async function judgeAnswer(
 ): Promise<AnswerJudgement> {
   const now = opts.now ?? Date.now;
   const injected = opts.model;
+  const directReply = isDirectReply(input); // judge-direct-reply.ts: why its failures skip the health counter
 
   if (!injected && !isJudgeEnabled()) {
     return {
@@ -381,7 +383,7 @@ export async function judgeAnswer(
     // caller of the fail-open judge, and every real outage since 2026-09-07 came
     // through this path, not judgeOutbound. Recording only one caller left the
     // outage monitor blind to the failure mode it was built to catch.
-    recordJudgeFailure(judgement.reason);
+    if (!directReply) recordJudgeFailure(judgement.reason);
     // Loud, and NOT cached: a transient outage must not pin "unscored" for the whole TTL.
     log.error(
       { reason: judgement.reason, model: judgeModelLabel(), event: "judge_unavailable" },
