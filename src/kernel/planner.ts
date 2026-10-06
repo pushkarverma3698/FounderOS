@@ -280,8 +280,8 @@ export function makePlanNode(
   clock: Clock = systemClock,
   commands: readonly CommandCatalogEntry[] = [],
   turnLog?: TurnLog,
-  gatedTools: ReadonlySet<string> = new Set(),
   screen?: ScreenSource,
+  gatedTools: ReadonlySet<string> = new Set(),
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 

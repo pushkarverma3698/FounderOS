@@ -159,7 +159,7 @@ describe("plan node", () => {
         return new AIMessage('{"type":"reply","text":"Research tools: deep_research, sales_pipeline"}');
       },
     };
-    const update = await makePlanNode(model, catalog, undefined, [], undefined, fixtureGated)(stateFor(PROD_QUESTION));
+    const update = await makePlanNode(model, catalog, undefined, [], undefined, undefined, fixtureGated)(stateFor(PROD_QUESTION));
     expect(calls).toBe(0);
     expect(update.mission).toMatchObject({ status: "done", plan: null });
     expect(update.failure).toBeNull();
@@ -175,7 +175,7 @@ describe("plan node", () => {
         return new AIMessage('{"type":"reply","text":"hi"}');
       },
     };
-    const update = await makePlanNode(model, catalog, undefined, [], undefined, fixtureGated)(stateFor("hello there"));
+    const update = await makePlanNode(model, catalog, undefined, [], undefined, undefined, fixtureGated)(stateFor("hello there"));
     expect(calls).toBe(1);
     expect(update.reply).toBe("hi");
   });
