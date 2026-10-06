@@ -8,6 +8,7 @@
  */
 
 import { searchBrain } from "../db/rag-search.js";
+import { hitHeader, renderWithAbstain } from "../db/brain-hit-view.js";
 import { brainIngest } from "../db/brain-ingest.js";
 import { writeToolIngestOptions } from "./brain-write-args.js";
 import { db } from "../db/client.js";
@@ -120,13 +121,9 @@ export async function callBrainTool(name: string, args: Record<string, unknown>)
           return formatResult(`No relevant context found.`);
         }
 
-        const text = result.hits.map((h, i) => {
-          const m = h.metadata;
-          return `--- Result ${i + 1} (Score: ${h.score.toFixed(3)}) ---\n` +
-                 `Type: ${h.memory_type ?? "unknown"} | Project: ${h.project ?? "none"} | Source: ${m.source_path ?? "unknown"}\n\n` +
-                 `${h.content}`;
-        }).join("\n\n");
-        
+        const text = renderWithAbstain(result.hits, query, (h, i) =>
+          `--- Result ${i + 1} (Score: ${h.score.toFixed(3)}) ---\n${hitHeader(h)}\n\n${h.content}`);
+
         return formatResult(text);
       }
       

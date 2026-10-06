@@ -5,10 +5,11 @@
  *
  *   search_memory  — read-only, no HITL. Routes a query across:
  *                    1. episodic_memory  (time-ordered events)
- *                    2. knowledge_entries (turicks-brain)
- *                    3. conversation_turns (what the founder said in THIS chat)
- *                    4. founder_context  (JSONB business state)
+ *                    2. conversation_turns (what the founder said in THIS chat)
+ *                    3. founder_context  (JSONB business state)
  *                    Results ranked by recency and formatted for Telegram.
+ *                    Decisions, bugs and past agent work live in brain.brain_memories and are read by
+ *                    search_knowledge, not here (AG-025). The legacy knowledge_entries table is no longer read.
  *
  *   record_event   — raw write tool (no interrupt here). The HITL gate is
  *                    applied in the agent-tools.ts wrapper, following the same
@@ -25,7 +26,6 @@ import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import {
   searchEpisodicMemory,
-  searchKnowledgeEntries,
   getFounderContext,
   insertEpisodicEvent,
 } from "../db/queries.js";
@@ -48,7 +48,7 @@ const turnLogDeps = (): RecallDeps => ({
 
 // ── search_memory ─────────────────────────────────────────────────────────────
 
-type SearchType = "all" | "episodic" | "knowledge" | "context" | "conversations";
+type SearchType = "all" | "episodic" | "context" | "conversations";
 
 export const searchMemoryTool = tool(
   async ({ query, type = "all" }: { query: string; type?: SearchType }, config) => {
@@ -76,26 +76,13 @@ export const searchMemoryTool = tool(
       }
     }
 
-    // 2. Knowledge entries (turicks-brain)
-    if (type === "all" || type === "knowledge") {
-      const entries = await searchKnowledgeEntries(TENANT, query, 4);
-      if (entries.length > 0) {
-        const formatted = entries.map((e) => {
-          const tags = (e.tags ?? []).join(", ");
-          const preview = e.content.slice(0, 300).replace(/\n+/g, " ");
-          return `[${("entry_type" in e ? (e as Record<string, unknown>)["entry_type"] ?? "" : "")}] ${e.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${e.content.length > 300 ? "…" : ""}`;
-        });
-        sections.push(`**Knowledge Base:**\n${formatted.join("\n\n")}`);
-      }
-    }
-
-    // 3. What the founder said in this chat (the turn log), in his own words
+    // 2. What the founder said in this chat (the turn log), in his own words
     if (type === "all") {
       const said = await searchTurnLog(threadId, query, turnLogDeps());
       if (said) sections.push(`**Conversations:**\n${said}`);
     }
 
-    // 4. Founder context — text-contains search across keys + values
+    // 3. Founder context — text-contains search across keys + values
     if (type === "all" || type === "context") {
       const stored = await getFounderContext(TENANT);
       const ctx = founderFacingContext(stored);
@@ -151,22 +138,22 @@ export const searchMemoryTool = tool(
   {
     name: "search_memory",
     description:
-      "Search FounderOS past memory only: prior conversations, decisions, events, and stored business context. " +
+      "Search FounderOS past memory only: prior conversations, events, and stored business context. " +
+      "For past decisions, bugs, or what Claude or Antigravity did or decided, use search_knowledge instead (the shared brain, with dates). " +
       "Use only when the founder explicitly asks to recall/remember past internal context, e.g. " +
       "'what did we discuss about X', 'what happened with Y', or 'recall Z'. " +
       "Do NOT use for external web facts, company lookups, market research, current information, or questions like 'what does [company] do' — route those to research.",
     schema: z.object({
       query: z.string().describe("Keywords to search for, e.g. 'stripe', 'acme deal', 'Tuesday meeting'"),
       type: z
-        .enum(["all", "episodic", "knowledge", "context", "conversations"])
+        .enum(["all", "episodic", "context", "conversations"])
         .optional()
         .nullable()
         .default("all")
         .describe(
           "Which memory source to search. " +
             "'all' (default) searches everything. " +
-            "'episodic' = past events + decisions. " +
-            "'knowledge' = turicks-brain ADRs + brand + case studies. " +
+            "'episodic' = past events recorded in this chat flow. " +
             "'conversations' = what the founder said in this chat before, in his own words. " +
             "'context' = current business state (clients, priorities).",
         ),

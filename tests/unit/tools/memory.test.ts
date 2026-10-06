@@ -165,17 +165,17 @@ describe("searchMemoryTool", () => {
     expect(result).toContain("Alex wants a Stripe webhook");
   });
 
-  it("returns knowledge entries when present", async () => {
+  it("never reads the legacy knowledge_entries table (decisions and bugs live in brain_memories, read by search_knowledge)", async () => {
     mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "ADR-002: Use Composio",
-        content: "We chose Composio because it handles OAuth.",
-        entry_type: "adr",
-        tags: ["composio"],
-      },
+      { title: "ADR-002: Use Composio", content: "OAuth.", entry_type: "adr", tags: ["composio"] },
     ]);
     const result = await searchMemoryTool.invoke({ query: "composio" });
-    expect(result).toContain("ADR-002: Use Composio");
+    expect(result).not.toContain("ADR-002: Use Composio");
+    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+  });
+
+  it("points the model at search_knowledge for past decisions, bugs and agent work", () => {
+    expect(searchMemoryTool.description).toContain("search_knowledge");
   });
 
   it("includes context data when present and query matches", async () => {
@@ -258,20 +258,6 @@ describe("searchMemoryTool", () => {
     expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
   });
 
-  it("filters by type=knowledge — skips episodic", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "Brand Voice Guide",
-        content: "Never say excited to share.",
-        entry_type: "brand",
-        tags: ["brand"],
-      },
-    ]);
-    const result = await searchMemoryTool.invoke({ query: "brand", type: "knowledge" });
-    expect(result).toContain("Brand Voice Guide");
-    expect(mockSearchEpisodicMemory).not.toHaveBeenCalled();
-  });
-
   it("filters by type=context — skips episodic and knowledge", async () => {
     mockGetFounderContext.mockResolvedValue({ active_clients: ["TestCo"] });
     const result = await searchMemoryTool.invoke({ query: "clients", type: "context" });
@@ -293,17 +279,10 @@ describe("searchMemoryTool", () => {
         source: "telegram",
       },
     ]);
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "LinkedIn Brand Pillar",
-        content: "Hook on line 1, 150–300 words.",
-        entry_type: "brand",
-        tags: ["linkedin"],
-      },
-    ]);
+    mockGetFounderContext.mockResolvedValue({ current_priorities: ["Ship the LinkedIn automation"] });
     const result = await searchMemoryTool.invoke({ query: "linkedin", type: "all" });
     expect(result).toContain("Met with Alex about LinkedIn");
-    expect(result).toContain("LinkedIn Brand Pillar");
+    expect(result).toContain("Ship the LinkedIn automation");
   });
 });
 

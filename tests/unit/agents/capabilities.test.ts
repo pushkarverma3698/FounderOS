@@ -255,6 +255,18 @@ describe("HITL Security Invariant", () => {
     }
   });
 
+  it("admin and engineering read the shared brain (search_knowledge), AG-025", () => {
+    // admin's search_memory read the legacy knowledge_entries table and never brain_memories; engineering had no
+    // memory tool. Mac Claude's and Antigravity's saved decisions were unreachable from either.
+    for (const dept of ["admin", "engineering"]) {
+      const names = DEPARTMENT_TOOLS[dept]!.map((t: { name: string }) => t.name);
+      expect(names, dept).toContain("search_knowledge");
+    }
+    // One reader per table per worker still holds: search_turicks_brain stays bound to no one.
+    const all = Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name);
+    expect(all).not.toContain("search_turicks_brain");
+  });
+
   it("github_write stays out of the declared set unless it is also HITL-gated", () => {
     const allNames = Object.values(DEPARTMENT_TOOLS)
       .flat()
