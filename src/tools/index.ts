@@ -29,6 +29,10 @@ export interface ToolResult {
   data?: unknown;
   error?: string;
   observed?: ObservedResult;
+  /** A list tool returned a full page: more rows exist than `data` holds. */
+  truncated?: boolean;
+  /** Plain-text line for the reply when `truncated`. */
+  note?: string;
 }
 
 export interface ToolInputSchema {

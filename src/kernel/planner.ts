@@ -36,6 +36,7 @@ import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { stripFalsePromises } from "./promise-guard.js";
+import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
 export interface KernelChatModel {
@@ -52,12 +53,12 @@ export interface WorkerCatalogEntry {
 
 /** One slash command the planner may choose — built from the gateway's COMMAND_MENU, never hand-typed here. */
 export interface CommandCatalogEntry {
-  /** Registered name, no slash. */
-  name: string;
-  /** Plain-text usage line the founder sees in the menu. */
-  description: string;
+  name: string; // registered name, no slash
+  description: string; // usage line the founder sees in the menu
   /** Changes something (files work, marks a row, spends money): the gateway asks for a tap before running it. */
   mutating: boolean;
+  /** Read-only bare, a write with arguments (`/focus` shows, `/focus <text>` replaces). */
+  writesWithArgs: boolean;
 }
 
 /**
@@ -387,8 +388,7 @@ export function makePlanNode(
         ...base,
         mission: { goal: input, status: "done", plan: null, cursor: 0 },
         command,
-        // History keeps what ran; the command's own output goes to the founder from the gateway.
-        reply: `Ran /${command.name}${command.args ? ` ${command.args}` : ""}`,
+        reply: commandHistoryReply(command.name, command.args, needsTapFor(commands, command)),
       };
     }
     return {
