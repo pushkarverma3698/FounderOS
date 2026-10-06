@@ -128,3 +128,17 @@ describe("full graph — a command turn", () => {
   });
 });
 
+
+describe("planner prompt — goals from plain words", () => {
+  const goal: CommandCatalogEntry = { name: "goal", description: "goal add title | metric=key target=n", mutating: true };
+
+  it("tells the planner to leave the metric out of a goal (the founder picks it with buttons)", () => {
+    const prompt = buildPlannerPrompt([], [goal]);
+    expect(prompt).toContain("goal add");
+    expect(prompt).toContain("Leave metric out");
+  });
+
+  it("says nothing about goals when the command is not offered", () => {
+    expect(buildPlannerPrompt([], commands)).not.toContain("Leave metric out");
+  });
+});
