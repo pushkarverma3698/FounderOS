@@ -18,6 +18,7 @@
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
+import { listResult } from "./list-truncation.js";
 import { getPullRequest, listPullRequests } from "./github-pr.js";
 
 const log = childLogger({ module: "tool:github" });
@@ -213,6 +214,10 @@ export const githubTool: UnifiedTool = {
         type: "number",
         description: "For get_pr: the pull request number.",
       },
+      since: {
+        type: "string",
+        description: "For list_commits: only commits after this ISO date (e.g. 2026-10-05). Use it for 'what shipped in the last N days'.",
+      },
       labels: {
         type: "string",
         description: "For create_issue: comma-separated label names (e.g. 'bug,enhancement').",
@@ -265,9 +270,8 @@ export const githubTool: UnifiedTool = {
           const { data: issues } = await octokit.rest.issues.listForRepo({
             owner, repo, state: "open", per_page: 30, sort: "updated",
           });
-          return {
-            success: true,
-            data: issues.map((i) => ({
+          return listResult(
+            issues.map((i) => ({
               number: i.number,
               title: i.title,
               state: i.state,
@@ -276,7 +280,8 @@ export const githubTool: UnifiedTool = {
               updated_at: i.updated_at,
               url: i.html_url,
             })),
-          };
+            30,
+          );
         }
 
         case "list_branches": {
@@ -284,7 +289,7 @@ export const githubTool: UnifiedTool = {
           const repo = args["repo"] as string;
           if (!owner || !repo) return { success: false, error: "list_branches requires owner and repo" };
           const { data: branches } = await octokit.rest.repos.listBranches({ owner, repo, per_page: 50 });
-          return { success: true, data: branches.map((b) => ({ name: b.name, sha: b.commit.sha.slice(0, 8) })) };
+          return listResult(branches.map((b) => ({ name: b.name, sha: b.commit.sha.slice(0, 8) })), 50);
         }
 
         case "list_commits": {
@@ -297,22 +302,25 @@ export const githubTool: UnifiedTool = {
           // OWN default branch, which is what the caller meant; hardcoding `main`
           // instead would only move the bug to the next repo that uses `master`.
           const sha = (args["sha"] as string) ?? (args["ref"] as string);
+          const since = args["since"] as string | undefined;
+          if (since && Number.isNaN(Date.parse(since))) return { success: false, error: "list_commits since must be an ISO date, e.g. 2026-10-05" };
           if (!owner || !repo) return { success: false, error: "list_commits requires owner and repo" };
           const { data: commits } = await octokit.rest.repos.listCommits({
             owner,
             repo,
             per_page: 20,
             ...(sha ? { sha } : {}),
+            ...(since ? { since: new Date(since).toISOString() } : {}),
           });
-          return {
-            success: true,
-            data: commits.map((c) => ({
+          return listResult(
+            commits.map((c) => ({
               sha: c.sha.slice(0, 8),
               message: c.commit.message.split("\n")[0],
               author: c.commit.author?.name ?? "unknown",
               date: c.commit.author?.date,
             })),
-          };
+            20,
+          );
         }
 
         case "list_prs": {

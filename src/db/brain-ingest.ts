@@ -3,6 +3,7 @@ import { db } from "./client.js";
 import { brainMemories } from "./schema.js";
 import { embedText } from "../lib/embed.js";
 import { createHash } from "crypto";
+import type { BrainProvenance } from "./brain-provenance.js";
 
 export interface IngestOptions {
   memoryType: string;
@@ -14,6 +15,8 @@ export interface IngestOptions {
   confidence?: number;
   status?: string;
   metadata?: Record<string, unknown>;
+  /** Merged into metadata (AG-026). Wins over same-named keys in `metadata`. */
+  provenance?: BrainProvenance;
   tenantId?: string;
 }
 
@@ -28,6 +31,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
     throw new Error("Cannot ingest empty memory content");
   }
 
+  const metadata = { ...(opts.metadata ?? {}), ...(opts.provenance ?? {}) };
   const tenantId = opts.tenantId ?? "turicks";
   const sourceId = opts.sourceId ?? createHash("sha256").update(content).digest("hex");
 
@@ -59,7 +63,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
       .set({
         content,
         embedding, // number[]: drizzle formats vector params itself; a pre-built string gets JSON-quoted and pgvector rejects it
-        metadata: opts.metadata ?? {},
+        metadata,
         importance: opts.importance?.toString() ?? null,
         confidence: opts.confidence?.toString() ?? null,
         status: opts.status ?? "ACTIVE",
@@ -86,7 +90,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
       importance: opts.importance?.toString() ?? null,
       confidence: opts.confidence?.toString() ?? null,
       status: opts.status ?? "ACTIVE",
-      metadata: opts.metadata ?? {},
+      metadata,
     })
     .returning({ id: brainMemories.id });
 

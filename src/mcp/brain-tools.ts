@@ -55,7 +55,9 @@ export const BRAIN_TOOLS = [
       properties: {
         content: { type: "string", description: "The memory content (markdown supported)." },
         tags: { type: "string", description: "Comma-separated tags (e.g., 'concept, auth, notes')" },
-        project: { type: "string", description: "The project this applies to (e.g. \"founderos\", \"oplify\"). Always pass it — untagged memories are invisible to project-scoped search." }
+        project: { type: "string", description: "The project this applies to (e.g. \"founderos\", \"oplify\"). Always pass it — untagged memories are invisible to project-scoped search." },
+        session_id: { type: "string", description: "Optional: the agent session this came from." },
+        repo: { type: "string", description: "Optional: the repo it concerns." },
       },
       required: ["content"]
     }
@@ -67,7 +69,9 @@ export const BRAIN_TOOLS = [
       type: "object",
       properties: {
         decision: { type: "string", description: "The decision made and its rationale." },
-        project: { type: "string", description: "The project this applies to." }
+        project: { type: "string", description: "The project this applies to." },
+        session_id: { type: "string", description: "Optional: the agent session this came from." },
+        repo: { type: "string", description: "Optional: the repo it concerns." },
       },
       required: ["decision"]
     }
@@ -79,7 +83,9 @@ export const BRAIN_TOOLS = [
       type: "object",
       properties: {
         bug: { type: "string", description: "Description of the bug, cause, and solution." },
-        project: { type: "string", description: "The project this applies to." }
+        project: { type: "string", description: "The project this applies to." },
+        session_id: { type: "string", description: "Optional: the agent session this came from." },
+        repo: { type: "string", description: "Optional: the repo it concerns." },
       },
       required: ["bug"]
     }
@@ -146,7 +152,8 @@ export async function callBrainTool(name: string, args: Record<string, unknown>)
         if (!opts) return formatError(`Unknown tool: ${name}`);
         const res = await brainIngest(opts);
         const label = name === "remember" ? "Memory saved" : name === "save_decision" ? "Decision saved" : "Bug logged";
-        return formatResult(`${label} (ID: ${res.id})${opts.project ? ` [project: ${opts.project}]` : " [no project tag]"}`);
+        return formatResult(`${label} (ID: ${res.id})${opts.project ? ` [project: ${opts.project}]` : " [no project tag]"}` +
+          (opts.project ? "" : "\nSaved without a project tag: project-scoped searches will not find it. Pass project (founderos, oplify, …)."));
       }
 
       default:

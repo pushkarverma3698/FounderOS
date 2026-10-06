@@ -24,6 +24,21 @@ vi.mock("../../../src/db/client.js", () => {
 
 const { brainIngest } = await import("../../../src/db/brain-ingest.js");
 
+describe("brainIngest provenance", () => {
+  beforeEach(() => { captured.values = undefined; captured.set = undefined; existing = []; });
+
+  it("merges provenance into metadata and keeps existing keys", async () => {
+    const provenance = { origin: "agent" as const, client: "claude-code", machine: "mac", occurred_at: "2026-10-06T10:00:00.000Z", visibility: "all" as const };
+    await brainIngest({ memoryType: "decision", content: "d", metadata: { tags: ["a"] }, provenance });
+    expect(captured.values?.["metadata"]).toEqual({ tags: ["a"], ...provenance });
+  });
+
+  it("without provenance, metadata is unchanged", async () => {
+    await brainIngest({ memoryType: "note", content: "n" });
+    expect(captured.values?.["metadata"]).toEqual({});
+  });
+});
+
 describe("brainIngest vector parameter", () => {
   beforeEach(() => { captured.values = undefined; captured.set = undefined; existing = []; });
 
