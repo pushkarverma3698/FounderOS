@@ -158,3 +158,33 @@ jobs:
             -o ConnectTimeout=30 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             'cd /opt/founderos && bash deploy/sync-daemons.sh' </dev/null
+
+      - name: Post-deploy oracle report (never blocks)
+        # The oracle report: which merged pipeline tasks can now be checked against prod, and what did each oracle say.
+        # Only runs anything when AGENT_PIPELINE_V2=1 is set on the VPS (the script prints DISABLED otherwise). A report,
+        # not a gate: continue-on-error, and deploy/oracle-report.sh exits 0 whatever happens. Nothing secret travels: the
+        # remote command is a fixed string, the Telegram token is read on the VPS from its own .env, and the only
+        # credential here is the SSH key, written to a 0600 temp file exactly as above (never argv, never echoed).
+        continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          KEY_FILE="$(mktemp)"
+          chmod 600 "$KEY_FILE"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+
+          timeout 3m ssh \
+            -i "$KEY_FILE" \
+            -p "${DEPLOY_PORT:-22}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=30 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'cd /opt/founderos && bash deploy/oracle-report.sh' </dev/null
