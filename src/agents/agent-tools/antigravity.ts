@@ -24,6 +24,8 @@ import { prepareDispatchBrief, type PreparedBrief } from "../../tools/dispatch-b
 import { renderCardPreview } from "../../tools/dispatch-brief-preview.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../../tools/dispatch-repos.js";
 import { ENGINES, engineDisplay, engineLabel, parseEngine, readDefaultEngine } from "../../tools/coding-engine.js";
+import { LABEL_SPEC } from "../../tools/pipeline-pending.js";
+import { specDraftingReply, specIntakeOn } from "../../tools/dispatch-spec-intake.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
@@ -119,7 +121,7 @@ export const dispatchAntigravityTask = tool(
       {
         action: "dispatch_antigravity_task",
         title: `🤖 Dispatch task to ${who}?`,
-        summary: `Open agent:ready issue on ${repoSlug} for ${who}: "${title}"`,
+        summary: `Open ${specIntakeOn() ? LABEL_SPEC : "agent:ready"} issue on ${repoSlug} for ${who}: "${title}"`,
         // A digest, not the raw body: the card cuts its preview at 1500 characters and the raw
         // body would lose Verification and Acceptance first (see dispatch-brief-preview.ts).
         // The model's own scope is shown, not the repaired one (whose hint block would fill the field): the
@@ -154,7 +156,7 @@ export const dispatchAntigravityTask = tool(
       return `❌ Failed to dispatch task to ${who}: ${res.error}`;
     }
 
-    const data = res.data as { issue_number: number; issue_url: string; title: string; repo: string; warnings?: string[] };
+    const data = res.data as { issue_number: number; issue_url: string; title: string; repo: string; labels?: string[]; warnings?: string[] };
 
     const auditRes = await writeAuditEntry({
       action: "dispatch_antigravity_task",
@@ -166,11 +168,16 @@ export const dispatchAntigravityTask = tool(
       log.warn({ key, action: "dispatch_antigravity_task" }, "writeAuditEntry conflict on dispatch_antigravity_task");
     }
 
+    const warned = data.warnings?.length ? `\n${data.warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "";
+    // What was filed decides the reply: an agent:spec issue is not queued for building, so it never says it is.
+    if (data.labels?.includes(LABEL_SPEC)) {
+      return specDraftingReply({ who, issue: data.issue_number, repo: data.repo, url: data.issue_url, engineLabel: engineLabel(executor) }) + warned;
+    }
     return (
       `✅ Dispatched to ${who}: Issue #${data.issue_number} opened on ${data.repo} with labels 'agent:ready' and '${engineLabel(executor)}'.\n` +
       `URL: ${data.issue_url}\n` +
       `The VPS agent-dispatch loop will pick it up on its next tick (within 15 minutes), implement the task in an isolated workspace, and submit a draft PR to beta.` +
-      (data.warnings?.length ? `\n${data.warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "")
+      warned
     );
   },
   {

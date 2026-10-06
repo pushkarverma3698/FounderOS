@@ -173,3 +173,22 @@ describe("deploy.yml — the existing deploy step keeps its secrets-via-stdin co
     expect(WORKFLOW).toMatch(/github\.event\.workflow_run\.conclusion == 'success'/);
   });
 });
+
+describe("deploy.yml — the post-deploy oracle report step", () => {
+  const reportStep = all.find((s) => s.run.includes("deploy/oracle-report.sh"));
+
+  it("comes after the daemon sync and can never fail or block the deploy", () => {
+    expect(reportStep).toBeTruthy();
+    expect(all.indexOf(reportStep as Step)).toBeGreaterThan(all.indexOf(syncStep as Step));
+    expect(reportStep?.text).toMatch(/^ {8}continue-on-error: true$/m);
+    expect(reportStep?.run).toMatch(/timeout \d+m ssh/);
+  });
+
+  it("sends a fixed remote command and keeps the SSH key out of argv and the log", () => {
+    expect(reportStep?.run).toMatch(/'cd \/opt\/founderos && bash deploy\/oracle-report\.sh' <\/dev\/null/);
+    expect(reportStep?.run).toMatch(/chmod 600 "\$KEY_FILE"/);
+    expect(reportStep?.run).not.toMatch(/echo[^\n]*DEPLOY_SSH_KEY/);
+    const keys = (reportStep?.env ?? []).map((l) => l.trim().split(":")[0]);
+    expect(keys.sort()).toEqual(["DEPLOY_HOST", "DEPLOY_PORT", "DEPLOY_SSH_KEY", "DEPLOY_USER"]);
+  });
+});

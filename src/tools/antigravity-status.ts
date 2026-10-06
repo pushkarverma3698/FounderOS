@@ -147,6 +147,12 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
       : `🕒 Queued — nothing has started yet. agent-dispatch picks it up at its next run, ${hhmm(nextDispatcherRun(now))}.`;
     return [head, waiting, notices, issue.url].join("\n");
   }
+  if (labels.has("agent:spec-review")) {
+    return [head, "📝 The spec is waiting for your approval in Telegram. Nothing is built until you approve it.", issue.url].join("\n");
+  }
+  if (labels.has("agent:spec")) {
+    return [head, "📝 A spec is being drafted from your request. A spec card will follow in Telegram; nothing is built before you approve it.", issue.url].join("\n");
+  }
   return [head, "Not an Antigravity task — it has no agent:* label.", issue.url].join("\n");
 }
 
