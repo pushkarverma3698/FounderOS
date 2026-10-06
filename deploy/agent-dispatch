@@ -370,9 +370,26 @@ emit_fenced_issue_text() {
 # checkout reset, the --print-timeout default) had to be fixed at two of them. This is the executor's call:
 # the Gemini key travels on stdin when we have one (agy_run), the result is the exit code, and agy_log gets the
 # plain-text view of the run.
+#
+# A model agy no longer knows (retired or renamed) is not a failed attempt: the same run starts again on the next
+# AGENT_DISPATCH_MODELS candidate. The retired name is warned about once ever (a marker per name), and when every
+# candidate is unknown the last run's log, which carries agy's own "not recognized" line, goes to the caller's
+# ordinary failure path: one agent:failed message that quotes it.
 run_agy_with_progress() {
-  local label="$1" workspace="$2" prompt_file="$3" agy_log="$4"
-  agy_run "$label" "$workspace" "$prompt_file" "$AGY_MODEL" "$TIMEOUT_SEC" "$agy_log" "$GEMINI_API_KEY"
+  local label="$1" workspace="$2" prompt_file="$3" agy_log="$4" m rc=1 marker
+  for m in $AGY_EXECUTOR_MODELS; do
+    AGY_MODEL="$m"
+    agy_run "$label" "$workspace" "$prompt_file" "$m" "$TIMEOUT_SEC" "$agy_log" "$GEMINI_API_KEY"
+    rc=$?
+    agy_model_unknown "$agy_log" || return "$rc"
+    log "${m} is not a model agy knows: trying the next executor model"
+    marker="$HOME/.claude/agent-dispatch.warned-model-$(printf '%s' "$m" | tr -c 'A-Za-z0-9._-' '_')"
+    if [[ ! -e "$marker" ]]; then
+      : >"$marker" 2>/dev/null
+      notify "⚠️ agent-dispatch: executor model ${m} is not in agy's catalog (retired or renamed), so it is skipped and the next candidate runs. Fix: ssh founderos-vps, crontab -e, correct AGENT_DISPATCH_MODELS on the agent-dispatch line (agy models lists what exists)."
+    fi
+  done
+  return "$rc"
 }
 
 # The same for Claude Code (deploy/lib/claude-run.sh). The token file's mtime is taken BEFORE the run and kept in

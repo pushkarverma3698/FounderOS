@@ -448,6 +448,9 @@ leave_down() {
 # that is the model that wrote the PR is not independent (ADR-046). A model whose quota is spent is skipped for
 # the rest of this sweep; the next tick asks again, because quota comes back.
 EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
+# Every model the executor may have fallen back to (AGENT_DISPATCH_MODELS), not only the first: the PR does not record which ran.
+EXECUTOR_MODELS=" ${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODELS} "
+EXECUTOR_MODELS="${EXECUTOR_MODELS//,/ }"
 SPENT_MODELS=" "
 RETIRED_MODELS=" "   # candidates agy does not know (a subset of SPENT_MODELS)
 QUOTA_SEEN=0         # 1 once any candidate hit a quota wall this sweep
@@ -460,7 +463,7 @@ REVIEW_EXCLUDE_PREFIX=""
 select_review_model() {
   local m
   for m in $REVIEW_MODELS; do
-    [[ "$m" == "$EXECUTOR_MODEL" ]] && continue
+    [[ "$EXECUTOR_MODELS" == *" $m "* ]] && continue
     [[ -n "$REVIEW_EXCLUDE_PREFIX" && "$m" == "$REVIEW_EXCLUDE_PREFIX"* ]] && continue
     [[ "$SPENT_MODELS" == *" $m "* ]] && continue
     MODEL="$m"

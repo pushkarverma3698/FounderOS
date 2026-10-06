@@ -291,7 +291,13 @@ export class DispatchSandbox {
       "agy",
       `${this.hookPath()}echo run >>"$AGY_CALLS"
 printf '%s\\n' "\${GEMINI_API_KEY-<unset>}" >>"$AGY_ENV_LOG"
-while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
+model=""
+while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; --model) model="$2"; shift 2 ;; *) shift ;; esac; done
+printf '%s\\n' "$model" >>"$AGY_CALLS.models"
+case " \${AGY_UNKNOWN_MODELS:-} " in *" $model "*)
+  printf 'error: invalid model selection (--model "%s" --effort ""): model %s is not recognized as a known model or custom model in settings\\n' "$model" "$model"
+  exit 1 ;;
+esac
 [ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
 printf '%s\\n' "\${AGY_OUT:-}"
 sleep "\${AGY_SLEEP_AFTER:-0}"
@@ -663,6 +669,11 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   }
   agyRuns(): number {
     return existsSync(this.agyCalls) ? readFileSync(this.agyCalls, "utf8").split("\n").filter(Boolean).length : 0;
+  }
+  /** The --model each fake agy run was given, one per run. */
+  agyModels(): string[] {
+    const f = `${this.agyCalls}.models`;
+    return existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean) : [];
   }
   /** The prompt each fake agy run was given (its --print argument), one entry per run. */
   agyPrompts(): string[] {
