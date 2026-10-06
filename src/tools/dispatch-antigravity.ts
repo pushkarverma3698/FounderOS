@@ -1,8 +1,7 @@
 /**
  * FounderOS — Antigravity Dispatch Tool
  * ========================================
- * Formats a self-contained engineering brief conforming to .github/ISSUE_TEMPLATE/agent-task.md
- * and opens a GitHub issue on pushkarverma3698/FounderOS with the `agent:ready` label.
+ * Formats a self-contained engineering brief (.github/ISSUE_TEMPLATE/agent-task.md) and opens a GitHub issue with `agent:ready` (`agent:spec` under AGENT_PIPELINE_V2=1).
  *
  * This connects FounderOS to the VPS autonomous loop (ADR-046):
  *   Telegram / Founder → dispatch_antigravity_task → GitHub Issue (agent:ready)
@@ -39,6 +38,7 @@ import { DEFAULT_ACCEPTANCE_TEXT } from "./dispatch-roles.js";
 import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.js";
 import { prepareDispatchBrief, type PreparedBrief } from "./dispatch-brief-repair.js";
 import { checkDispatchBrief, type ContentsClient } from "./dispatch-brief-check.js";
+import { filedBody, filedLabels } from "./dispatch-spec-intake.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
@@ -328,7 +328,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
     }
 
     // Exactly one engine label: an issue carrying both is ambiguous to the daemon, which then falls back to the default.
-    const labels = [AGENT_READY_LABEL, ANTIGRAVITY_LABEL, engineLabel(engine)];
+    const labels = filedLabels([AGENT_READY_LABEL, ANTIGRAVITY_LABEL, engineLabel(engine)]);
 
     // The gate. A brief with an empty section is never filed: the reason goes back to the model, before any
     // Antigravity tokens are spent. A cited path that does not exist is NOT such a reason (see
@@ -355,7 +355,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
         data: { missing: lint.missing, missing_headings: lint.missingHeadings, missing_paths: lint.missingPaths },
       };
     }
-    const { body, warnings } = prepared;
+    const { warnings } = prepared; const body = filedBody(prepared.body, founderRequest);
 
     try {
       const { data } = await octokit.rest.issues.create({
