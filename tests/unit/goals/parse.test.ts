@@ -338,6 +338,14 @@ describe("goalArgsOf — the arguments of a /goal message, read back from a mess
     expect(goalArgsOf("❌ Not done.\n• metric: Please don't use /goal in metric")).toBeNull();
   });
 
+  it("preserves multiline commands without truncation", () => {
+    expect(goalArgsOf("/goal add Implement login\nAnd verify it works | target=1")).toBe("add Implement login\nAnd verify it works | target=1");
+  });
+
+  it("handles valid user commands containing the string Command:", () => {
+    expect(goalArgsOf("/goal add Fix the Command: parsing | target=1")).toBe("add Fix the Command: parsing | target=1");
+  });
+
   it("does not read other commands or plain text as a /goal message", () => {
     expect(goalArgsOf("/goals")).toBeNull();
     expect(goalArgsOf("/task fix it")).toBeNull();

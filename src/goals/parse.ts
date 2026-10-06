@@ -325,17 +325,16 @@ export function goalArgsOf(messageText: string): string | null {
   const text = messageText.trim();
   if (!text) return null;
 
-  const commandIdx = text.indexOf("Command:");
-  const targetText = commandIdx !== -1 ? text.slice(commandIdx) : text;
-
-  const match = /(?:^|\n)\s*(?:Command:\s*)?(?:<code>)?\s*\/goal(?:@[a-zA-Z0-9_]+)?(?:\s+([^\r\n]*?))?\s*(?:<\/code>)?\s*(?:\r?\n|$)/i.exec(targetText);
+  const match = /(?:^|\n)\s*(?:Command:\s*)?(?:<code>)?\s*\/goal(?:@[a-zA-Z0-9_]+)?(?:\s+([\s\S]*))?$/i.exec(text);
   if (!match) return null;
 
   let raw = match[1] ?? "";
-  if (raw.endsWith("</code>")) {
-    raw = raw.slice(0, -7);
+  const codeCloseIdx = raw.indexOf("</code>");
+  if (codeCloseIdx !== -1) {
+    raw = raw.slice(0, codeCloseIdx);
   }
   return raw.trim();
 }
+
 
 
