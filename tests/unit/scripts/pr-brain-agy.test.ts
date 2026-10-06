@@ -361,6 +361,10 @@ describe("where and how the reviewer runs", () => {
     expect(prompt).toContain(`--repo ${SLUG}`);
     expect(prompt).toContain("BRAIN-VERDICT: PASS");
     expect(prompt).toContain("BRAIN-VERDICT: FAIL");
+    // The review comment carries the typed verdict, so agent-dispatch can hand the non-blockers to the executor.
+    expect(prompt).toContain('"version":1');
+    expect(prompt).toContain(`"head_sha":"${head}"`);
+    expect(prompt).toMatch(/every non-blocking finding as severity major or minor/);
     expect(prompt).not.toMatch(/Invoke the pr-adversary skill/);
   });
 
@@ -554,6 +558,15 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { AGENT_DISPATCH_MODEL: SPENT } });
 
     expect(agyLog("model")).toEqual([FALLBACK]);
+  });
+
+  it("also keeps off every executor FALLBACK candidate: a PR does not record which AGENT_DISPATCH_MODELS entry wrote it", () => {
+    sweep({
+      agyOut: review("BRAIN-VERDICT: PASS"),
+      env: { AGENT_DISPATCH_MODELS: `gemini-3.6-flash-medium,${FALLBACK}`, PR_BRAIN_MODELS: `${FALLBACK} ${SPENT}` },
+    });
+
+    expect(agyLog("model")).toEqual([SPENT]);
   });
 });
 

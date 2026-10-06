@@ -42,7 +42,17 @@
 # The model the EXECUTOR writes code with. One definition for both daemons: pr-brain must never review a PR with
 # the model that wrote it (ADR-046, the first independence condition), and it can only know that by reading the
 # same setting the executor reads. Explicit --model matters: bare `agy` runs on whatever default the quota allows.
-AGY_EXECUTOR_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
+#
+# AGENT_DISPATCH_MODELS is the candidate LIST (space or comma separated, best first): when agy no longer knows a name
+# (agy_model_unknown, deploy/lib/agy-failure.sh) the executor re-runs the same attempt on the next one
+# (run_agy_with_progress in deploy/agent-dispatch). AGENT_DISPATCH_MODEL, the old single name, is a list of one.
+# AGY_EXECUTOR_MODEL stays the FIRST candidate, the model a run normally uses. pr-brain keeps its reviewer
+# independent of every candidate (AGY_EXECUTOR_MODELS), not just the first: a PR written by a fallback model is not
+# labelled with it, so excluding only the first would let that model review its own work. Keep the defaults of
+# PR_BRAIN_MODELS (claude-sonnet-5-5-medium, gemini-3.1-pro-high) out of this list.
+AGY_EXECUTOR_MODELS="${AGENT_DISPATCH_MODELS:-${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium gemini-3.1-flash-lite}}"
+AGY_EXECUTOR_MODELS="${AGY_EXECUTOR_MODELS//,/ }"
+AGY_EXECUTOR_MODEL="${AGY_EXECUTOR_MODELS%% *}"
 
 # Runs a command as $AG_USER without ever letting arbitrary content (issue bodies, review comments) pass
 # through shell interpolation: arguments after the script reach the inner bash as $1, $2, ..., never
