@@ -28,9 +28,29 @@ export class HttpStatusError extends Error {
   }
 }
 
+/**
+ * A 200 whose body is not JSON where JSON was asked for: a bot wall, a login redirect or a
+ * marketing page, which is how a BambooHR tenant that no longer exists answers. Typed so the
+ * dead-board record (board-failure.ts) can count it; the parser's own message stays in the text.
+ */
+export class NotJsonError extends Error {
+  constructor(cause: unknown) {
+    super(`response was not JSON (${(cause as Error).message})`);
+    this.name = "NotJsonError";
+  }
+}
+
 /** A per-posting body fetch: JSON, and never cached — see free-ats-cache.ts. */
 export async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
   return await fetchPayload(url, timeoutMs, "json", null);
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (err) {
+    throw new NotJsonError(err);
+  }
 }
 
 /** The wire format a platform's board endpoint speaks. */
@@ -115,7 +135,7 @@ export async function fetchPayload(
       throw new HttpStatusError(response.status, retryAfterMs);
     }
 
-    const payload = format === "json" ? await response.json() : await response.text();
+    const payload = format === "json" ? await readJson(response) : await response.text();
     
     if (cache) {
       await cache.store(url, response.headers?.get("etag"), payload);
