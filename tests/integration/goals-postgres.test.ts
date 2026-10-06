@@ -51,6 +51,53 @@ async function removeTenant(tenant: string): Promise<void> {
   await db.execute(sql`delete from agents.goals where tenant_id in (${tenant}, ${`${tenant}-other`})`);
 }
 
+type Db = ReturnType<typeof getDb>;
+
+/**
+ * `db`, except that inside each transaction every UPDATE after the first waits for `gate`. Lets a test stop
+ * a run between two statements of one transaction while it holds the first statement's row locks.
+ */
+function holdingSecondUpdate(db: Db, gate: Promise<void>): Db {
+  const held = <T extends object>(query: T): T =>
+    new Proxy(query, {
+      get(target, key) {
+        if (key === "then") {
+          return (ok: (v: unknown) => unknown, fail: (e: unknown) => unknown) => gate.then(() => (target as unknown as PromiseLike<unknown>).then(ok, fail));
+        }
+        const v: unknown = Reflect.get(target, key);
+        if (typeof v !== "function") return v;
+        return (...args: unknown[]) => {
+          const out: unknown = v.apply(target, args);
+          return out !== null && typeof out === "object" ? held(out) : out;
+        };
+      },
+    });
+  return new Proxy(db, {
+    get(target, key) {
+      const v: unknown = Reflect.get(target, key);
+      if (key !== "transaction") return typeof v === "function" ? v.bind(target) : v;
+      return (work: (tx: unknown) => Promise<unknown>) =>
+        target.transaction(async (tx) => {
+          let updates = 0;
+          return work(
+            new Proxy(tx, {
+              get(o, k) {
+                const f: unknown = Reflect.get(o, k);
+                if (typeof f !== "function") return f;
+                if (k !== "update") return f.bind(o);
+                return (...args: unknown[]) => {
+                  const builder = f.apply(o, args) as object;
+                  updates += 1;
+                  return updates === 1 ? builder : held(builder);
+                };
+              },
+            }),
+          );
+        });
+    },
+  });
+}
+
 afterAll(async () => {
   if (pgUp) await closeDatabaseConnections();
 });
@@ -116,6 +163,75 @@ describe.runIf(pgUp)("goals — real Postgres", () => {
         expect([a.kind, b.kind].sort()).toEqual(["in-progress", "sent"]);
         expect(t.sent).toHaveLength(1);
       } finally {
+        await removeTenant(t.tenant);
+      }
+    });
+
+    // CI 2026-10-05 (PR #909): `deadlock detected` between one run's claim INSERT and the other run's
+    // saveReviewResults UPDATE. The claim locks review rows in goal-id order (ON CONFLICT DO UPDATE locks a
+    // row even when its WHERE refuses it); the save locked the same rows in priority order. Random uuids made
+    // the orders disagree about half the time, and the second claim had to land in the gap between the two
+    // UPDATEs. Here both are forced: the first-priority goal gets the larger id, and the first run's second
+    // UPDATE is held until the second run's claim is blocked on a lock (or has already finished).
+    it("a second run claiming while the first stores its results does not deadlock", async () => {
+      const t = await setup();
+      let releaseFirst = (): void => undefined;
+      let both: Promise<unknown> = Promise.resolve();
+      try {
+        const tail = randomUUID().slice(8);
+        await getDb().execute(sql`update agents.goals set id = ${`ffffffff${tail}`}::uuid where id = ${t.apps.id}::uuid`);
+        await getDb().execute(sql`update agents.goals set id = ${`00000000${tail}`}::uuid where id = ${t.manual.id}::uuid`);
+
+        const secondIsBlocked = new Promise<void>((resolve) => (releaseFirst = resolve));
+        let saveStarted!: () => void;
+        const firstIsSaving = new Promise<void>((resolve) => (saveStarted = resolve));
+        let secondClaimed = false;
+
+        const firstRepo = createPgGoalRepo(holdingSecondUpdate(getDb(), secondIsBlocked));
+        const first: StandupDeps = {
+          ...t.deps,
+          repo: {
+            ...firstRepo,
+            saveReviewResults: (date, results) => {
+              const p = firstRepo.saveReviewResults(date, results);
+              saveStarted();
+              return p;
+            },
+          },
+        };
+        const second: StandupDeps = {
+          ...t.deps,
+          repo: {
+            ...t.repo,
+            claimReviews: async (...args) => {
+              await firstIsSaving;
+              const out = await t.repo.claimReviews(...args);
+              secondClaimed = true;
+              return out;
+            },
+          },
+        };
+
+        const runs = Promise.all([runStandup(first), runStandup(second)]);
+        both = runs;
+        await firstIsSaving;
+        await vi.waitFor(async () => {
+          if (secondClaimed) return;
+          const waiting = await getDb().execute(
+            sql`select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and (query ilike '%goal_reviews%' or query ilike '%pg_advisory_xact_lock%')`,
+          );
+          expect(waiting.length).toBeGreaterThan(0);
+        });
+        releaseFirst();
+
+        const [a, b] = await runs;
+        expect(a.kind).toBe("sent");
+        expect(["in-progress", "already-sent"]).toContain(b.kind);
+        expect(t.sent).toHaveLength(1);
+      } finally {
+        // Never leave the first run parked inside its transaction: it holds the day's lock.
+        releaseFirst();
+        await both.catch(() => undefined); // allow-failopen: the assertions above already reported any failure
         await removeTenant(t.tenant);
       }
     });
