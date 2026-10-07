@@ -182,6 +182,7 @@ export const envSchema = z.object({
   LLM_CACHE_ENABLED: z.enum(["true", "false"]).default("false"),
   /** TTL (seconds) for a cached LLM response. 0 disables writes. Default 1h. */
   LLM_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(3_600),
+  RECENT_ACTIVITY_ENABLED: z.enum(["true", "false"]).default("true"), // AG-029 kill switch: "false" drops the planner's Recent work block
 
   // ── mem0 episodic memory cloud ────────────────────────────────────────────
   /** When set, events are also pushed to mem0 cloud for semantic recall. */

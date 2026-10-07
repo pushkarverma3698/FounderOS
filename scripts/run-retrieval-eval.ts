@@ -14,7 +14,7 @@
  *
  * Exit codes:
  *   0 — the run was clean and the numbers mean what they say
- *   1 — the run happened but is NOT a measurement of semantic retrieval
+ *   1 — a cross-source or no-answer case failed (AG-029), or the run is NOT a measurement of semantic retrieval
  *       (embedder down → keyword-only, a query errored, a golden document is
  *       missing from the corpus, or the corpus could not be counted)
  *   2 — the harness itself could not run
@@ -47,6 +47,7 @@ import { rerankHits } from "../src/db/rag-rerank.js";
 import { RERANK_CANDIDATE_POOL } from "../src/db/rag-query.js";
 import { embedTextCached } from "../src/lib/embed.js";
 import { db, closeDatabaseConnections } from "../src/db/client.js";
+import { runExtraCases } from "./lib/retrieval-extra.js";
 
 /**
  * The store under measurement. The golden set was authored against
@@ -266,7 +267,8 @@ async function main(): Promise<void> {
     "",
   ].join("\n");
 
-  const rendered = `${renderAblationReport(reports)}\n${latencyTable}`;
+  const extra = await runExtraCases(DEPS);
+  const rendered = `${renderAblationReport(reports)}\n${latencyTable}\n${extra.report}`;
   process.stdout.write(`${rendered}\n`);
 
   const out = resolve(REPORT_PATH);
@@ -274,7 +276,7 @@ async function main(): Promise<void> {
   process.stdout.write(`Report written to ${out}\n`);
 
   await closeDatabaseConnections().catch(() => undefined); // allow-failopen: eval teardown
-  process.exit(reports.every(isTrustworthy) ? 0 : 1);
+  process.exit(reports.every(isTrustworthy) && extra.failures === 0 ? 0 : 1);
 }
 
 main().catch((err) => {
