@@ -55,6 +55,20 @@ describe("docDateMs — the date a document carries in its own file name", () =>
   });
 });
 
+describe("docDateMs — agent rows with metadata.occurred_at (AG-026)", () => {
+  it("falls back to occurred_at when the file name has no date", () => {
+    expect(docDateMs({ occurred_at: "2026-09-01T10:00:00Z" })).toBe(Date.parse("2026-09-01T10:00:00Z"));
+  });
+
+  it("prefers the file-name date when both exist", () => {
+    expect(docDateMs({ source_path: "docs/plans/2026-10-03-x.md", occurred_at: "2026-09-01T10:00:00Z" })).toBe(Date.UTC(2026, 9, 3));
+  });
+
+  it("ignores an unparseable occurred_at", () => {
+    expect(docDateMs({ occurred_at: "not a date" })).toBeNull();
+  });
+});
+
 describe("recencyWeight", () => {
   it("is 1 for today and falls in a straight line to the floor", () => {
     expect(recencyWeight(0)).toBe(1);

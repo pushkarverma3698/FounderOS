@@ -137,7 +137,7 @@ case "$group $sub" in
         | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
            isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
            comments: [(.comments // [])[] | {body: .body}], labels: [(.labels // [])[] | {name: .}],
-           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
+           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN"), body: (.body // "")}
         | '"$PICK"' ]' "$STATE" | emit
     ;;
 
@@ -150,7 +150,7 @@ case "$group $sub" in
       | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
          isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
          comments: [(.comments // [])[] | {body: .body}], labels: [(.labels // [])[] | {name: .}],
-         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
+         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN"), body: (.body // "")}
       | '"$PICK" "$STATE" | emit
     ;;
 
@@ -174,9 +174,26 @@ case "$group $sub" in
   "pr create")
     need_repo
     number=$(jq -r --arg r "$repo" '100 + (.repos[$r].prs | length)' "$STATE")
-    mutate --arg r "$repo" --arg h "$(flag --head)" --argjson n "$number" \
-      '.repos[$r].prs += [{number: $n, headRefName: $h, isDraft: true, comments: []}]'
+    mutate --arg r "$repo" --arg h "$(flag --head)" --argjson n "$number" --arg b "$(flag --body || true)" \
+      '.repos[$r].prs += [{number: $n, headRefName: $h, isDraft: true, comments: [], body: $b}]'
     printf 'https://github.com/%s/pull/%s\n' "$repo" "$number"
+    ;;
+
+  "pr close")
+    # Closes the PR (the branch stays); `--comment X` adds X as a PR comment first, as gh does.
+    need_repo
+    body=$(flag --comment) || body=""
+    mutate --arg r "$repo" --arg n "$num" --arg b "$body" \
+      '(.repos[$r].prs[] | select((.number | tostring) == $n)) |= (.state = "CLOSED"
+         | if $b == "" then . else .comments = ((.comments // []) + [{body: $b}]) end)'
+    ;;
+
+  "pr edit")
+    # Only `--body` is modelled; label edits on a PR succeed and change nothing, as before.
+    need_repo
+    if body=$(flag --body); then
+      mutate --arg r "$repo" --arg n "$num" --arg b "$body" '(.repos[$r].prs[] | select((.number | tostring) == $n) | .body) = $b'
+    fi
     ;;
 
   "label list")

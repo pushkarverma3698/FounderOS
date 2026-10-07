@@ -122,7 +122,8 @@ export const searchTuricksBrainTool: UnifiedTool = {
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
 
-    const result = await runRagSearch("brain_memories", query, topK);
+    // No run config reaches a UnifiedTool, so it cannot tell the founder DM from a group: exclude founder-only rows (AG-027).
+    const result = await runRagSearch("brain_memories", query, topK, { filter: { excludeFounderOnly: true } });
 
     if ("error" in result) {
       return { success: false, error: ragErrorMessage("turicks-brain", result.error) };

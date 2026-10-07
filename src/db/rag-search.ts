@@ -26,6 +26,15 @@ export interface RagHit {
   /** brain_memories only — undefined for personal_rag/research_cache. */
   memory_type?: string;
   project?: string | null;
+  /** brain_memories only: the `source` column (e.g. "ide_mcp" for agent-written rows). */
+  source?: string | null;
+  /** brain_memories only: when the row was written. */
+  created_at?: Date | string | null;
+  /**
+   * Cosine similarity from the vector leg. Unset on keyword-only hits, whose `score` is a term-overlap fraction
+   * and not comparable. The abstain (src/db/brain-hit-view.ts) reads this, never `score`.
+   */
+  cosine?: number;
 }
 
 /** Metadata-column equality filter, ANDed onto a search's WHERE clause. */
@@ -35,6 +44,8 @@ export interface RagFilter {
   memory_type?: string;
   /** brain_memories only: the real `project` column — scopes results to one project (e.g. "oplify"). */
   project?: string;
+  /** brain_memories only: drop rows with `metadata.visibility = 'founder'` (Mac capture, AG-027). Set for every non-founder-DM caller. */
+  excludeFounderOnly?: boolean;
 }
 
 /** Throws if `table` is not one of the allowed RAG tables. */
@@ -52,8 +63,8 @@ export function assertAllowedRagTable(table: string): asserts table is RagTable 
  */
 function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void {
   if (table === "brain_memories") return;
-  if (filter?.memory_type || filter?.project) {
-    throw new Error(`memory_type/project filters require table "brain_memories", got "${table}"`);
+  if (filter?.memory_type || filter?.project || filter?.excludeFounderOnly) {
+    throw new Error(`memory_type/project filters require table "brain_memories", got "${table}" (excludeFounderOnly needs it too)`);
   }
 }
 
@@ -63,6 +74,16 @@ function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void
  */
 function liveRowsClause(table: RagTable) {
   return table === "brain_memories" ? sql` AND status NOT IN ('SUPERSEDED', 'ARCHIVED')` : sql``;
+}
+
+/**
+ * Group-chat privacy (AG-027, audit F3): rows the Mac wrote with `visibility: founder` are served to the founder's DM only.
+ * A row with no visibility key stays visible, so every pre-existing row keeps its behaviour. Leading space, like the fragments around it.
+ */
+function visibilityClause(table: RagTable, filter?: RagFilter) {
+  return table === "brain_memories" && filter?.excludeFounderOnly
+    ? sql` AND COALESCE(metadata->>'visibility', 'all') <> 'founder'`
+    : sql``;
 }
 
 /** The schema these stores actually live in — see {@link ragTableRef}. */
@@ -113,9 +134,9 @@ export async function searchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}${visibilityClause(table, opts?.filter)}`;
   const isBrainMemories = table === "brain_memories";
-  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
+  const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
   const rows = await db.execute(sql`
     SELECT content, metadata${extraCols}, 1 - (embedding <=> ${vec}::vector) AS score
@@ -134,12 +155,17 @@ export async function searchRagTable(
       score: number;
       memory_type?: string;
       project?: string | null;
+      source?: string | null;
+      created_at?: Date | string | null;
     }>
   ).map((r) => ({
     content: r.content,
     metadata: r.metadata ?? {},
     score: Number(r.score),
-    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+    cosine: Number(r.score),
+    ...(isBrainMemories
+      ? { memory_type: r.memory_type, project: r.project, source: r.source, created_at: r.created_at }
+      : {}),
   }));
 }
 
@@ -194,9 +220,9 @@ export async function keywordSearchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}${visibilityClause(table, opts?.filter)}`;
   const isBrainMemories = table === "brain_memories";
-  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
+  const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
 
   // The SQL mirror of scoreByTerms: one CASE arm per term, summed. Ordering by
   // it makes the LIMIT keep the highest-overlap rows instead of arbitrary ones.
@@ -219,18 +245,24 @@ export async function keywordSearchRagTable(
       metadata: Record<string, unknown> | null;
       memory_type?: string;
       project?: string | null;
+      source?: string | null;
+      created_at?: Date | string | null;
     }>
   ).map((r) => ({
     content: r.content,
     metadata: r.metadata ?? {},
-    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+    ...(isBrainMemories
+      ? { memory_type: r.memory_type, project: r.project, source: r.source, created_at: r.created_at }
+      : {}),
   }));
 
   return rankByTerms(candidates, terms, (c) => c.content, limit).map((c) => ({
     content: c.content,
     metadata: c.metadata,
     score: Math.min(1, scoreByTerms(c.content, terms) / terms.length),
-    ...(isBrainMemories ? { memory_type: c.memory_type, project: c.project } : {}),
+    ...(isBrainMemories
+      ? { memory_type: c.memory_type, project: c.project, source: c.source, created_at: c.created_at }
+      : {}),
   }));
 }
 

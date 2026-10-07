@@ -41,15 +41,14 @@ function ragSearchTables(source: string): string[] {
 }
 
 /**
- * THREE scripts write the brain, not one. ADR-038 moved only the first and left
+ * The Claude and Antigravity transcript writers were retired by AG-027: the Mac capture now reaches
+ * brain_memories only through brainIngest (see the last test). Three scripts used to write the brain, not one. ADR-038 moved only the first and left
  * the other two behind — measured on the dev DB 2026-09-05, those two owned
  * 2,642 of 4,018 rows, 66% of the corpus. Repointing readers without them would
  * have made the entire conversation memory invisible instead of fixing anything.
  */
 const WRITERS = [
   "scripts/sync-turicks-brain.ts", // docs/ → source_path + entry_type
-  "scripts/ingest-claude-sessions.ts", // Claude transcripts → source + doc_type
-  "scripts/sync-conversation-session.ts", // Antigravity transcripts, no embedding
 ] as const;
 
 describe("brain store parity — the writers and the readers name the same table", () => {
@@ -66,6 +65,13 @@ describe("brain store parity — the writers and the readers name the same table
     for (const table of sqlTables(read(writer))) {
       expect(table).toBe("brain_memories");
     }
+  });
+
+  it("the Mac capture writes through brainIngest on the VPS, so it cannot name another table", () => {
+    const ingester = read("scripts/brain-ingest-digests.ts");
+    expect(ingester).toContain("brainIngest");
+    expect(read("src/db/brain-ingest.ts")).toContain("brainMemories");
+    expect(sqlTables(ingester)).toEqual([]);
   });
 
   it("search_knowledge queries the table brain:sync writes, on both call sites", () => {

@@ -75,4 +75,11 @@ describe("scripts/pipeline-spec", () => {
     expect(JSON.parse(await runPipelineSpec("record", JSON.stringify({ ...base, repo: "evil/repo" }), ON, d)).status).toBe("FAILED");
     expect(d.fs.files.size).toBe(0);
   });
+
+  it("failfirst: judges the vitest report, and refuses input that is not {report, locked_tests}", async () => {
+    const report = JSON.stringify({ testResults: [{ name: `/w/${TEST_FILE}`, message: "", assertionResults: [{ status: "passed" }] }] });
+    expect(JSON.parse(await runPipelineSpec("failfirst", JSON.stringify({ report, locked_tests: [TEST_FILE] }), ON, mk())).status).toBe("PASSES");
+    expect(JSON.parse(await runPipelineSpec("failfirst", JSON.stringify({ report, locked_tests: [7] }), ON, mk())).status).toBe("FAILED");
+    expect(JSON.parse(await runPipelineSpec("failfirst", JSON.stringify({ locked_tests: [TEST_FILE] }), ON, mk())).status).toBe("FAILED");
+  });
 });

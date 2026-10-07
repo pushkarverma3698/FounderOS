@@ -76,7 +76,7 @@ const TOOLS = [
   "bash", "sh", "env", "awk", "sed", "grep", "tr", "cut", "head", "tail", "wc", "date", "mkdir", "rm", "mv", "cp",
   "cat", "find", "sleep", "basename", "dirname", "mktemp", "chmod", "chown", "hostname", "readlink", "stat", "git",
   "jq", "sort", "uniq", "touch", "ls", "id", "ln", "tee", "xargs", "comm", "diff", "sha256sum", "shasum", "realpath",
-  "true", "false", "test", "expr", "printf", "seq", "uname", "tar",
+  "true", "false", "test", "expr", "printf", "seq", "uname", "tar", "perl",
 ];
 
 /** git with its chatter captured: a local bare origin makes protocol-v2 push print warnings that are not test output. */
@@ -156,6 +156,8 @@ interface RepoState {
     comments: { body: string }[];
     labels?: string[];
     checks?: { name: string; bucket: string; state?: string; required?: boolean }[];
+    /** Set by the fake `gh pr create --body` and `gh pr edit --body`. */
+    body?: string;
   }[];
 }
 interface GhState {

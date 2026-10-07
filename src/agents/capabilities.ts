@@ -98,12 +98,14 @@ type AnyTool = any;
  * RETRIEVAL_TOOL_TABLE below. Where each RAG table is read (pinned by
  * tests/unit/agents/capabilities.test.ts):
  *
- * brain_memories → marketing + research + sales
+ * brain_memories → admin + engineering + marketing + research + sales
  * research_cache → research
  * personal_rag   → none
  *
- * brain_memories: business knowledge (strategy, ADRs, brand, founder profile),
- *   read only through searchKnowledge. research also held searchTuricksBrain,
+ * brain_memories: business knowledge (strategy, ADRs, brand, founder profile) AND what Mac Claude and
+ *   Antigravity saved through MCP (decisions, bugs, session notes), read only through searchKnowledge.
+ *   admin and engineering joined 2026-10-06 (AG-025): admin's search_memory read the legacy knowledge_entries
+ *   table and never this one, and engineering, which answers "what work happened", had no memory tool. research also held searchTuricksBrain,
  *   the same engine over the same table, and on 2026-09-26 called both for one
  *   query; searchKnowledge took its only advantage (top_k up to 10) instead.
  *   The UnifiedTool stays in src/tools/rag.ts for scripts/probe-rag.ts and the
@@ -122,10 +124,10 @@ import { synthesizeSkill } from "./agent-tools.js";
 import { uiCheck } from "./agent-tools/ui-qa.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recallConversationTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
+  admin: [readContext, updateContext, searchMemoryTool, searchKnowledge, recallConversationTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, antigravityTaskStatus, requeueAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
+  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, antigravityTaskStatus, requeueAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs, searchKnowledge],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, sendFile, writeFile],

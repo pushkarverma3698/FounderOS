@@ -11,6 +11,7 @@
 import { z } from "zod";
 import type { RagHit } from "./rag-search.js";
 import type { HybridOk } from "./rag-hybrid.js";
+import { abstainText, hitHeader, isBrainHit } from "./brain-hit-view.js";
 
 export const RetrievalResultSchema = z.object({
   /** Where the chunk came from — a file path, URL, or doc id. Never empty. */
@@ -23,6 +24,8 @@ export const RetrievalResultSchema = z.object({
   chunk: z.string().min(1),
   /** Pre-rendered citation token, e.g. "[ADR-001.md]". */
   citation: z.string().min(1),
+  /** brain_memories hits only: `<date> · <origin> · <project> · <type>` (src/db/brain-hit-view.ts). */
+  header: z.string().min(1).optional(),
 });
 
 export type RetrievalResult = z.infer<typeof RetrievalResultSchema>;
@@ -46,6 +49,7 @@ export function toRetrievalResult(hit: RagHit, sourceField: string): RetrievalRe
     citation: `[${source}]`,
   };
   if (typeof docType === "string" && docType.length > 0) result.doc_type = docType;
+  if (isBrainHit(hit)) result.header = hitHeader(hit);
   return result;
 }
 
@@ -54,12 +58,13 @@ export function renderRetrieval(results: readonly RetrievalResult[], query: stri
   if (results.length === 0) {
     return `No results found for "${query}". The knowledge base may not have this information yet.`;
   }
-  return results
-    .map((r, i) => {
-      const type = r.doc_type ? ` ${r.doc_type}` : "";
-      return `${i + 1}. ${r.citation}${type} (score ${r.score.toFixed(2)})\n${r.chunk}`;
-    })
-    .join("\n\n");
+  return results.map(renderResult).join("\n\n");
+}
+
+function renderResult(r: RetrievalResult, i: number): string {
+  const type = r.doc_type ? ` ${r.doc_type}` : "";
+  const header = r.header ? `\n${r.header}` : "";
+  return `${i + 1}. ${r.citation}${type} (score ${r.score.toFixed(2)})${header}\n${r.chunk}`;
 }
 
 /**
@@ -88,10 +93,17 @@ export function renderRagSuccess(result: HybridOk, query: string, label: string,
       : "";
   // Validate at the boundary: a malformed/source-less hit is dropped, never
   // rendered as a citable source (F4 — hallucinated sources become a typed miss).
-  const results = result.hits
-    .map((h) => RetrievalResultSchema.safeParse(toRetrievalResult(h, sourceField)))
-    .filter((p) => p.success)
-    .map((p) => p.data);
+  const valid = result.hits.flatMap((hit) => {
+    const parsed = RetrievalResultSchema.safeParse(toRetrievalResult(hit, sourceField));
+    return parsed.success ? [{ hit, result: parsed.data }] : [];
+  });
+  const results = valid.map((v) => v.result);
+  // A weak top hit abstains (cosine only, see brain-hit-view.ts). Rendered by index so each hit keeps its own citation.
+  const byHit = new Map(valid.map((v) => [v.hit, v.result] as const));
+  if (results.length > 0) {
+    const abstain = abstainText(valid.map((v) => v.hit), query, (h, i) => renderResult(byHit.get(h)!, i));
+    if (abstain !== null) return abstain;
+  }
   return (
     `${banner}${label} search for "${query}" (${results.length} results${suffix}):\n\n` +
     renderRetrieval(results, query)

@@ -29,6 +29,7 @@ export {
   type CommandCatalogEntry,
   type WorkerCatalogEntry,
 } from "./planner.js";
+export { commandNeedsTap } from "./command-tap.js";
 export {
   dispatch,
   routeAfterDispatch,
