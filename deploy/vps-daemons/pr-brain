@@ -38,7 +38,7 @@
 #
 # Config:
 #   ~/.claude/pr-brain.repos   one repo path per line ('#' comments). Absent => auto-discover.
-#   ~/.claude/pr-brain.off     kill switch. Present => exit 0 immediately.
+#   ~/.claude/pr-brain.off     kill switch for the sweep. Present => exit 0 immediately, unless --pr names one PR.
 #   PR_BRAIN_MAX               PRs per sweep (default 3)
 #   PR_BRAIN_ENGINE            agy (default) or claude, see above
 #   PR_BRAIN_MODELS            agy engine: reviewer models, best first, space or comma separated
@@ -349,9 +349,15 @@ if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 && -z "$ONE_REPO" && -z "$ONE_PR" ]
   write_effective "$HOME/.claude/pr-brain.effective" "engine=$ENGINE" "reviewers=$_reviewers" "merge=${PR_BRAIN_MERGE:-1}"
 fi
 
+# The switch stops the sweep. An explicit --pr is someone asking for this one review (deploy/job-run after a /task
+# build, or the founder by hand), the same way --pr already skips the sweep's promotion and pipeline-PR filters.
+# 2026-10-07: with /review off a /task built its PR and then failed with "the review was skipped".
 if [[ -f "$OFF_SWITCH" ]]; then
-  log "kill switch present ($OFF_SWITCH) — nothing dispatched"
-  exit 0
+  if [[ -z "$ONE_PR" ]]; then
+    log "kill switch present ($OFF_SWITCH) — nothing dispatched"
+    exit 0
+  fi
+  log "kill switch present ($OFF_SWITCH) — ignored for the explicit --pr ${ONE_PR}"
 fi
 
 # A gate can outlast the 20-minute cron interval. Without a lock the next tick
