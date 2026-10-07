@@ -35,6 +35,7 @@ import { replyForError } from "./error-reply.js";
 import { sendCapabilityHint } from "./capability-hint.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
 import { engineFromApprovalCard, type Engine } from "../tools/coding-engine.js";
+import { withInflight } from "./inflight-turns.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -147,7 +148,14 @@ async function sendReply(ctx: Context, text: string): Promise<void> {
  * dispatch tool trusts it over its own argument: the planner is told the engine in words, and a model may drop a
  * word, so the choice cannot depend on the model copying it.
  */
-export async function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
+export function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
+  // Registered for as long as it runs so a deploy's SIGTERM waits for it (inflight-turns.ts, AG-037).
+  return withInflight({ chatId: String(ctx.chat?.id ?? "unknown"), text, record: true }, (flight) =>
+    runKernelTurn(ctx, text, profileId, engine, flight.setTurnId),
+  );
+}
+
+async function runKernelTurn(ctx: Context, text: string, profileId: string | undefined, engine: Engine | undefined, setTurnId: (id: string) => void): Promise<void> {
   const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
   const queued = chatTurnChains.has(String(chatId));
@@ -159,6 +167,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
   let planned = null as PlannedCommand | null;
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
+    setTurnId(trace.turnId);
     // First: the founder sees "Working on it" before the gates and the first-boot kernel compile, not after them.
     const ack = sendTurnAck(ctx, trace, arrivedAt, { queued });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
@@ -267,7 +276,14 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 // ── Resume after an approval decision ─────────────────────────────────────────
 
 const cardEngine = (data: string | null | undefined) => { const engine = engineFromApprovalCard(data); return engine ? { engine } : {}; };
-export async function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
+export function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
+  // A deploy waits for an approval tap's run too, but never reports it as a dropped message (record: false).
+  return withInflight({ chatId: String(ctx.chat?.id ?? "unknown"), text: `approval ${decision}`, record: false }, () =>
+    resumeKernelTurn(ctx, decision, nonce),
+  );
+}
+
+async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
   const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
