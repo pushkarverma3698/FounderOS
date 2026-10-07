@@ -237,3 +237,49 @@ describe("githubTool — get_pr input checks", () => {
     expect(result.error).toContain("number");
   });
 });
+
+describe("githubTool - list_commits since and truncation", () => {
+  const commit = (i: number) => ({ sha: "abcdef" + i + "0000000", commit: { message: "c" + i, author: { name: "A", date: "2026-10-05" } } });
+  beforeEach(() => {
+    process.env["GITHUB_TOKEN"] = "ghp_test";
+    mockListCommits.mockReset();
+  });
+
+  it("passes since to Octokit as an ISO timestamp", async () => {
+    mockListCommits.mockResolvedValue({ data: [commit(1)] });
+    await githubTool.execute({ action: "list_commits", owner: "o", repo: "r", since: "2026-10-05" });
+    expect(mockListCommits.mock.calls[0]![0]).toMatchObject({ since: "2026-10-05T00:00:00.000Z" });
+  });
+
+  it("omits since when not given, and rejects a non-date", async () => {
+    mockListCommits.mockResolvedValue({ data: [commit(1)] });
+    await githubTool.execute({ action: "list_commits", owner: "o", repo: "r" });
+    expect(mockListCommits.mock.calls[0]![0]).not.toHaveProperty("since");
+    const bad = await githubTool.execute({ action: "list_commits", owner: "o", repo: "r", since: "yesterday-ish" });
+    expect(bad.success).toBe(false);
+  });
+
+  it("a full page of 20 is flagged truncated with the plain-text line", async () => {
+    mockListCommits.mockResolvedValue({ data: Array.from({ length: 20 }, (_, i) => commit(i)) });
+    const res = await githubTool.execute({ action: "list_commits", owner: "o", repo: "r" });
+    expect(res.truncated).toBe(true);
+    expect(res.note).toContain("Showing the first 20; more exist");
+  });
+
+  it("a short page is not flagged", async () => {
+    mockListCommits.mockResolvedValue({ data: Array.from({ length: 19 }, (_, i) => commit(i)) });
+    const res = await githubTool.execute({ action: "list_commits", owner: "o", repo: "r" });
+    expect(res.truncated).toBeUndefined();
+  });
+
+  it("the LangChain wrapper forwards since and prints the truncation line", async () => {
+    mockListCommits.mockResolvedValue({ data: Array.from({ length: 20 }, (_, i) => commit(i)) });
+    const { githubRead } = await import("../../../src/agents/agent-tools/engineering.js");
+    const out = await githubRead.invoke(
+      { action: "list_commits", owner: "o", repo: "r", since: "2026-10-05" },
+      { configurable: { thread_id: "since-wrapper-test" } },
+    );
+    expect(mockListCommits.mock.calls[0]![0]).toMatchObject({ since: "2026-10-05T00:00:00.000Z" });
+    expect(String(out)).toContain("Showing the first 20; more exist");
+  });
+});

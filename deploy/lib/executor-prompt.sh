@@ -15,9 +15,12 @@
 #       the same, with STANDARDS.md read from the checkout in $WORKSPACE (the spec branch), as the executor's user.
 #   exec_refuse ISSUE TITLE WHY
 #       once per issue: agent:ready off, agent:needs-brief on, one comment, one Telegram message.
+#   exec_changed_nothing ISSUE PR ENAME LOG
+#       the executor of an approved spec finished with no commit on top of the locked test: the PR (if any) is closed,
+#       agent:working -> agent:needs-brief, one comment, one Telegram message. Only called for a contract run.
 #
-# NEEDS FROM THE SOURCING SCRIPT: log, notify, gh, jq, as_antigravity, issue_has_label, REPO, WORKSPACE, DRY_RUN,
-#   NEEDS_BRIEF_LABEL.
+# NEEDS FROM THE SOURCING SCRIPT: log, notify, gh, jq, as_antigravity, issue_has_label, finish_issue, redact_secrets,
+#   agy_progress_outcome, REPO, WORKSPACE, DRY_RUN, NEEDS_BRIEF_LABEL.
 
 EXEC_ROOT="${AGENT_DISPATCH_PIPELINE_ROOT:-/opt/founderos}"
 EXEC_NODE="${AGENT_DISPATCH_NODE:-node}"
@@ -92,4 +95,26 @@ exec_refuse() {
 Fix: repair or re-create the spec (ask FounderOS again), then put \`agent:ready\` back." >/dev/null
   notify "📝 agent-dispatch did NOT run #${issue} in ${REPO} ('${title}'): the approved contract cannot be used (${why}). No executor run was started. You hear about this issue once."
   log "#${issue} not run: contract unusable (${why}) — labelled ${NEEDS_BRIEF_LABEL}, commented, Telegram sent"
+}
+
+exec_changed_nothing() {
+  local issue="$1" pr="$2" ename="$3" run_log="$4" last_line closed=""
+  last_line="$(grep -v '^[[:space:]]*$' "$run_log" 2>/dev/null | tail -n1 | redact_secrets | cut -c1-200)"
+  log "#${issue}: ${ename} finished with no commit on top of the locked test (pr=${pr:-none}) — closing the empty PR, asking the founder"
+  if [[ -n "$pr" ]]; then
+    if gh pr close "$pr" --repo "$REPO" --comment "Closed by agent-dispatch: this PR holds only the locked test for #${issue}, no change on top of it. The branch stays, so a retry builds on the same test." >/dev/null 2>&1; then
+      closed=" Its PR #${pr} held only the test and was closed; the branch stays."
+    else
+      log "WARNING: could not close the empty PR #${pr} for #${issue} — close it by hand: gh pr close ${pr} --repo ${REPO}"
+      closed=" Its PR #${pr} holds only the test; close it (agent-dispatch could not)."
+    fi
+  fi
+  gh label create "$NEEDS_BRIEF_LABEL" --repo "$REPO" --color FBCA04 \
+    --description "The issue is not a complete brief; agent-dispatch will not claim it until it is" --force >/dev/null 2>&1 || true
+  finish_issue "$issue" "$NEEDS_BRIEF_LABEL"
+  gh issue comment "$issue" --repo "$REPO" --body "<!-- agent-changed-nothing --> ${ename} finished but committed nothing on top of the locked test you approved.${closed} It found nothing to change, or could not make the test pass and stopped. Its last line: \`${last_line:-<empty>}\`
+
+Still broken? Add what you see, then put \`agent:ready\` back: the approved spec is kept, so the retry builds on the same test. Done? Close this issue." >/dev/null
+  notify "🤷 #${issue} (${REPO}): ${ename} committed nothing on top of the locked test, so there is nothing to review.${closed} Retry: add what is still wrong to the issue and relabel agent:ready. Done: close it."
+  agy_progress_outcome "🤷 ${ename} committed nothing on top of the locked test. #${issue} is ${NEEDS_BRIEF_LABEL}.${closed}"
 }

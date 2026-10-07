@@ -17,8 +17,8 @@ import type { KernelStateType, KernelUpdate } from "../../../src/kernel/state.js
 import type { FailureReport, PlannedCommand } from "../../../src/kernel/contracts.js";
 
 const commands: CommandCatalogEntry[] = [
-  { name: "where", description: "Where are we. where founderos for one", mutating: false },
-  { name: "task", description: "Build something", mutating: true },
+  { name: "where", description: "Where are we. where founderos for one", mutating: false, writesWithArgs: false },
+  { name: "task", description: "Build something", mutating: true, writesWithArgs: false },
 ];
 
 const cmd = (name: string, args?: string) => JSON.stringify({ type: "command", name, ...(args !== undefined ? { args } : {}) });
@@ -60,6 +60,21 @@ describe("plan node — command decision", () => {
     const update = await makePlanNode(scripted([cmd("/Where")]), [], undefined, commands)(stateFor("where are we"));
     expect(commandOf(update)).toEqual({ name: "where", args: "" });
     expect(update.reply).toBe("Ran /where");
+  });
+
+  it("history says Offered, not Ran, for a command that waits for a tap", async () => {
+    const goal: CommandCatalogEntry = { name: "goal", description: "goal add", mutating: true, writesWithArgs: false };
+    const update = await makePlanNode(scripted([cmd("goal", "add 20 applications")]), [], undefined, [goal])(stateFor("my goal is 20 applications"));
+    expect(update.reply).toBe("Offered /goal add 20 applications: not run until the founder taps \u2705 Run");
+    expect(update.reply).not.toMatch(/^Ran/);
+  });
+
+  it("a read-only command given write arguments is Offered; bare it is Ran", async () => {
+    const focus: CommandCatalogEntry = { name: "focus", description: "focus", mutating: false, writesWithArgs: true };
+    const withArgs = await makePlanNode(scripted([cmd("focus", "close the pilot")]), [], undefined, [focus])(stateFor("x"));
+    expect(withArgs.reply).toContain("Offered /focus close the pilot");
+    const bare = await makePlanNode(scripted([cmd("focus")]), [], undefined, [focus])(stateFor("x"));
+    expect(bare.reply).toBe("Ran /focus");
   });
 
   it("refuses an invented command with a correction retry, then accepts a real one", async () => {
@@ -130,7 +145,7 @@ describe("full graph — a command turn", () => {
 
 
 describe("planner prompt — goals from plain words", () => {
-  const goal: CommandCatalogEntry = { name: "goal", description: "goal add title | metric=key target=n", mutating: true };
+  const goal: CommandCatalogEntry = { name: "goal", description: "goal add title | metric=key target=n", mutating: true, writesWithArgs: false };
 
   it("tells the planner to leave the metric out of a goal (the founder picks it with buttons)", () => {
     const prompt = buildPlannerPrompt([], [goal]);

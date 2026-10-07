@@ -9,6 +9,8 @@
  *   pipeline-spec.ts record   < {repo, issue, contract, effective_risk, fingerprint, spec_commit}
  *                                                            -> {"status":"RECORDED","nonce","parts":[html..],"reply_markup"}
  *                                                             | {"status":"FAILED","error"}
+ *   pipeline-spec.ts failfirst < {report (vitest JSON text), locked_tests: [paths]}
+ *                                                            -> {"status":"FAILS"|"PASSES"|"BROKEN","reason"}
  *
  * Always exits 0 and prints one JSON line: the caller reads the status, never the exit code. With AGENT_PIPELINE_V2 not
  * "1" every subcommand prints {"status":"DISABLED"} and touches nothing.
@@ -18,6 +20,7 @@ import { pathToFileURL } from "node:url";
 import { renderSpecCard } from "../src/gateway/coding-cards.js";
 import { contractsDir, type StoreFs } from "../src/tools/contract-store.js";
 import { newNonce, pipelineV2Enabled, writePending } from "../src/tools/pipeline-pending.js";
+import { judgeFailFirst } from "../src/tools/fail-first.js";
 import { extractAsk, runPassP, type PassPInput } from "../src/tools/pipeline-spec.js";
 import { parseTaskContract } from "../src/tools/task-contract.js";
 
@@ -101,7 +104,13 @@ export async function runPipelineSpec(
     return line(runPassP({ issue_body, repo, base_sha, model_output, manifest, line_counts } as PassPInput));
   }
   if (sub === "record") return record(input, env, deps);
-  return failed("unknown subcommand " + String(sub) + " (ask | verify | record)");
+  if (sub === "failfirst") {
+    if (!isObj(input) || typeof input["report"] !== "string" || !Array.isArray(input["locked_tests"]) || !input["locked_tests"].every((t) => typeof t === "string")) {
+      return failed("failfirst needs report (string) and locked_tests (array of strings)");
+    }
+    return line(judgeFailFirst(input["report"], input["locked_tests"] as string[]));
+  }
+  return failed("unknown subcommand " + String(sub) + " (ask | verify | record | failfirst)");
 }
 
 async function readStdin(): Promise<string> {

@@ -39,5 +39,6 @@ export function plannableCommands(): CommandCatalogEntry[] {
     name: e.command,
     description: e.description,
     mutating: !READ_ONLY_COMMANDS.has(e.command),
+    writesWithArgs: WRITES_WITH_ARGS.has(e.command),
   }));
 }

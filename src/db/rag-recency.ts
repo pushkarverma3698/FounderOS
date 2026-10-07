@@ -4,7 +4,7 @@
  * 2026-10-04 audit: 310 of the 763 plan chunks were over 30 days old and ranked exactly like last week's, so "what is
  * the plan for X" could be answered from a plan that had since been replaced.
  *
- * The date comes from the document's own file name (`docs/plans/2026-10-03-foo.md`). `created_at` cannot be used:
+ * The date comes from the document's own file name (or, for agent writes, `metadata.occurred_at`) (`docs/plans/2026-10-03-foo.md`). `created_at` cannot be used:
  * `brain:sync` deletes and re-inserts a source's chunks, so it only records when the sync last ran. A document with no
  * date in its name (an ADR, CLAUDE.md, a rule) is never aged: those are meant to be long-lived.
  *
@@ -22,13 +22,18 @@ const MS_PER_DAY = 86_400_000;
 /** `YYYY-MM-DD` at the start of the file name, followed by a separator or the end of the name. */
 const FILE_DATE = /^(\d{4})-(\d{2})-(\d{2})(?=[-.]|$)/;
 
+/** `metadata.occurred_at` (agent writes, AG-026) as ms, or null when absent or unparseable. */
+function occurredAtMs(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
 /** Date in the document's file name as UTC midnight ms, or null when it has none. */
 export function docDateMs(metadata: Record<string, unknown> | null | undefined): number | null {
   const path = metadata?.source_path ?? metadata?.source_file;
-  if (typeof path !== "string") return null;
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const m = FILE_DATE.exec(name);
-  if (!m) return null;
+  const m = typeof path === "string" ? FILE_DATE.exec(path.slice(path.lastIndexOf("/") + 1)) : null;
+  if (!m) return occurredAtMs(metadata?.occurred_at);
   const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const ms = Date.UTC(year, month - 1, day);
   const d = new Date(ms);

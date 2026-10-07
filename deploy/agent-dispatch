@@ -250,9 +250,10 @@ notify_long() {
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 #   pass-p.sh       pass_p_run: AGENT_PIPELINE_V2 only, writes the spec + locked test for a new coding ask (a no-op otherwise)
 #   executor-prompt.sh  exec_lookup / exec_build: AGENT_PIPELINE_V2 only, the executor of an approved spec gets a contract prompt
+#   pr-moves.sh     ensure_moves_line: an agent PR with no `Moves:` line gets `Moves: A` for the PR scope check
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -1096,6 +1097,15 @@ EOF
       ;;
   esac
 
+  # An approved spec's run that finished but committed nothing on top of the locked test: the executor found nothing to
+  # change, or gave up quietly. It is not a crash (the CLI exited 0, or opened a PR), so agent:failed would mislead; an
+  # empty PR would go to review holding only the test (#965). The founder decides; the contract stays for a retry.
+  if [[ -n "$pipeline_spec" && "${new_commits:-0}" -eq 0 && ( "$agy_exit" -eq 0 || -n "$pr_number" ) ]]; then
+    exec_changed_nothing "$issue" "$pr_number" "$ename" "$agy_log"
+    rm -f "$agy_log"
+    return 1
+  fi
+
   if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]]; then
     local last_line
     last_line=$(grep -v '^[[:space:]]*$' "$agy_log" 2>/dev/null | tail -n1 | redact_secrets | cut -c1-200)
@@ -1126,6 +1136,7 @@ EOF2
   fi
   finish_issue "$issue" agent:review
   label_engine "$issue" "$pr_number" "$engine"
+  ensure_moves_line "$pr_number"
   local pr_url; pr_url="$(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url 2>/dev/null)"
   gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: ${pr_url}. Awaiting pr-brain review.${closed_note}" >/dev/null
   notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO} by ${ename}, awaiting pr-brain review.${closed_note}

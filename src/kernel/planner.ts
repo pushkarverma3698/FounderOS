@@ -36,6 +36,7 @@ import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { stripFalsePromises } from "./promise-guard.js";
+import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
 export interface KernelChatModel {
@@ -52,12 +53,12 @@ export interface WorkerCatalogEntry {
 
 /** One slash command the planner may choose — built from the gateway's COMMAND_MENU, never hand-typed here. */
 export interface CommandCatalogEntry {
-  /** Registered name, no slash. */
-  name: string;
-  /** Plain-text usage line the founder sees in the menu. */
-  description: string;
+  name: string; // registered name, no slash
+  description: string; // usage line the founder sees in the menu
   /** Changes something (files work, marks a row, spends money): the gateway asks for a tap before running it. */
   mutating: boolean;
+  /** Read-only bare, a write with arguments (`/focus` shows, `/focus <text>` replaces). */
+  writesWithArgs: boolean;
 }
 
 /**
@@ -131,7 +132,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
     `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}.`,
     `- expected.kind is "action_receipt" whenever the step SENDS/POSTS/WRITES anything external; those steps also set hitl_required=true when using a gated tool.`,
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
-    `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory, recall_conversation for what the founder said in past chats). Read first, then answer — never answer from priors or ask permission to check.`,
+    `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory, recall_conversation for what the founder said in past chats). Past decisions, bugs, or what Claude or Antigravity did or decided → search_knowledge (admin or engineering); if it returns \"No strong match\", say so, do not guess. Read first, then answer — never answer from priors or ask permission to check.`,
     // 2026-09-29: "what is my current focus?" was answered with June's plan as if it were
     // current. read_context now dates every value and marks a stale or undated one with this
     // mark (src/tools/context-render.ts), so this rule has a real input to act on.
@@ -387,8 +388,7 @@ export function makePlanNode(
         ...base,
         mission: { goal: input, status: "done", plan: null, cursor: 0 },
         command,
-        // History keeps what ran; the command's own output goes to the founder from the gateway.
-        reply: `Ran /${command.name}${command.args ? ` ${command.args}` : ""}`,
+        reply: commandHistoryReply(command.name, command.args, needsTapFor(commands, command)),
       };
     }
     return {

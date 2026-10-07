@@ -30,20 +30,9 @@
 import { runSelfImprovementDispatch } from "../src/evolution/dispatch-findings.js";
 import { renderDispatchMessage } from "../src/evolution/dispatch-message.js";
 import { sendToChat } from "../src/infra/telegram-send.js";
-import { syncConversationSessions } from "./sync-conversation-session.js";
 
 export async function runSelfImprovementLoop(): Promise<void> {
   console.log("=== FounderOS Self-Improvement Acting Loop ===");
-
-  // Laptop-only, and deliberately not part of the scheduled path: this reads
-  // Claude Code transcripts from ~/.claude/projects, which exist on this machine
-  // and not on the VPS. Kept here so `pnpm self-improve:run` still syncs them.
-  try {
-    const sessionRes = await syncConversationSessions();
-    console.log(`Synced ${sessionRes.synced} conversation sessions into DB memory.`);
-  } catch (err) {
-    console.warn("Session sync failed (continuing):", (err as Error).message);
-  }
 
   const outcome = await runSelfImprovementDispatch();
 

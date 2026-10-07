@@ -11,6 +11,7 @@
 
 import type { Octokit } from "octokit";
 import type { ToolResult } from "./index.js";
+import { listResult } from "./list-truncation.js";
 
 /** Caps keep one get_pr result small enough for a multi-step chain. */
 const MAX_BODY = 1_500;
@@ -26,9 +27,8 @@ function cap(text: string | null | undefined, max: number): string {
 
 export async function listPullRequests(octokit: Octokit, owner: string, repo: string): Promise<ToolResult> {
   const { data } = await octokit.rest.pulls.list({ owner, repo, state: "open", per_page: 30, sort: "updated", direction: "desc" });
-  return {
-    success: true,
-    data: data.map((p) => ({
+  return listResult(
+    data.map((p) => ({
       number: p.number,
       title: p.title,
       draft: p.draft ?? false,
@@ -38,7 +38,8 @@ export async function listPullRequests(octokit: Octokit, owner: string, repo: st
       updated_at: p.updated_at,
       url: p.html_url,
     })),
-  };
+    30,
+  );
 }
 
 export async function getPullRequest(octokit: Octokit, owner: string, repo: string, number: number): Promise<ToolResult> {

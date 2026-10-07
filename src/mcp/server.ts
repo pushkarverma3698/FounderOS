@@ -17,7 +17,7 @@
  *   - github_read     → GitHub repos / README / stats (read-only)
  *   - read_context    → Founder's current business context
  *   — Memory data-source layer (ADR-016) —
- *   - search_memory   → Unified query across episodic_memory + conversations + knowledge_entries
+ *   - search_memory   → Unified query across episodic_memory + conversations + founder_context
  *   - search_knowledge → turicks-brain hybrid search (brain_memories table, ADR-038)
  *   - read_cv         → CV/career lookup (personal-rag REST API → CV files → labelled wiki fallback)
  *
@@ -102,7 +102,7 @@ export const FOUNDEROS_MCP_TOOLS = [
     name: "search_memory" as const,
     description:
       "Search across all FounderOS memory tiers: episodic events (decisions, outcomes, " +
-      "completed tasks), conversation history, turicks-brain knowledge, and founder context. " +
+      "completed tasks), conversation history, and founder context (use search_knowledge for decisions, bugs and ADRs). " +
       "Use this to answer 'what did we decide about X', 'what happened with Y last week', " +
       "'what is our strategy on Z'. Read-only — no approval needed.",
     inputSchema: {
@@ -114,7 +114,7 @@ export const FOUNDEROS_MCP_TOOLS = [
         },
         type: {
           type: "string",
-          enum: ["all", "conversations", "episodic", "context", "knowledge"],
+          enum: ["all", "conversations", "episodic", "context"],
           description: "Filter to a specific memory tier (default: all)",
         },
       },
@@ -228,7 +228,7 @@ export async function handleMcpToolCall(
 
       case "search_memory": {
         const query = String(args["query"] ?? "");
-        const type = (args["type"] as "all" | "conversations" | "episodic" | "knowledge" | "context" | undefined) ?? "all";
+        const type = (args["type"] as "all" | "conversations" | "episodic" | "context" | undefined) ?? "all";
         // searchMemoryTool is a LangChain DynamicStructuredTool (.invoke not .execute)
         try {
           const text = await searchMemoryTool.invoke({ query, type });
