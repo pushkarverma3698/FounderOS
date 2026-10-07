@@ -79,6 +79,10 @@ describe("buildExecutorPrompt: what the executor is told", () => {
     expect(p).toContain("git push -u origin HEAD");
   });
 
+  it("asks for the `Moves: A` line the PR scope check needs (#965 was red without it)", () => {
+    expect(ok()).toContain("`Moves: A`");
+  });
+
   it("forbids editing the locked tests and adding a dependency", () => {
     const p = ok();
     expect(p).toMatch(/do not (edit|change|modify)[^.]*locked test/i);

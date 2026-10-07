@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# job-run — one /task, one process, one outcome.
+#
+# fos-job.socket (deploy/systemd) starts one of these per connection. The bot writes ONE JSON line to the socket:
+#
+#   {"repo":"owner/name","issue":41,"stage":"spec"|"build"}
+#
+# and this script owns the job from there to its end:
+#
+#   spec   agent-dispatch --issue N --repo R --stage spec   Pass P writes the spec and sends it for approval
+#   build  agent-dispatch --issue N --repo R --stage build  the executor implements the issue and opens the PR,
+#          then pr-brain --repo <checkout> --pr <that PR>   the review, and the card the founder taps
+#
+# The founder hears exactly ONE outcome. The card the run itself posts (the spec card, or pr-brain's review card)
+# is the outcome when there is one. When the run ends without it, whatever the reason (a non-zero exit, a silent
+# exit 0, a SIGTERM, a pr-brain that skipped), the EXIT trap sends ONE Telegram message: repo#N, the stage it died
+# in, the exit code and the last 15 lines of the job's log. There are no other per-error alerts here, on purpose:
+# a job that ends in silence is the failure this replaces (src/tools/dispatch-tick.ts has the story).
+#
+# agent-dispatch waits its turn on the dispatch lock for up to an hour (--wait-lock 3600), saying "queued behind"
+# once, so a /task filed while the 15-minute sweep is running is not dropped.
+#
+# Under systemd there is no cron line, so the environment the sweep runs with (models, timeouts, AGENT_DISPATCH_*,
+# PR_BRAIN_*) is read back from the agent-dispatch line in this user's crontab: a job runs the same models the
+# sweep does. Only a plain list of VAR=value words is taken from it, and nothing in it is evaluated.
+#
+# Env (tests): JOB_RUN_ENV_FILE (default /opt/founderos/.env: Telegram credentials), JOB_RUN_DISPATCH,
+#   JOB_RUN_PR_BRAIN, JOB_RUN_CRONTAB, JOB_RUN_READ_TIMEOUT (seconds to wait for the request line, default 10),
+#   JOB_RUN_KEEP_PATH (keep the caller's PATH instead of the fixed one).
+
+set -u
+
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+[[ -n "${JOB_RUN_KEEP_PATH:-}" ]] || export PATH=/usr/local/bin:/usr/bin:/bin
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
+
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
+DISPATCH="${JOB_RUN_DISPATCH:-$SELF_DIR/agent-dispatch}"
+PR_BRAIN="${JOB_RUN_PR_BRAIN:-$SELF_DIR/pr-brain}"
+ENV_FILE="${JOB_RUN_ENV_FILE:-/opt/founderos/.env}"
+WAIT_LOCK_SEC=3600
+
+mkdir -p "$HOME/.claude/jobs" 2>/dev/null
+JOB_LOG="$HOME/.claude/jobs/job-$(date +%Y%m%dT%H%M%S)-$$.log"
+: >"$JOB_LOG" 2>/dev/null || JOB_LOG="/dev/null"
+find "$HOME/.claude/jobs" -name 'job-*.log' -mtime +14 -delete 2>/dev/null
+
+# redact_secrets: everything that leaves the box passes through it (the log tail can hold a rejected key).
+for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
+  [[ -f "$_lib_dir/down-state.sh" ]] && { . "$_lib_dir/down-state.sh"; [[ -f "$_lib_dir/tg-quiet.sh" ]] && . "$_lib_dir/tg-quiet.sh"; break; }
+done
+if ! declare -F redact_secrets >/dev/null; then
+  echo "job-run: FATAL: lib/down-state.sh not found next to $SELF_PATH; deploy/sync-daemons.sh ships it" >&2
+  exit 1
+fi
+
+# Everything goes to the job log; on_exit prints the whole log to stdout, which systemd keeps in the journal.
+jlog() { printf '%s job-run: %s\n' "$(date +%H:%M:%S)" "$*" >>"$JOB_LOG"; }
+
+# One child at a time, in the background with `wait`: bash holds a trap until the foreground command ends, and a
+# SIGTERM (systemctl stop, a reboot) has to reach the child and the EXIT trap at once.
+CHILD=""
+run_logged() {
+  "$@" >>"$JOB_LOG" 2>&1 </dev/null &
+  CHILD=$!
+  wait "$CHILD"
+  local rc=$?
+  CHILD=""
+  return "$rc"
+}
+on_term() {
+  [[ -z "$CHILD" ]] || kill -TERM "$CHILD" 2>/dev/null
+  JOB_RC=143; FAIL_REASON="terminated (SIGTERM) while ${PHASE}"; exit 143
+}
+
+REPO="" ISSUE="" STAGE="" PHASE="reading the request" FAIL_REASON="" OUTCOME_POSTED=0 JOB_RC=0
+
+# The one message. Sent directly, not through the daemons' notify(): quiet hours hold those back, and the
+# founder asked for this job and is waiting on it.
+send_telegram() {
+  local token chat
+  [[ -f "$ENV_FILE" ]] || { jlog "no env file $ENV_FILE: cannot reach Telegram"; return 1; }
+  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  [[ -n "$token" && -n "$chat" ]] || { jlog "no Telegram credentials in $ENV_FILE"; return 1; }
+  curl -sf -o /dev/null --max-time 20 "https://api.telegram.org/bot${token}/sendMessage" \
+    --data-urlencode "chat_id=${chat}" --data-urlencode "text=$1" --data "disable_web_page_preview=true" || return 1
+  # The bot's planner reads the screen log, so "which job is that?" about this message has an answer.
+  declare -F tg_screen_log >/dev/null && tg_screen_log "$1" "$chat"
+  return 0
+}
+
+on_exit() {
+  local rc=$?
+  [[ "$JOB_RC" -ne 0 ]] && rc="$JOB_RC"
+  [[ "$JOB_LOG" == /dev/null ]] || cat "$JOB_LOG" 2>/dev/null
+  [[ "$OUTCOME_POSTED" -eq 1 ]] && exit "$rc"
+  [[ "$rc" -eq 0 ]] && rc=1
+  local what="${REPO:-unknown repo}#${ISSUE:-?}" tail_lines msg
+  tail_lines="$(tail -n 15 "$JOB_LOG" 2>/dev/null | redact_secrets)"
+  msg="⚠️ Job failed: ${what} · stage ${STAGE:-unknown} · exit ${rc}
+${FAIL_REASON:-ended without a result while ${PHASE}}
+
+Last 15 log lines:
+${tail_lines}"
+  send_telegram "$(printf '%s' "$msg" | redact_secrets | cut -c1-3900 | head -c 3900)" \
+    || jlog "the failure message could not be sent to Telegram; the log is $JOB_LOG"
+  exit "$rc"
+}
+trap on_exit EXIT
+trap on_term TERM
+trap 'JOB_RC=130; FAIL_REASON="interrupted while ${PHASE}"; exit 130' INT
+
+fail() { JOB_RC="$1"; FAIL_REASON="$2"; jlog "$2"; exit "$1"; }
+
+# ------------------------------------------------------------------ the request
+LINE=""
+if ! IFS= read -r -t "${JOB_RUN_READ_TIMEOUT:-10}" LINE; then
+  [[ -n "$LINE" ]] || fail 64 "not a valid job request: nothing arrived on the socket within ${JOB_RUN_READ_TIMEOUT:-10}s"
+fi
+REPO="$(jq -r '.repo // empty' <<<"$LINE" 2>/dev/null)" || REPO=""
+ISSUE="$(jq -r '.issue // empty | tostring' <<<"$LINE" 2>/dev/null)" || ISSUE=""
+STAGE="$(jq -r '.stage // empty' <<<"$LINE" 2>/dev/null)" || STAGE=""
+if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$ISSUE" =~ ^[1-9][0-9]*$ || ! "$STAGE" =~ ^(spec|build)$ ]]; then
+  _got="$(printf '%s' "$LINE" | cut -c1-200)"
+  REPO="" ISSUE="" STAGE=""
+  fail 64 "not a valid job request (needs {repo: owner/name, issue: positive integer, stage: spec|build}): ${_got}"
+fi
+jlog "job: ${REPO}#${ISSUE} stage ${STAGE}"
+
+# ------------------------------------------------------------------ the environment cron would have given us
+CRON_ASSIGN_RE='^([A-Za-z_][A-Za-z0-9_]*=([^[:space:]"'"'"'`$\\;&|<>()]*|"[^"`$\\]*"|'"'"'[^'"'"']*'"'"')[[:space:]]+)*$'
+# cron_env NAME: the VAR=value words on this user's crontab line that runs NAME (agent-dispatch, pr-brain).
+cron_env() {
+  local name="$1" cron="${JOB_RUN_CRONTAB:-crontab}" row words
+  command -v "$cron" >/dev/null 2>&1 || return 0
+  row="$("$cron" -l 2>/dev/null | grep -E "^[^#]*[/ ]${name}([[:space:]]|\$)" | head -n1)"
+  [[ -n "$row" ]] || return 0
+  # five schedule fields, then VAR=value words, then the command
+  words="$(printf '%s\n' "$row" | sed -E "s#^[[:space:]]*([^[:space:]]+[[:space:]]+){5}##; s#[^[:space:]=\"']*${name}([[:space:]].*)?\$##")"
+  [[ -n "$words" ]] || return 0
+  if [[ "$words" =~ $CRON_ASSIGN_RE ]]; then
+    local own_path="$PATH"
+    eval "export $words"
+    PATH="$own_path:$PATH"   # the cron PATH adds directories (a CLI under ~/.local/bin); it never removes ours
+  else
+    jlog "crontab environment ignored (${name} line): not a plain VAR=value list"
+  fi
+}
+cron_env agent-dispatch
+cron_env pr-brain   # PR_BRAIN_MODELS, PR_BRAIN_ROOT, PR_BRAIN_MERGE live on its own line: the review runs as the sweep's does
+# A job reviews and asks; the founder's tap on the card merges. pr-brain's own default is to merge a PR it clears, so
+# a missing PR_BRAIN_MERGE must never mean "merge".
+export PR_BRAIN_MERGE="${PR_BRAIN_MERGE:-0}"
+export AGENT_DISPATCH_ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-$ENV_FILE}" PR_BRAIN_ENV_FILE="${PR_BRAIN_ENV_FILE:-$ENV_FILE}"
+
+# ------------------------------------------------------------------ the run
+PHASE="agent-dispatch (${STAGE})"
+run_logged "$DISPATCH" --issue "$ISSUE" --repo "$REPO" --stage "$STAGE" --wait-lock "$WAIT_LOCK_SEC"
+rc=$?
+[[ "$rc" -eq 0 ]] || fail "$rc" "agent-dispatch exited ${rc} before the ${STAGE} stage finished"
+
+issue_labels() { gh issue view "$ISSUE" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null; }
+
+if [[ "$STAGE" == spec ]]; then
+  PHASE="checking the spec outcome"
+  labels="$(issue_labels)"
+  # spec-review: the spec card is out. needs-brief: Pass P told the founder what the brief lacks. Still agent:spec: nothing happened.
+  if grep -qxE 'agent:spec-review|agent:needs-brief' <<<"$labels"; then
+    jlog "spec stage done: $(tr '\n' ' ' <<<"$labels")"
+    OUTCOME_POSTED=1
+    exit 0
+  fi
+  fail 1 "agent-dispatch ended with exit 0 but ${REPO}#${ISSUE} has no spec (labels: $(tr '\n' ' ' <<<"$labels")): nothing was written"
+fi
+
+PHASE="finding the pull request"
+PR="$(gh pr list --repo "$REPO" --state open --json number,headRefName --limit 100 2>/dev/null \
+  | jq -r --arg a "task/issue-${ISSUE}" '.[]? | select(.headRefName == $a or (.headRefName | startswith($a + "-"))) | .number' 2>/dev/null | head -n1)"
+[[ "$PR" =~ ^[0-9]+$ ]] || fail 1 "agent-dispatch ended with exit 0 but there is no pull request for ${REPO}#${ISSUE} (branch task/issue-${ISSUE}*): the executor opened none"
+jlog "PR #${PR} opened for #${ISSUE}"
+
+PHASE="pr-brain review of PR #${PR}"
+CHECKOUT=""
+REPO_NAME="${REPO#*/}"
+# The same repos pr-brain would sweep: the list in ~/.claude/pr-brain.repos, or, when there is none, every directory
+# under PR_BRAIN_ROOT (pr-brain's auto-discovery; /opt/review on the VPS).
+repo_dirs() {
+  if [[ -f "$HOME/.claude/pr-brain.repos" ]]; then
+    grep -vE '^[[:space:]]*(#|$)' "$HOME/.claude/pr-brain.repos"
+  else
+    local d
+    for d in "${PR_BRAIN_ROOT:-$HOME/Projects}"/*/; do printf '%s\n' "${d%/}"; done
+  fi
+}
+while IFS= read -r _row; do
+  _dir="${_row/#\~/$HOME}"
+  [[ -d "$_dir" && "$(basename "$_dir" | tr 'A-Z' 'a-z')" == "$(printf '%s' "$REPO_NAME" | tr 'A-Z' 'a-z')" ]] && { CHECKOUT="$_dir"; break; }
+done < <(repo_dirs)
+[[ -n "$CHECKOUT" ]] || fail 1 "no local checkout for ${REPO_NAME} (pr-brain.repos, or under ${PR_BRAIN_ROOT:-$HOME/Projects}): pr-brain cannot review PR #${PR}. Add its path to ~/.claude/pr-brain.repos"
+
+run_logged "$PR_BRAIN" --repo "$CHECKOUT" --pr "$PR" --wait-lock "$WAIT_LOCK_SEC"
+rc=$?
+[[ "$rc" -eq 0 ]] || fail "$rc" "pr-brain exited ${rc} reviewing PR #${PR}"
+
+PHASE="checking the review of PR #${PR}"
+view="$(gh pr view "$PR" --repo "$REPO" --json headRefOid,comments 2>/dev/null)"
+head_sha="$(jq -r '.headRefOid // empty' <<<"$view" 2>/dev/null)"
+if [[ -n "$head_sha" ]] && jq -e --arg s "${head_sha:0:7}" '[.comments[]?.body | select(contains("<!-- brain-reviewed: " + $s))] | length > 0' <<<"$view" >/dev/null 2>&1; then
+  jlog "review done: PR #${PR} head ${head_sha:0:7} carries the brain-reviewed marker"
+  OUTCOME_POSTED=1
+  exit 0
+fi
+fail 1 "pr-brain exited 0 but PR #${PR} has no review marker on its head (${head_sha:0:7}): the review was skipped"

@@ -34,10 +34,11 @@ import { fileURLToPath } from "node:url";
 
 const DEPLOY = fileURLToPath(new URL("../../../deploy/", import.meta.url));
 const SYNC = join(DEPLOY, "sync-daemons.sh");
-const EXECUTABLES = ["agent-dispatch", "pr-brain", "onboard-repo.sh"] as const;
+const EXECUTABLES = ["agent-dispatch", "job-run", "pr-brain", "onboard-repo.sh"] as const;
 /** Where each executable lives in the repo, relative to deploy/. */
 const SOURCE_OF: Record<(typeof EXECUTABLES)[number], string> = {
   "agent-dispatch": "agent-dispatch",
+  "job-run": "job-run",
   "pr-brain": "vps-daemons/pr-brain",
   "onboard-repo.sh": "onboard-repo.sh",
 };
@@ -354,7 +355,7 @@ describe("every file a deployed daemon sources is in the deploy copy list", () =
   });
 });
 
-describe("sync-daemons.sh — the per-minute kick cron", () => {
+describe("sync-daemons.sh — the retired per-minute kick cron", () => {
   // What the box really has (crontab -l on founderos-vps, 2026-10-02), the lines that matter.
   const AGENT_LINE =
     "*/15 * * * * PATH=/usr/local/bin:/usr/bin:/bin AGENT_DISPATCH_ENV_FILE=/opt/founderos/.env $HOME/bin/agent-dispatch >/dev/null 2>>$HOME/.claude/agent-dispatch.log";
@@ -370,7 +371,7 @@ describe("sync-daemons.sh — the per-minute kick cron", () => {
   let crontab: string;
 
   /** A crontab command backed by a file, with `crontab -l` and `crontab -` as the real one has them. */
-  function fakeCrontab(initial: string | null, dropKicked = false): void {
+  function fakeCrontab(initial: string | null, ignoreWrites = false): void {
     state = join(root, "crontab.state");
     crontab = join(root, "crontab-stub");
     if (initial !== null) writeFileSync(state, initial);
@@ -378,7 +379,7 @@ describe("sync-daemons.sh — the per-minute kick cron", () => {
       crontab,
       `#!/usr/bin/env bash
 if [ "$1" = "-l" ]; then [ -f "${state}" ] && { cat "${state}"; exit 0; }; echo "no crontab for tester" >&2; exit 1; fi
-if [ "$1" = "-" ]; then ${dropKicked ? `grep -v -e '--kicked' >"${state}"` : `cat >"${state}"`}; exit 0; fi
+if [ "$1" = "-" ]; then ${ignoreWrites ? "cat >/dev/null" : `cat >"${state}"`}; exit 0; fi
 exit 2
 `,
       { mode: 0o755 },
@@ -386,21 +387,18 @@ exit 2
   }
   const stateLines = (): string[] => readFileSync(state, "utf8").split("\n").filter(Boolean);
 
-  it("adds one kick line, copied from the agent-dispatch line (same PATH and env file), and keeps every other line", () => {
-    fakeCrontab([...OTHER_LINES, "", AGENT_LINE, ""].join("\n"));
+  it("removes the kick line the last deploy installed, and keeps every other line", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE, KICK_LINE, ""].join("\n"));
 
     const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(r.out).toContain("sync-daemons: kick cron installed:");
-    const lines = stateLines();
-    expect(lines).toContain(KICK_LINE);
-    for (const line of [...OTHER_LINES, AGENT_LINE]) expect(lines, line).toContain(line);
-    expect(lines).toHaveLength(OTHER_LINES.length + 2);
+    expect(r.out).toContain("sync-daemons: kick cron retired");
+    expect(stateLines()).toEqual([...OTHER_LINES, AGENT_LINE]);
   });
 
-  it("is idempotent: a second deploy changes nothing and says so", () => {
-    fakeCrontab([...OTHER_LINES, AGENT_LINE].join("\n") + "\n");
+  it("is idempotent: a second deploy has nothing to retire and changes nothing", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE, KICK_LINE].join("\n") + "\n");
     sync({ SYNC_DAEMONS_CRONTAB: crontab });
     const once = readFileSync(state, "utf8");
 
@@ -408,28 +406,26 @@ exit 2
 
     expect(second.status, second.err).toBe(0);
     expect(readFileSync(state, "utf8")).toBe(once);
-    expect(second.out).toContain("kick cron already installed");
-    expect(stateLines().filter((l) => l.includes("--kicked"))).toHaveLength(1);
+    expect(second.out).toContain("no kick cron to retire");
   });
 
-  it("does not take a commented-out agent-dispatch line as the one to copy, or as already installed", () => {
-    fakeCrontab(`# ${AGENT_LINE}\n# ${KICK_LINE}\n${OTHER_LINES[0]}\n`);
+  it("never ADDS a line: a crontab with no kick line is left exactly as it was", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE].join("\n") + "\n");
+    const before = readFileSync(state, "utf8");
 
     const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(r.out).toContain("WARNING: no agent-dispatch line in the crontab");
-    expect(stateLines().some((l) => !l.startsWith("#") && l.includes("--kicked"))).toBe(false);
+    expect(readFileSync(state, "utf8")).toBe(before);
   });
 
-  it("warns and installs nothing when there is no agent-dispatch line to copy the environment from", () => {
-    fakeCrontab(OTHER_LINES.join("\n") + "\n");
+  it("leaves a commented-out kick line alone", () => {
+    fakeCrontab(`# ${KICK_LINE}\n${AGENT_LINE}\n`);
 
     const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(r.out).toContain("WARNING: no agent-dispatch line in the crontab");
-    expect(stateLines()).toEqual(OTHER_LINES);
+    expect(stateLines()).toEqual([`# ${KICK_LINE}`, AGENT_LINE]);
   });
 
   it("copes with a user who has no crontab at all", () => {
@@ -439,17 +435,16 @@ exit 2
 
     expect(r.status, r.err).toBe(0);
     expect(existsSync(state)).toBe(false);
-    expect(r.out).toContain("WARNING: no agent-dispatch line");
   });
 
-  it("fails loudly, and puts the old crontab back, when the new line does not stick", () => {
-    fakeCrontab([...OTHER_LINES, AGENT_LINE].join("\n") + "\n", true);
+  it("fails loudly, and puts the old crontab back, when the removal does not stick", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE, KICK_LINE].join("\n") + "\n", true);
 
     const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
 
     expect(r.status).toBe(1);
-    expect(r.err).toMatch(/the crontab does not hold the line/);
-    expect(stateLines()).toEqual([...OTHER_LINES, AGENT_LINE]);
+    expect(r.err).toMatch(/the kick job is still in the crontab/);
+    expect(stateLines()).toEqual([...OTHER_LINES, AGENT_LINE, KICK_LINE]);
   });
 
   it("never edits the real crontab when HOME is a scratch directory (every other test here runs that way)", () => {
@@ -465,15 +460,9 @@ exit 2
     expect(existsSync(calls)).toBe(false);
     expect(r.out).toContain("kick cron left alone");
   });
-
-  it("the transformation is exactly: five schedule fields -> every minute, and `--kicked` after agent-dispatch", () => {
-    fakeCrontab(AGENT_LINE + "\n");
-    sync({ SYNC_DAEMONS_CRONTAB: crontab });
-    expect(stateLines()[1]).toBe(KICK_LINE);
-  });
 });
 
-describe("sync-daemons.sh — the agy login helper's systemd units", () => {
+describe("sync-daemons.sh — the systemd units (agy login helper, job socket)", () => {
   let units: string;
   let ctl: string;
   let ctlLog: string;
@@ -510,15 +499,17 @@ esac
     fakeSystemctl();
   });
 
-  it("installs both unit files byte for byte, reloads systemd, enables and starts the socket, and says so", () => {
+  it("installs every unit file byte for byte, reloads systemd, enables and starts both sockets, and says so", () => {
     const r = sync(env());
     expect(r.status, r.err).toBe(0);
-    for (const u of ["agy-login.socket", "agy-login.service"]) {
+    for (const u of ["agy-login.socket", "agy-login.service", "fos-job.socket", "fos-job@.service"]) {
       expect(sha(join(units, u))).toBe(sha(join(DEPLOY, "systemd", u)));
       expect(modeOf(join(units, u))).toBe("644");
     }
-    expect(calls()).toEqual(expect.arrayContaining(["daemon-reload", "enable --now agy-login.socket", "restart agy-login.socket", "try-restart agy-login.service"]));
-    expect(r.out).toContain("agy login units installed and agy-login.socket active (updated)");
+    expect(calls()).toEqual(expect.arrayContaining(["daemon-reload", "enable --now agy-login.socket", "enable --now fos-job.socket", "restart agy-login.socket", "restart fos-job.socket", "try-restart agy-login.service"]));
+    // A job that is running finishes on the code it started with: the instances are never restarted.
+    expect(calls().filter((c) => c.includes("fos-job@"))).toEqual([]);
+    expect(r.out).toContain("agy-login.socket and fos-job.socket active (updated)");
     expect(existsSync(join(units, "agy-login.socket.new"))).toBe(false);
   });
 
@@ -529,6 +520,7 @@ esac
     expect(r.status, r.err).toBe(0);
     expect(calls()).not.toContain("daemon-reload");
     expect(calls()).not.toContain("restart agy-login.socket");
+    expect(calls()).not.toContain("restart fos-job.socket");
     expect(r.out).toContain("(unchanged)");
   });
 
@@ -565,7 +557,7 @@ esac
   it("never touches systemd under a scratch HOME when no unit destination is given", () => {
     const r = sync({ SYNC_DAEMONS_SYSTEMCTL: ctl });
     expect(r.status, r.err).toBe(0);
-    expect(r.out).toContain("agy login units left alone");
+    expect(r.out).toContain("systemd units left alone");
     expect(calls()).toEqual([]);
   });
 
@@ -578,5 +570,23 @@ esac
     expect(socket).toMatch(/^SocketUser=antigravity$/m);
     expect(socket).toMatch(/^SocketGroup=founderos$/m);
     expect(socket).toMatch(/^SocketMode=0660$/m);
+  });
+
+  it("the job units: the socket is founderos-only and one instance per connection; the service does NOT set the bot's sandbox flags", () => {
+    const service = readFileSync(join(DEPLOY, "systemd", "fos-job@.service"), "utf8");
+    const socket = readFileSync(join(DEPLOY, "systemd", "fos-job.socket"), "utf8");
+    const active = (t: string): string[] => t.split("\n").filter((l) => !l.startsWith("#"));
+    expect(socket).toMatch(/^ListenStream=\/run\/fos-job\.sock$/m);
+    expect(socket).toMatch(/^SocketUser=founderos$/m);
+    expect(socket).toMatch(/^SocketGroup=founderos$/m);
+    expect(socket).toMatch(/^SocketMode=0660$/m);
+    expect(socket).toMatch(/^Accept=yes$/m);
+    expect(service).toMatch(/^User=founderos$/m);
+    expect(service).toMatch(/^StandardInput=socket$/m);
+    expect(service).toMatch(/^StandardOutput=journal$/m);
+    // sudo -n -u antigravity is what the dispatcher does; any of these flags makes it fail, as it did from the bot.
+    for (const flag of ["NoNewPrivileges", "ProtectSystem", "PrivateTmp"]) {
+      expect(active(service).join("\n"), flag).not.toContain(flag);
+    }
   });
 });

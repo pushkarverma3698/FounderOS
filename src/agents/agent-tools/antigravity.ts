@@ -28,6 +28,9 @@ import { LABEL_SPEC } from "../../tools/pipeline-pending.js";
 import { specDraftingReply, specIntakeOn } from "../../tools/dispatch-spec-intake.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { queueExistingIssue, target as existingTarget } from "./existing-issue-dispatch.js";
+import { parseIssueReference } from "../../tools/existing-issue.js";
+import { NO_ACTION_PREFIX } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 
@@ -87,6 +90,22 @@ export const dispatchAntigravityTask = tool(
     if (!executor) return `❌ Cannot dispatch: engine "${engine}" is not one I can run. Use ${ENGINES.join(" or ")}.`;
     const who = engineDisplay(executor);
 
+    // Work that already has an issue is never filed again (prod 2026-10-07: "Start work on issue #41" became #83,
+    // whose body was that sentence). The named issue is read, a merged fix is reported, else THAT issue is queued.
+    const named = parseIssueReference(repoSlug, founder_request, title);
+    if (named.kind === "many") {
+      const list = named.numbers.map((x) => `#${x}`).join(", ");
+      return (
+        `${NO_ACTION_PREFIX} the request names more than one existing issue (${list}) on ${repoSlug}. Nothing was filed. ` +
+        `Queue them one at a time with requeue_antigravity_task (${named.numbers.map((x) => `issue=${x}`).join(", then ")}).`
+      );
+    }
+    if (named.kind === "one") {
+      const t = await existingTarget(repoSlug);
+      if (typeof t === "string") return t;
+      return queueExistingIssue(t, named.number, { founderRequest: founder_request, engine: executor, action: "dispatch_antigravity_task", repoArg: repo }, config);
+    }
+
     const input: AntigravityTaskInput = {
       title,
       goal: goal ?? "",
@@ -105,7 +124,7 @@ export const dispatchAntigravityTask = tool(
     // Idempotency: prevent duplicate issue creation on HITL resume loop
     const key = idemKey("dispatch_antigravity", repoSlug, title, scope, executor);
     if (await hasBeenAudited(key)) {
-      return `Already dispatched: "${title}" on ${repoSlug} (skipped duplicate)`;
+      return `${NO_ACTION_PREFIX} Already dispatched earlier: "${title}" on ${repoSlug}. Nothing new was filed, and this does not mean an agent has picked it up.`;
     }
 
     // The lint comes after the idempotency check (an already-dispatched brief needs none) and
@@ -176,7 +195,7 @@ export const dispatchAntigravityTask = tool(
     return (
       `✅ Dispatched to ${who}: Issue #${data.issue_number} opened on ${data.repo} with labels 'agent:ready' and '${engineLabel(executor)}'.\n` +
       `URL: ${data.issue_url}\n` +
-      `The VPS agent-dispatch loop will pick it up on its next tick (within 15 minutes), implement the task in an isolated workspace, and submit a draft PR to beta.` +
+      `Its run started now: Antigravity implements it in an isolated workspace, submits a draft PR to beta, and the review card follows here.` +
       warned
     );
   },
@@ -185,12 +204,13 @@ export const dispatchAntigravityTask = tool(
     description:
       "Dispatch an engineering or coding task to a coding CLI on the VPS (Google Antigravity or Claude Code, see engine) via GitHub issue (requires founder approval). " +
       "Use when asked to hand off or dispatch work to Google Antigravity, or when engineering tasks involve modifying FounderOS itself. " +
+      "A request that names an existing issue (#41, 'issue 41', an issue URL) never files a new one: that issue is read, a merged fix is reported, otherwise it is queued. " +
       "Formats a complete self-contained ticket conforming to .github/ISSUE_TEMPLATE/agent-task.md and opens an issue with the 'agent:ready' label. " +
       "ALWAYS pass founder_request (his own words, verbatim): goal, expected and verification you leave out are filled from it, so a one-line request is enough. Never ask the founder for a file path or a command. Do not guess file paths: name a path only if you saw it in a tool result, " +
       "otherwise describe the subsystem in words and Antigravity, which reads the whole repository, finds the files. " +
       "The brief is checked before approval: every section filled; if it names exactly what is missing, fix that and call this tool again in the same turn, " +
       "and ask the founder only for a fact that only he knows. " +
-      "The VPS agent-dispatch daemon claims it within a minute, implements it in an isolated workspace, and submits a draft PR to beta; an independent reviewer (pr-brain) then reviews it.",
+      "Its run starts at once on the VPS, implements it in an isolated workspace, and submits a draft PR to beta; an independent reviewer (pr-brain) then reviews it.",
     schema: z.object({
       title: z.string().describe("Concise task title with conventional commit prefix (e.g. 'feat: 13k ATS scaling with per-domain rate limiting')."),
       goal: z.string().optional().nullable().describe(

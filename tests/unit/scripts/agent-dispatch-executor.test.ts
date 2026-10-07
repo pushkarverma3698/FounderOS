@@ -8,6 +8,8 @@
  * What these cases defend: an approved issue gets the lean contract prompt on the spec branch with the locked test still
  * in its history; the spec commit is not counted as the executor's work; a stored contract that cannot be used refuses
  * the run once instead of falling back to the old free-text path; with the flag off, or no contract, nothing changes.
+ * A run that finishes but commits nothing on top of the locked test closes its empty PR and asks the founder (#965); an
+ * agent PR with no `Moves:` line gets `Moves: A`, so the PR scope check is not red for a line the agent forgot (#965).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -31,7 +33,7 @@ const git = (cwd: string, ...args: string[]): string =>
   execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 /** What Pass P leaves on origin: task/issue-N = main + the locked test (and the repo's STANDARDS.md, standing in for one in main). */
-function specBranch(issue: number): { spec: string; base: string } {
+function specBranch(issue: number, opts: { scopeCheck?: boolean } = {}): { spec: string; base: string } {
   const ws = sb.ensureWorkspace(SLUG);
   const base = git(ws, "rev-parse", "origin/main");
   git(ws, "checkout", "-q", "-b", `task/issue-${issue}`, "origin/main");
@@ -39,6 +41,10 @@ function specBranch(issue: number): { spec: string; base: string } {
   mkdirSync(join(ws, "docs/antigravity"), { recursive: true });
   writeFileSync(join(ws, TEST_FILE), 'import { it } from "vitest";\nit("fails now", () => { throw new Error("red"); });\n');
   writeFileSync(join(ws, "docs/antigravity/STANDARDS.md"), STANDARDS);
+  if (opts.scopeCheck !== false) {
+    mkdirSync(join(ws, "scripts"), { recursive: true });
+    writeFileSync(join(ws, "scripts/verify-pr-scope.ts"), "// the PR scope check (Moves line + freeze)\n");
+  }
   git(ws, "add", ".");
   git(ws, "commit", "-q", "-m", "test: lock the spec");
   git(ws, "push", "-q", "origin", `task/issue-${issue}`);
@@ -63,10 +69,10 @@ const baseEnv = (): Record<string, string> => ({
   FOUNDEROS_CONTRACTS_DIR: contracts,
 });
 const tick = (hook: string, env: Record<string, string> = {}) => sb.tick({ agyOut: "done", agyRc: 0, agyHook: hook, env: { ...baseEnv(), ...env } });
-const implement = (spec: string): string =>
+const implement = (spec: string, body = "b"): string =>
   `git merge-base --is-ancestor ${spec} HEAD || { echo "spec commit missing from history" >&2; exit 3; }; ` +
   "git -c user.name=t -c user.email=t@t commit --allow-empty -q -m impl && " +
-  `gh pr create --repo ${SLUG} --head "$(git branch --show-current)" --title t --body b >/dev/null`;
+  `gh pr create --repo ${SLUG} --head "$(git branch --show-current)" --title t --body '${body}' >/dev/null`;
 const prOnly = `gh pr create --repo ${SLUG} --head "$(git branch --show-current)" --title t --body b >/dev/null`;
 const pipelineBody = "## Goal\n\nDo the thing.\n\n(the founder's ask is in the stored contract)";
 
@@ -120,14 +126,13 @@ describe("an approved contract: the executor gets the lean prompt on the spec br
     expect(sb.labelsOf(7)).not.toContain(NEEDS_BRIEF);
   });
 
-  it("does not count the spec commit as the executor's work: a run that added nothing is a failure", () => {
+  it("does not count the spec commit as the executor's work: a run that added nothing never reaches review", () => {
     const { spec, base } = specBranch(7);
     storeContract(7, spec, base);
     sb.addIssue({ number: 7, body: pipelineBody });
     tick(prOnly);
-    expect(sb.labelsOf(7)).toContain("agent:failed");
     expect(sb.labelsOf(7)).not.toContain("agent:review");
-    expect(sb.commentsOf(7).join("\n")).toMatch(/commits=0/);
+    expect(sb.labelsOf(7)).not.toContain("agent:working");
   });
 
   it("a hostile ask stays inside its fence in the prompt", () => {
@@ -232,5 +237,94 @@ describe("without a contract, or with the flag off, nothing changes", () => {
     expect(p).toContain("ISSUE-DRIVEN-CONTRACT");
     expect(p).not.toContain("==== TASK ====");
     expect(sb.prs()[0]?.headRefName).toBe("task/issue-7-fix-the-thing");
+  });
+});
+
+describe("a run that commits nothing on top of the locked test (#956 → #965)", () => {
+  it("closes the empty PR, keeps the spec branch, and asks the founder instead of agent:failed", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick(prOnly);
+
+    expect(sb.labelsOf(7)).toContain(NEEDS_BRIEF);
+    expect(sb.labelsOf(7)).not.toContain("agent:failed");
+    const pr = sb.prs()[0]!;
+    expect(pr.state).toBe("CLOSED");
+    expect(sb.prCommentsOf(pr.number).join("\n")).toContain("#7");
+    expect(git(sb.ensureWorkspace(SLUG), "ls-remote", "origin", "task/issue-7")).toContain(spec);
+
+    const said = sb.commentsOf(7).join("\n");
+    expect(said).toContain("committed nothing");
+    expect(said).toContain(READY);
+    const msgs = sb.messages().filter((m) => m.includes("#7"));
+    expect(msgs.some((m) => m.includes("committed nothing"))).toBe(true);
+    expect(msgs.some((m) => m.includes("FAILED"))).toBe(false);
+  });
+
+  it("no PR and no commit after a clean exit is the same case: nothing to close, the founder is asked", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick("true");
+    expect(sb.labelsOf(7)).toContain(NEEDS_BRIEF);
+    expect(sb.labelsOf(7)).not.toContain("agent:failed");
+    expect(sb.commentsOf(7).join("\n")).toContain("committed nothing");
+  });
+
+  it("a run that crashed (non-zero exit, no PR) is still a failure, not 'nothing to do'", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    sb.tick({ agyOut: "boom", agyRc: 1, agyHook: "true", env: baseEnv() });
+    expect(sb.labelsOf(7)).toContain("agent:failed");
+    expect(sb.labelsOf(7)).not.toContain(NEEDS_BRIEF);
+  });
+});
+
+describe("the PR scope check needs a Moves line; an agent PR without one gets `Moves: A` (#965)", () => {
+  it("adds `Moves: A` above a body that has none", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick(implement(spec, "## What changed\n\nx"));
+    const body = sb.prs()[0]!.body ?? "";
+    expect(body.split("\n")[0]).toBe("Moves: A");
+    expect(body).toContain("## What changed");
+    expect(sb.labelsOf(7)).toContain("agent:review");
+  });
+
+  it("a Moves line hidden in an HTML comment does not count, as in the CI check", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick(implement(spec, "<!-- Moves: A -->\nbody"));
+    expect((sb.prs()[0]!.body ?? "").startsWith("Moves: A\n")).toBe(true);
+  });
+
+  it("leaves a body that already names its move alone", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick(implement(spec, "Moves: crash-fix\n\nbody"));
+    expect(sb.prs()[0]!.body).toBe("Moves: crash-fix\n\nbody");
+  });
+
+  it("a check that cannot run (no perl) changes nothing, rather than guess 'no move'", () => {
+    const { spec, base } = specBranch(7);
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    sb.tick({ agyOut: "done", agyRc: 0, agyHook: implement(spec, "no move named"), env: baseEnv(), withoutTools: ["perl"] });
+    expect(sb.prs()[0]!.body).toBe("no move named");
+    expect(sb.log()).toContain("could not check PR");
+    expect(sb.labelsOf(7)).toContain("agent:review");
+  });
+
+  it("a repo without the scope check (Oplify) keeps its body as the agent wrote it", () => {
+    const { spec, base } = specBranch(7, { scopeCheck: false });
+    storeContract(7, spec, base);
+    sb.addIssue({ number: 7, body: pipelineBody });
+    tick(implement(spec, "body"));
+    expect(sb.prs()[0]!.body).toBe("body");
   });
 });

@@ -53,8 +53,24 @@ export interface GoldenTask {
    * task does not test the approval gate.
    */
   expectsHitl?: boolean;
+  /**
+   * Earlier turns of the same conversation, oldest first. The invoker seeds them into the
+   * thread's history before `input` is sent (no model call, so they cost $0). Lets a case test
+   * a follow-up that only makes sense with the turn before it.
+   */
+  priorTurns?: PriorTurn[];
+  /** Case-insensitive substrings the final reply must ALL contain (e.g. "#676"). */
+  mustMention?: string[];
+  /** Case-insensitive substrings that fail the case if the final reply contains ANY. */
+  mustNotMention?: string[];
   /** Optional human note shown in the report. */
   note?: string;
+}
+
+/** One earlier exchange replayed ahead of a golden task's `input`. */
+export interface PriorTurn {
+  user: string;
+  reply: string;
 }
 
 /** One step of the plan the planner actually produced. */
@@ -87,6 +103,8 @@ export interface Observation {
   command?: { name: string; args: string } | null;
   /** Whether the run paused on a HITL `interrupt()`. */
   hadInterrupt: boolean;
+  /** The final founder-facing reply, when the invoker captured it. Scored by mustMention / mustNotMention. */
+  reply?: string;
   /** Optional error captured while running the task. */
   error?: string;
   /**
@@ -115,6 +133,8 @@ export interface TaskResult {
   toolsCorrect: boolean;
   /** True if HITL happened iff expected (or no HITL expectation was declared). */
   hitlCorrect: boolean;
+  /** True if the reply satisfied mustMention / mustNotMention (or the task declared neither). */
+  mentionsCorrect: boolean;
   /**
    * True when the run failed for an INFRASTRUCTURE reason (the observation carried
    * an `error`, e.g. a 503 that escaped the model layer), as opposed to the model

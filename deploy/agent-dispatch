@@ -34,8 +34,12 @@
 #   agent-dispatch --list           # show eligible issues and exit
 #   agent-dispatch --check-brief [FILE]  # is this issue body a complete brief? (stdin without FILE)
 #                                   # prints "missing: <heading>" / "empty: <heading>", exit 0 = complete
-#   agent-dispatch --kicked         # cron, every minute: run a tick ONLY if the bot left a kick file (see State).
-#                                   # Silent and free when there is none, which is almost always.
+#   agent-dispatch --issue 447 --repo owner/name --stage build|spec --wait-lock 3600
+#                                   # a job (deploy/job-run): ONE issue, ONE stage, nothing else. --stage spec runs only Pass P
+#                                   # (the spec) for it, --stage build only the claim and implement; without --stage both run
+#                                   # as before. --wait-lock waits up to 3600s for a running tick instead of skipping. A forced
+#                                   # issue runs no sweep of other issues (release_stale_claims, redispatch_unresolved_reviews)
+#                                   # and no quiet-hours skip: the founder asked for it now.
 #
 # Repos: DEFAULT_REPOS below is the ONLY list this daemon reads. ISSUE_REPOS / ISSUE_REPO in the
 # environment are ignored, with one warning per tick: a list living in the crontab is invisible to CI.
@@ -67,12 +71,6 @@
 #                               (auth), what the CLI said. One Telegram message when it appears. A quota block ends at
 #                               its epoch; an auth block (also a missing token) ends when the token file changes.
 #   agent-dispatch.onboard-reported  repo-setup problems already sent to Telegram (sent once, again on change)
-#   agent-dispatch.kick         written by the bot (src/tools/dispatch-tick.ts) the moment it files an issue; one
-#                               line per issue. The bot cannot start this daemon itself: it runs under systemd with
-#                               NoNewPrivileges, so every `sudo` in a child it spawns fails ("no new privileges
-#                               flag is set"), the startup check below read that as "agy is not installed", and
-#                               every approved /task paused the loop with a false alarm. A per-minute cron job
-#                               (`--kicked`, outside that sandbox) turns the file into a tick within a minute.
 #   agent-dispatch.effective    the writer models this daemon is running with, defaults included (written=<epoch>,
 #                               agy_model=, claude_model=), rewritten by every plain tick, kill switch or not. The bot
 #                               reads it for /review: it cannot run `crontab -l` under NoNewPrivileges, so it could not
@@ -86,7 +84,6 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-KICK_FILE="${AGENT_DISPATCH_KICK_FILE:-$HOME/.claude/agent-dispatch.kick}"
 # shellcheck disable=SC2034  # read by deploy/lib/down-state.sh, which shellcheck does not follow
 DOWN_FILE="$HOME/.claude/agent-dispatch.down"
 
@@ -169,6 +166,7 @@ NEEDS_BRIEF_LABEL="agent:needs-brief"
 DRY_RUN=0
 LIST_ONLY=0
 FORCE_ISSUE=""
+FORCE_STAGE=""   # spec|build with --issue: which one stage of that issue to run (empty = both, the old behaviour)
 
 TG_DAEMON_NAME="${TG_DAEMON_NAME:-agent-dispatch}"
 log() {
@@ -183,7 +181,7 @@ log() {
 # ON and could not name one). It reads this file instead: the settings as this process resolved them, defaults
 # included, one key=value per line. Written by every plain tick, even when the kill switch is on, and never by
 # a hand run (--dry-run, --list, --issue, --repo: those lack the cron line's variables and would report the
-# wrong models) nor by an idle --kicked minute. A failed write is logged and never stops the tick.
+# wrong models) A failed write is logged and never stops the tick.
 write_effective() {
   local file="$1"; shift
   local tmp="$file.tmp.$$"
@@ -250,9 +248,10 @@ notify_long() {
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 #   pass-p.sh       pass_p_run: AGENT_PIPELINE_V2 only, writes the spec + locked test for a new coding ask (a no-op otherwise)
 #   executor-prompt.sh  exec_lookup / exec_build: AGENT_PIPELINE_V2 only, the executor of an approved spec gets a contract prompt
+#   pr-moves.sh     ensure_moves_line: an agent PR with no `Moves:` line gets `Moves: A` for the PR scope check
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -425,15 +424,16 @@ run_engine_with_progress() {
 
 FORCE_REPO=""
 CHECK_BRIEF=0
-KICKED=0
+WAIT_LOCK_SEC=0
 BRIEF_FILE="-"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --list) LIST_ONLY=1; shift ;;
-    --kicked) KICKED=1; shift ;;
+    --wait-lock) WAIT_LOCK_SEC="${2:-}"; shift 2 ;;
     --issue) FORCE_ISSUE="${2:-}"; shift 2 ;;
     --repo) FORCE_REPO="${2:-}"; shift 2 ;;
+    --stage) FORCE_STAGE="${2:-}"; shift 2 ;;
     --check-brief) CHECK_BRIEF=1; shift; if [[ $# -gt 0 && "$1" != --* ]]; then BRIEF_FILE="$1"; shift; fi ;;
     -h|--help) sed -n '3,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "agent-dispatch: unknown argument '$1' (try --help)" >&2; exit 2 ;;
@@ -446,13 +446,17 @@ if [[ "$CHECK_BRIEF" -eq 1 ]]; then
   exit $?
 fi
 
-# --kicked: cron runs this every minute, so "nothing to do" is the normal case and must cost nothing and say
-# nothing: no log line, no gh call, no startup check. The kick file is the bot's note that it just filed an
-# issue (src/tools/dispatch-tick.ts). A tick that is already running leaves it where it is: the kick is only
-# consumed by a tick that actually runs, so a kick that arrives during a 30-minute Antigravity run is not lost.
-if [[ "$KICKED" -eq 1 ]]; then
-  [[ -s "$KICK_FILE" ]] || exit 0
-  [[ ! -d "$LOCK" ]] || exit 0
+case "$FORCE_STAGE" in
+  ""|spec|build) ;;
+  *) echo "agent-dispatch: --stage is spec or build, got '${FORCE_STAGE}'" >&2; exit 2 ;;
+esac
+if [[ -n "$FORCE_STAGE" && -z "$FORCE_ISSUE" ]]; then
+  echo "agent-dispatch: --stage needs --issue" >&2
+  exit 2
+fi
+if [[ ! "$WAIT_LOCK_SEC" =~ ^[0-9]+$ ]]; then
+  echo "agent-dispatch: --wait-lock takes a number of seconds, got '${WAIT_LOCK_SEC}'" >&2
+  exit 2
 fi
 
 if [[ -n "$LEGACY_REPO_VARS" ]]; then
@@ -466,7 +470,6 @@ fi
 
 if [[ -f "$OFF_SWITCH" && "$LIST_ONLY" -eq 0 ]]; then
   log "kill switch present ($OFF_SWITCH) — nothing dispatched"
-  [[ "$KICKED" -eq 1 ]] && rm -f "$KICK_FILE"   # spent, or this repeats (and logs) every minute
   exit 0
 fi
 
@@ -484,9 +487,6 @@ startup_fail() { # startup_fail CLASS DETAIL FIX
   fi
   log "startup check failed (${cls}): ${detail}"
   down_enter "$cls" "$detail" "🛑 agent-dispatch PAUSED on ${HOST}: ${detail}. Fix: ${fix}. Nothing is claimed until then; one more message when it resumes — none until then."
-  # A kick is only a shortcut past the 15-minute cron. While the loop is down it is spent, or this check
-  # would run, and log, once a minute until somebody fixes the box.
-  [[ "$KICKED" -eq 1 ]] && rm -f "$KICK_FILE"
   exit 0
 }
 
@@ -533,6 +533,25 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
     if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +90 2>/dev/null)" ]]; then
       log "stale lock older than 90m — reclaiming"
       rm -rf "$LOCK" && mkdir "$LOCK" 2>/dev/null || { log "could not reclaim lock"; exit 0; }
+    elif [[ "$WAIT_LOCK_SEC" -gt 0 ]]; then
+      # A job (deploy/job-run) was asked for by the founder: it waits its turn, says so once, and never
+      # skips silently. The caller reports a job that gave up.
+      log "queued behind another dispatch tick ($LOCK) — waiting up to ${WAIT_LOCK_SEC}s"
+      _waited=0
+      until mkdir "$LOCK" 2>/dev/null; do
+        if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +90 2>/dev/null)" ]]; then
+          log "stale lock older than 90m — reclaiming"
+          rm -rf "$LOCK"
+          continue
+        fi
+        if [[ "$_waited" -ge "$WAIT_LOCK_SEC" ]]; then
+          log "gave up waiting ${WAIT_LOCK_SEC}s for the dispatch lock ($LOCK)"
+          echo "gave up waiting ${WAIT_LOCK_SEC}s for the dispatch lock ($LOCK)" >&2
+          exit 75
+        fi
+        sleep "${AGENT_DISPATCH_LOCK_POLL_SEC:-5}"
+        _waited=$((_waited + ${AGENT_DISPATCH_LOCK_POLL_SEC:-5}))
+      done
     else
       log "another dispatch tick is running ($LOCK) — this tick does nothing"
       exit 0
@@ -540,16 +559,6 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
   fi
   trap 'rm -rf "$LOCK"' EXIT
   tg_flush_digest
-fi
-
-# The lock is ours, so this tick is real and is about to read the whole queue: any kick note is spent, whether
-# this is the per-minute job or the 15-minute cron (which would otherwise leave a note that starts a second,
-# pointless tick a minute later). Taken before the pause check on purpose: a paused loop was announced when it
-# paused, and the issue waits at agent:ready for the resume either way. A note written AFTER this line is for an
-# issue filed after it, and the next minute's --kicked finds it.
-if [[ -s "$KICK_FILE" && "$DRY_RUN" -eq 0 ]]; then
-  log "kicked by the bot for: $(tr '\n' ' ' <"$KICK_FILE" | cut -c1-200)"
-  rm -f "$KICK_FILE"
 fi
 
 # ------------------------------------------------------------- pause bookkeeping
@@ -581,7 +590,7 @@ slugify() {
 # 2026-09-21 07:45–08:31: #710 was claimed and run 5 times in 46 minutes, every
 # run dying on "Individual quota reached … Resets in 57h37m44s" and every run
 # marking the issue agent:failed — as though the TASK had failed. Nothing read
-# the reset time, so every tick and every /task kick walked into the same wall.
+# the reset time, so every tick and every /task run walked into the same wall.
 # A quota hit now records when it lifts; until then no claim and no re-dispatch
 # starts, and the issue goes back to agent:ready to be picked up afterwards.
 QUOTA_FILE="$HOME/.claude/agent-dispatch.quota-until"
@@ -982,7 +991,7 @@ claim_and_implement() {
   gh issue comment "$issue" --repo "$REPO" \
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
-  prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX)"
   set_integration_branch
   local target_branch="$INTEGRATION_BRANCH"
 
@@ -1032,7 +1041,7 @@ EOF
   else
     log "invoking agy for #${issue} (timeout ${TIMEOUT_SEC}s, --new-project pinned to ${WORKSPACE})"
   fi
-  local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX.log)"
+  local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX)"
   # The timeouts that matter (the outer `timeout`, and --print-timeout set just under it, without which every
   # real task died at 5m05s) live with the invocation, in deploy/lib/agy-run.sh (claude-run.sh for Claude Code).
   run_engine_with_progress "$engine" "${ename} #${issue} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
@@ -1096,6 +1105,15 @@ EOF
       ;;
   esac
 
+  # An approved spec's run that finished but committed nothing on top of the locked test: the executor found nothing to
+  # change, or gave up quietly. It is not a crash (the CLI exited 0, or opened a PR), so agent:failed would mislead; an
+  # empty PR would go to review holding only the test (#965). The founder decides; the contract stays for a retry.
+  if [[ -n "$pipeline_spec" && "${new_commits:-0}" -eq 0 && ( "$agy_exit" -eq 0 || -n "$pr_number" ) ]]; then
+    exec_changed_nothing "$issue" "$pr_number" "$ename" "$agy_log"
+    rm -f "$agy_log"
+    return 1
+  fi
+
   if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]]; then
     local last_line
     last_line=$(grep -v '^[[:space:]]*$' "$agy_log" 2>/dev/null | tail -n1 | redact_secrets | cut -c1-200)
@@ -1126,6 +1144,7 @@ EOF2
   fi
   finish_issue "$issue" agent:review
   label_engine "$issue" "$pr_number" "$engine"
+  ensure_moves_line "$pr_number"
   local pr_url; pr_url="$(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url 2>/dev/null)"
   gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: ${pr_url}. Awaiting pr-brain review.${closed_note}" >/dev/null
   notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO} by ${ename}, awaiting pr-brain review.${closed_note}
@@ -1360,7 +1379,7 @@ redispatch_unresolved_reviews() {
 
     local branch prompt_file
     branch=$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq .headRefName)
-    prompt_file="$(mktemp /tmp/agent-dispatch-redispatch-XXXXXX.txt)"
+    prompt_file="$(mktemp /tmp/agent-dispatch-redispatch-XXXXXX)"
     chmod 644 "$prompt_file"
     if [[ "$mode" == nonblockers ]]; then
       {
@@ -1405,7 +1424,7 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
-    local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX.log)"
+    local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX)"
     run_engine_with_progress "$engine" "${ename} fixing PR #${pr} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
     agy_log_append "$agy_log"
     local quota_until wall
@@ -1492,11 +1511,13 @@ run_tick() {
     # returns $FORCE_ISSUE verbatim, blind to which $REPO is active this
     # iteration — without this check it claims the same-numbered issue in
     # whichever repo the loop reaches first. Confirmed live 2026-09-21:
-    # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
+    # the bot's first forced run (--issue N, no --repo) claimed a FounderOS
     # issue in place of a same-numbered Oplify one. No --repo given (the old
     # calling convention) skips nothing, unchanged from before.
     if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
       log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
+    elif [[ "$FORCE_STAGE" == spec ]]; then
+      log "forced issue #$FORCE_ISSUE, stage spec — no claim in $REPO"
     elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
       brief_checks=0
       candidates="$(pick_ready_issues)"
@@ -1517,11 +1538,17 @@ run_tick() {
       done
     fi
 
-    release_stale_claims
-    # A wall the claim just hit is already on disk, so engine_ready keeps this pass off that CLI.
-    redispatch_unresolved_reviews
+    # A forced issue is one job for one issue: the sweeps of OTHER issues (stale claims, unresolved reviews) are not
+    # its business and would spend its run on them.
+    if [[ -z "$FORCE_ISSUE" ]]; then
+      release_stale_claims
+      # A wall the claim just hit is already on disk, so engine_ready keeps this pass off that CLI.
+      redispatch_unresolved_reviews
+    fi
     # Flag off: returns at once. Flag on: at most one new coding ask gets its spec written and sent for approval.
-    pass_p_run
+    if [[ "$FORCE_STAGE" != build ]]; then
+      if [[ -z "$FORCE_REPO" || "$REPO" == "$FORCE_REPO" ]]; then pass_p_run; fi
+    fi
   done
 
   total_claims=0

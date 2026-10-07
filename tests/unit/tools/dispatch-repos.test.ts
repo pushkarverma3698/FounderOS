@@ -16,6 +16,7 @@ const {
   assertAllowedRepo,
   matchAllowlistedRepos,
   assertDispatchableRepo,
+  findRepoNamedInText,
 } = await import("../../../src/tools/dispatch-repos.js");
 
 /**
@@ -274,5 +275,33 @@ describe("matchAllowlistedRepos — with registered project repos", () => {
     expect(matchAllowlistedRepos("hulda")).toEqual([
       "pushkarverma3698/House-of-Hulda-Website-frontend",
     ]);
+  });
+});
+
+describe("findRepoNamedInText — a repo named anywhere in the request", () => {
+  // Prod 2026-10-07 10:40 UTC: "/task In oplify-messaging-api \nStart work on issue #41." got "Which repo?".
+  it.each([
+    ["In oplify-messaging-api \nStart work on issue #41.", "OplifyMessage/oplify-messaging-api"],
+    ["start work on oplify-messaging-api#41", "OplifyMessage/oplify-messaging-api"],
+    ["see https://github.com/OplifyMessage/oplify-messaging-app/issues/12 and fix it", "OplifyMessage/oplify-messaging-app"],
+    ["the hero on (hulda) is broken", "pushkarverma3698/House-of-Hulda-Website-frontend"],
+    ["fix founderos", "pushkarverma3698/FounderOS"],
+  ])("%j names %s", (text, repo) => {
+    expect(findRepoNamedInText(text)).toBe(repo);
+  });
+
+  it.each([
+    ["fix the flaky CSV export"],
+    ["app fix the login button"],
+    ["api is slow"],
+    ["mention repo:hulda in the readme"],
+    ["try it in a sandbox first"],
+    ["port the oplify-api retry into founderos"],
+  ])("%j names no single repo", (text) => {
+    expect(findRepoNamedInText(text)).toBeNull();
+  });
+
+  it("a registered project repo counts by its exact name", () => {
+    expect(findRepoNamedInText("add a readme to my-side-project", ["pushkarverma3698/my-side-project"])).toBe("pushkarverma3698/my-side-project");
   });
 });

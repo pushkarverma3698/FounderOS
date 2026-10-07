@@ -19,6 +19,7 @@ import { SHA_A, SHA_B, contractFixture } from "../../helpers/contract-fixture.js
 import { memFs } from "../../helpers/mem-fs.js";
 
 const REPO = "pushkarverma3698/fos-journey-sandbox";
+const PR = 40;
 const DIR = "/store";
 const NOW = new Date("2026-10-06T10:30:00.000Z");
 const SPEC_NONCE = "specNonce1";
@@ -51,7 +52,7 @@ function mergeRecord(over: Partial<PendingMerge> = {}): PendingMerge {
     nonce: MERGE_NONCE,
     repo: REPO,
     issue: 12,
-    pr: 40,
+    pr: PR,
     evidence: { status: "PASS", reasons: [], head_sha: HEAD },
     review: { decision: "APPROVE", head_sha: HEAD },
     head_at_review: HEAD,
@@ -67,8 +68,13 @@ interface Harness {
   labels: Array<{ repo: string; issue: number; add: readonly string[]; remove: readonly string[] }>;
   comments: string[];
   merges: Array<{ repo: string; pr: number; sha: string }>;
+  updates: Array<{ repo: string; pr: number; expectedHead: string }>;
+  /** Set to make GitHub refuse the branch update with this message. */
+  updateFails?: string;
   audits: Array<{ action: string; key: string; payload: Record<string, unknown> }>;
   audited: Set<string>;
+  jobs: Array<{ repo: string; issue: number; stage: string }>;
+  jobResult: { status: "inert" | "started" } | { status: "failed"; reason: string };
   pr: PrState;
 }
 
@@ -79,8 +85,11 @@ function harness(over: { env?: Record<string, string>; pr?: Partial<PrState> } =
     labels: [],
     comments: [],
     merges: [],
+    updates: [],
     audits: [],
     audited: new Set(),
+    jobs: [],
+    jobResult: { status: "started" },
     pr: { state: "open", merged: false, headSha: HEAD, baseSha: BASE, baseRef: "beta", ...over.pr },
     deps: undefined as unknown as CodingDeps,
   };
@@ -95,12 +104,20 @@ function harness(over: { env?: Record<string, string>; pr?: Partial<PrState> } =
     async comment(_repo, _issue, body) {
       h.comments.push(body);
     },
+    async startJob(repo, issue, stage) {
+      h.jobs.push({ repo, issue, stage });
+      return h.jobResult;
+    },
     async inspectPr() {
       return h.pr;
     },
     async merge(repo, pr, sha) {
       h.merges.push({ repo, pr, sha });
       return MERGE_SHA;
+    },
+    async updateBranch(repo, pr, expectedHead) {
+      if (h.updateFails !== undefined) throw new Error(h.updateFails);
+      h.updates.push({ repo, pr, expectedHead });
     },
     async alreadyDone(key) {
       return h.audited.has(key);
@@ -200,6 +217,24 @@ describe("approve", () => {
     expect(r.said()).toMatch(/approved/i);
     expect(r.clear).toHaveBeenCalled();
     // the pending record is spent
+    expect((await readPending(h.fs, DIR, SPEC_NONCE)).ok).toBe(false);
+  });
+
+  it("starts the build run for the approved issue (stage=build)", async () => {
+    const h = harness();
+    await seed(h, specRecord());
+    const r = await tap(h, "approve", SPEC_NONCE);
+    expect(h.jobs).toEqual([{ repo: REPO, issue: 12, stage: "build" }]);
+    expect(r.said()).not.toMatch(/did not start/);
+  });
+
+  it("when the run cannot start the founder is told in the same chat, and the approval stands", async () => {
+    const h = harness();
+    h.jobResult = { status: "failed", reason: "connect ENOENT /run/fos-job.sock" };
+    await seed(h, specRecord());
+    const r = await tap(h, "approve", SPEC_NONCE);
+    expect(r.said()).toContain("The build did not start: connect ENOENT /run/fos-job.sock");
+    expect(h.labels).toHaveLength(1);
     expect((await readPending(h.fs, DIR, SPEC_NONCE)).ok).toBe(false);
   });
 
@@ -367,6 +402,52 @@ describe("merge", () => {
     const r = await tap(h, "merge", MERGE_NONCE);
     expect(h.merges).toEqual([]);
     expect(r.said()).toMatch(/base moved/i);
+  });
+
+  it("when only the base moved, updates the PR branch so a fresh card can follow, and merges nothing", async () => {
+    const h = harness({ pr: { baseSha: "e".repeat(40) } });
+    await seedApproved(h);
+    await seed(h, mergeRecord());
+    const r = await tap(h, "merge", MERGE_NONCE);
+    expect(h.merges).toEqual([]);
+    expect(h.audits).toEqual([]);
+    expect(h.updates).toEqual([{ repo: REPO, pr: PR, expectedHead: HEAD }]);
+    expect(r.said()).toMatch(/base moved/i);
+    expect(r.said()).toMatch(/merged the new beta into the PR branch/i);
+    expect(r.said()).toMatch(/fresh card/i);
+    expect(r.clear).toHaveBeenCalled();
+  });
+
+  it("does not touch the branch when the head moved too: that head needs its own review", async () => {
+    const h = harness({ pr: { baseSha: "e".repeat(40), headSha: "d".repeat(40) } });
+    await seedApproved(h);
+    await seed(h, mergeRecord());
+    const r = await tap(h, "merge", MERGE_NONCE);
+    expect(h.updates).toEqual([]);
+    expect(h.merges).toEqual([]);
+    expect(r.said()).toMatch(/head moved/i);
+  });
+
+  it("does not update the branch when something else is wrong too (not APPROVE)", async () => {
+    const h = harness({ pr: { baseSha: "e".repeat(40) } });
+    await seedApproved(h);
+    await seed(h, mergeRecord({ review: { decision: "REQUEST_CHANGES", head_sha: HEAD } }));
+    await tap(h, "merge", MERGE_NONCE);
+    expect(h.updates).toEqual([]);
+  });
+
+  it("when GitHub refuses the branch update, says why, nothing is merged, and the card can be tapped again", async () => {
+    const h = harness({ pr: { baseSha: "e".repeat(40) } });
+    h.updateFails = "merge conflict between beta and the PR branch";
+    await seedApproved(h);
+    await seed(h, mergeRecord());
+    const first = await tap(h, "merge", MERGE_NONCE);
+    expect(first.said()).toContain("merge conflict between beta and the PR branch");
+    expect(first.said()).toMatch(/not updated/i);
+    expect(h.merges).toEqual([]);
+    h.updateFails = undefined;
+    await tap(h, "merge", MERGE_NONCE);
+    expect(h.updates).toEqual([{ repo: REPO, pr: PR, expectedHead: HEAD }]);
   });
 
   it("refuses non-PASS evidence and non-APPROVE review even if the button somehow exists", async () => {

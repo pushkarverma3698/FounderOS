@@ -44,7 +44,7 @@ cd "$APP_DIR"
 #   The repo is public, so they live on the box, not in git or the snapshot.
 #   2026-10-02: JOBHUNT_CHAT_ID (the family jobs group, src/infra/telegram-send.ts) is the same kind of id.
 #   Unset, the job lane falls back to the founder's chat, so a wiped value moves every job message back there.
-#   AGENT_DISPATCH_BIN makes a filed issue start in seconds (src/tools/dispatch-tick.ts);
+#   AGENT_DISPATCH_BIN makes a filed issue start a job at once through fos-job.socket (src/tools/dispatch-tick.ts);
 #   unset on prod until 2026-09-29, so #762 waited for the next 15-minute cron tick.
 #   2026-10-06: AGENT_PIPELINE_V2 (coding pipeline switch) and ORACLE_ALLOWED_HOSTS are founder-set on the box;
 #   the #941 deploy dropped both. Unset, the pipeline is off.

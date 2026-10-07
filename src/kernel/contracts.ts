@@ -57,6 +57,8 @@ export const ToolReceiptSchema = z.object({
   ok: z.boolean(),
   at: z.string().datetime(),
   idempotency_key: z.string().optional(),
+  /** false when the tool succeeded by deliberately doing nothing (tool-failure.ts NO_ACTION_PREFIX). */
+  acted: z.boolean().optional(),
 });
 export type ToolReceipt = z.infer<typeof ToolReceiptSchema>;
 
@@ -174,6 +176,7 @@ export function repairWrappedOutput(parsed: unknown, ref: string): unknown {
 // ── Task envelope (the ONLY thing a worker sees) ──────────────────────────────
 
 export const MAX_TOOL_CALLS_PER_STEP = 6;
+export const MAX_READ_TOOL_CALLS_PER_STEP = 15; // read-only steps only: see step-budget.ts
 export const MAX_PLAN_STEPS = 8;
 
 export const TaskEnvelopeSchema = z.preprocess(
@@ -195,7 +198,7 @@ export const TaskEnvelopeSchema = z.preprocess(
     ),
     dependencies: z.array(z.string()).optional(),
     constraints: z.object({
-      max_tool_calls: z.number().int().min(1).max(MAX_TOOL_CALLS_PER_STEP),
+      max_tool_calls: z.number().int().min(1).max(MAX_READ_TOOL_CALLS_PER_STEP),
       hitl_required: z.boolean(),
     }),
   }),
@@ -258,6 +261,8 @@ export const StepResultSchema = z.discriminatedUnion("status", [
     output: z.unknown(),
     tool_receipts: z.array(ToolReceiptSchema).default([]),
     observed: ObservedResultSchema.optional(),
+    /** Set in code when the step spent its whole tool budget: names what may be unanswered (AG-035). */
+    note: z.string().optional(),
   }),
   z.object({
     status: z.literal("failed"),

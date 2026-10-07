@@ -137,11 +137,12 @@ tg_flush_digest() {
   while IFS=$'\t' read -r utc_time daemon msg || [[ -n "$utc_time" ]]; do
     [[ -n "$utc_time" ]] || continue
     total_events=$((total_events + 1))
-    ist_time="$(TZ=Asia/Kolkata date -d "$utc_time" '+%H:%M' 2>/dev/null || echo "00:00")"
+    ist_time="$(TZ=Asia/Kolkata date -d "$utc_time" '+%H:%M' 2>/dev/null || { e="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$utc_time" +%s)" && TZ=Asia/Kolkata date -r "$e" '+%H:%M'; } 2>/dev/null || echo "00:00")"
 
     local found=-1
     local idx=0
-    for k in "${keys[@]}"; do
+    # ${keys[@]+...}: macOS bash 3.2 treats an empty array as unbound under set -u.
+    for k in ${keys[@]+"${keys[@]}"}; do
       if [[ "$k" == "${daemon}"$'\t'"${msg}" ]]; then
         found=$idx
         break

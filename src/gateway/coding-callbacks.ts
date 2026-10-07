@@ -68,9 +68,13 @@ export interface CodingDeps {
   now(): Date;
   setLabels(repo: string, issue: number, change: { add: readonly string[]; remove: readonly string[] }): Promise<void>;
   comment(repo: string, issue: number, body: string): Promise<void>;
+  /** Starts the issue's run now (fos-job socket). Never throws; a failure is returned so the founder is told. */
+  startJob(repo: string, issue: number, stage: "spec" | "build"): Promise<{ status: "inert" | "started" } | { status: "failed"; reason: string }>;
   inspectPr(repo: string, pr: number): Promise<PrState>;
   /** Squash-merges pinned to `sha`; returns the merge commit's sha. Throws when GitHub refuses. */
   merge(repo: string, pr: number, sha: string): Promise<string>;
+  /** Merges the base branch into the PR branch, pinned to `expectedHead`, so CI reruns on a head that is current. Throws when GitHub refuses. */
+  updateBranch(repo: string, pr: number, expectedHead: string): Promise<void>;
   alreadyDone(key: string): Promise<boolean>;
   /** True when a row was written. */
   audit(row: AuditRow): Promise<boolean>;
@@ -147,13 +151,16 @@ async function approve(ctx: Context, deps: CodingDeps, rec: PendingSpec): Promis
     log.error({ label, err: errText(err) }, "Spec approved, but the audit row failed");
   }
   try {
-    await deps.comment(rec.repo, rec.issue, `Spec approved by the founder (contract ${rec.fingerprint.slice(0, 12)}, spec commit ${rec.spec_commit.slice(0, 7)}). The executor may pick this up.`);
+    await deps.comment(rec.repo, rec.issue, `Spec approved by the founder (contract ${rec.fingerprint.slice(0, 12)}, spec commit ${rec.spec_commit.slice(0, 7)}). The build run starts now.`);
   } catch (err) {
     // allow-failopen: the comment is a courtesy trail; the contract record and the label are the approval.
     log.warn({ label, err: errText(err) }, "Spec approved, but the issue comment failed");
   }
+  // Approval is done and recorded; the build starts now, or the founder hears here that nothing is running it.
+  const started = await deps.startJob(rec.repo, rec.issue, "build");
+  const notStarted = started.status === "failed" ? `\n⚠️ The build did not start: ${started.reason}. Check \`systemctl status fos-job.socket\` on the VPS, then re-queue ${label}.` : "";
   await clearButtons(ctx);
-  await say(ctx, `✅ ${label}: spec approved (${rec.fingerprint.slice(0, 12)}). Labelled ${LABEL_READY}.${audited ? "" : "\n⚠️ The audit row could not be written; the approval itself is done."}`);
+  await say(ctx, `✅ ${label}: spec approved (${rec.fingerprint.slice(0, 12)}). Labelled ${LABEL_READY}.${audited ? "" : "\n⚠️ The audit row could not be written; the approval itself is done."}${notStarted}`);
 }
 
 async function sendBack(ctx: Context, deps: CodingDeps, rec: PendingSpec, action: "change" | "cancel"): Promise<void> {
@@ -216,8 +223,35 @@ async function mergePr(ctx: Context, deps: CodingDeps, rec: PendingMerge, acknow
     baseNow: facts.baseSha,
   });
   if (!decision.ok) {
+    const reasons = decision.reasons.map((r) => `• ${r}`).join("\n");
+    // Only the base moved: the review and the evidence still describe this head. The base requires an up-to-date branch,
+    // and the review sweep skips a head it already gated, so nothing else would ever produce a new head and a new card.
+    const onlyBaseMoved = canMerge({
+      evidence: rec.evidence,
+      review: rec.review,
+      headAtReview: rec.head_at_review,
+      headNow: facts.headSha,
+      baseAtReview: rec.base_at_review,
+      baseNow: rec.base_at_review,
+    }).ok;
+    if (!onlyBaseMoved) {
+      await clearButtons(ctx);
+      await say(ctx, `⛔ ${label}: not merging.\n${reasons}\nA fresh evidence card follows when the new head has been checked.`);
+      return;
+    }
+    try {
+      await deps.updateBranch(rec.repo, rec.pr, facts.headSha);
+    } catch (err) {
+      await release(deps, rec.nonce);
+      await say(ctx, `⛔ ${label}: not merging.\n${reasons}\nThe PR branch was not updated either: ${errText(err)}\nNothing was merged. Fix that, then tap again.`);
+      return;
+    }
     await clearButtons(ctx);
-    await say(ctx, `⛔ ${label}: not merging.\n${decision.reasons.map((r) => `• ${r}`).join("\n")}\nA fresh evidence card follows when the new head has been checked.`);
+    await say(
+      ctx,
+      `⛔ ${label}: not merging.\n${reasons}\nI merged the new ${facts.baseRef} into the PR branch, so its checks rerun on a current head. ` +
+        `A fresh card follows from the next review sweep once those checks finish; if the review sweep is switched off, none comes until it is on again.`,
+    );
     return;
   }
 

@@ -31,6 +31,12 @@ export type CostStage = "planner" | "worker" | "synthesizer";
 export interface CostAttribution {
   readonly agent: string;
   readonly stage: CostStage;
+  /**
+   * The model this stage was built to call, as a prefixed id. Used when the
+   * provider's response does not name the model (most do not), so the ledger
+   * records the stage's model instead of the run-wide AGENT_MODEL.
+   */
+  readonly model?: string;
 }
 
 /**
@@ -55,6 +61,8 @@ export const UNATTRIBUTED_STAGE = "unattributed";
 export const COST_AGENT_METADATA_KEY = "cost_agent";
 /** @see COST_AGENT_METADATA_KEY */
 export const COST_STAGE_METADATA_KEY = "cost_stage";
+/** @see COST_AGENT_METADATA_KEY */
+export const COST_MODEL_METADATA_KEY = "cost_model";
 
 /** The three kernel nodes that can spend. Anything else is not a stage we wrote. */
 const COST_STAGES: readonly string[] = ["planner", "worker", "synthesizer"];
@@ -63,7 +71,11 @@ const isCostStage = (value: unknown): value is CostStage =>
 
 /** Render an attribution as run metadata for a model invoke config. */
 export function costAttributionMetadata(attribution: CostAttribution): Record<string, string> {
-  return { [COST_AGENT_METADATA_KEY]: attribution.agent, [COST_STAGE_METADATA_KEY]: attribution.stage };
+  return {
+    [COST_AGENT_METADATA_KEY]: attribution.agent,
+    [COST_STAGE_METADATA_KEY]: attribution.stage,
+    ...(attribution.model ? { [COST_MODEL_METADATA_KEY]: attribution.model } : {}),
+  };
 }
 
 /**
@@ -77,7 +89,8 @@ export function attributionFromMetadata(
   const agent = metadata?.[COST_AGENT_METADATA_KEY];
   const stage = metadata?.[COST_STAGE_METADATA_KEY];
   if (typeof agent !== "string" || agent.length === 0 || !isCostStage(stage)) return undefined;
-  return { agent, stage };
+  const model = metadata?.[COST_MODEL_METADATA_KEY];
+  return typeof model === "string" && model.length > 0 ? { agent, stage, model } : { agent, stage };
 }
 
 // ── Model pricing table ───────────────────────────────────────────────────────

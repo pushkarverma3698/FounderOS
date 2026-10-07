@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockHitlGate = vi.fn();
-const kick = vi.fn();
+const kick = vi.fn(async (..._a: unknown[]) => ({ status: "started" }));
 const audit = vi.fn(async () => ({ written: true }));
 const gh = {
   update: vi.fn(async () => ({})),
@@ -26,7 +26,10 @@ vi.mock("../../../src/agents/agent-tools/hitl.js", () => ({
   hitlGate: (...a: unknown[]) => mockHitlGate(...a),
   idemKey: (...parts: string[]) => parts.join("|"),
 }));
-vi.mock("../../../src/tools/dispatch-tick.js", () => ({ kickDispatchTick: (...a: unknown[]) => kick(...a) }));
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({
+  startDispatchJob: (...a: unknown[]) => kick(...a),
+  startFailureNote: (n: number, repo: string, reason: string) => `could not start ${repo}#${n}: ${reason}`,
+}));
 vi.mock("../../../src/db/queries.js", () => ({
   hasBeenAudited: vi.fn(async () => false),
   writeAuditEntry: (...a: unknown[]) => audit(...(a as [])),
@@ -92,7 +95,7 @@ describe("requeue_antigravity_task", () => {
     expect(gh.addLabels).toHaveBeenCalledWith(
       expect.objectContaining({ issue_number: 762, labels: expect.arrayContaining(["agent:ready"]) }),
     );
-    expect(kick).toHaveBeenCalledWith(762, "pushkarverma3698/FounderOS");
+    expect(kick).toHaveBeenCalledWith(762, "pushkarverma3698/FounderOS", "build");
     expect(audit).toHaveBeenCalledOnce();
     expect(res).toMatch(/#762 is back in Antigravity's queue/);
   });
@@ -125,7 +128,7 @@ describe("requeue_antigravity_task", () => {
 
     expect(mockHitlGate).not.toHaveBeenCalled();
     expect(gh.addLabels).not.toHaveBeenCalled();
-    expect(kick).toHaveBeenCalledWith(762, "pushkarverma3698/FounderOS");
+    expect(kick).toHaveBeenCalledWith(762, "pushkarverma3698/FounderOS", "build");
     expect(res).toMatch(/already queued/i);
   });
 

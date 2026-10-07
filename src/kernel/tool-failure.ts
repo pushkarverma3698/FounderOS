@@ -22,6 +22,19 @@ export const TOOL_FAILURE_MARKER = "[[TOOL_FAILURE";
 export const REJECTION_MARKER = "Rejected by founder";
 
 /**
+ * A side-effecting tool that deliberately did nothing (a duplicate skipped, already fixed, already queued) starts
+ * its result with this. It is a success, so the synthesizer still sees "nothing was filed", but the worker marks
+ * its receipt `acted: false` and founderReceiptsBlock does not count it as an action. Prod 53f253d7 (2026-10-07)
+ * printed "✓ 2 actions completed and verified" under one filed issue and one skipped duplicate.
+ * src/agents/tool-result.ts holds the agents' copy (the kernel cannot import agents).
+ */
+export const NO_ACTION_PREFIX = "ℹ️ No action taken:";
+
+export function isNoActionResult(result: string): boolean {
+  return result.trimStart().startsWith(NO_ACTION_PREFIX);
+}
+
+/**
  * Fourth convention, added 2026-09-23: the failure PROSE that tool wrappers
  * actually return.
  *
