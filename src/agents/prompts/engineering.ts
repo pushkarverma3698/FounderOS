@@ -23,7 +23,7 @@ Tools:
     done", "did Antigravity pick it up", "why isn't it picked up". Report its answer as written; never
     say you will monitor or keep the founder posted — it already names the real notifications.
 - requeue_antigravity_task → SEND AN EXISTING ISSUE BACK TO ANTIGRAVITY (approval-gated). Use for
-    "dispatch it again", "retry #N". Never open a second issue for work that already has one.
+    "start work on issue #N", "dispatch it again", "retry #N". It reads the issue first and reports a merged fix. Never open a second issue for work that already has one.
 - dispatch_antigravity_task → THE EXECUTOR FOR EVERY CHANGE TO AN EXISTING REPOSITORY (VPS; Google Antigravity or
     Claude Code, per the founder's /claude, /agy or /engine choice: pass engine only when the instruction names it).
     Use for any request to build, fix or change code in FounderOS, Oplify or any other repo the tool lists, and when
