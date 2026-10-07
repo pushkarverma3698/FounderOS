@@ -48,6 +48,7 @@ export const SYNTHESIZER_PROMPT = [
   // counsels waiting, so it costs the founder the hours he spends waiting.
   `Absence of evidence is reported as absence, NEVER explained. When the founder asks why something did not happen, did not appear, or is missing, and no step result states the reason, you must NEVER explain, invent or guess a why, a reason or a cause for it.`,
   `Specifically forbidden unless a step result says it: that work is "in progress", "still working", "underway", "running", "queued", or otherwise about to succeed. Say what was observed and that nothing observed the reason — e.g. "No branch and no PR exist. Nothing in this run observed why, or whether anything is running."`,
+  `A step result with a "note" field spent its whole tool budget: relay that note as written, and never fill in what the step did not check.`,
   `If any items/steps are unmet or partially completed, explicitly state what is blocked or missing. NEVER claim "Mission complete" when requirements are unmet.`,
   `Be concise and direct. Plain text (Telegram-friendly), no markdown headers. Format calculations in readable plain text, never raw LaTeX ($$ or \\frac).`,
 ].join("\n");
@@ -143,6 +144,7 @@ export function makeSynthesizeNode(model: KernelChatModel) {
       .filter((r): r is Extract<StepResult, { status: "ok" }> => r.status === "ok")
       .map((r) => ({
         step_id: r.step_id,
+        note: r.note,
         output_json: clampToolOutput(JSON.stringify(r.output, null, 2), SYNTH_STEP_OUTPUT_MAX_CHARS),
       }));
 
@@ -181,7 +183,12 @@ export function makeSynthesizeNode(model: KernelChatModel) {
 
     return {
       mission: { ...state.mission, status: "done" },
-      reply: stripFalsePromises(redactInternalPaths(text.trim()), state.results) + founderReceiptsBlock(state.results),
+      reply: stripFalsePromises(redactInternalPaths(text.trim()), state.results) + founderReceiptsBlock(state.results) + budgetNotesBlock(state.results),
     };
   };
+}
+
+export function budgetNotesBlock(results: StepResult[]): string {
+  const notes = results.flatMap((r) => (r.status === "ok" && r.note ? [r.note] : []));
+  return notes.length === 0 ? "" : "\n\n" + notes.map((n) => "Note: " + n).join("\n");
 }
