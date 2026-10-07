@@ -106,6 +106,14 @@ describe("ops_state scope background_jobs", () => {
     expect(res.observed?.evidence).toContain("scope:background_jobs");
   });
 
+  it("says which commit is deployed, as one `Deployed:` line next to the summary", async () => {
+    const res = await opsStateTool.execute({ scope: "background_jobs" });
+    const data = JSON.parse(String(res.data)) as { deployed: string };
+    // Real process, real checkout: a sha and a date inside one, "unknown" in a tree without one. Either way one line with the start time.
+    expect(data.deployed).toMatch(/^Deployed: (unknown|[0-9a-f]{7} ".*" \(\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\)), process started \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+    expect(opsStateTool.description).toContain("deployed");
+  });
+
   it("an off switch is reported as off, with the way back", async () => {
     writeFileSync(join(home, ".claude", "pr-brain.off"), "off\n");
     const res = await opsStateTool.execute({ scope: "background_jobs" });
