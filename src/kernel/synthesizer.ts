@@ -21,7 +21,7 @@ import { isKernelTerminalError } from "./errors.js";
 import { clampToolOutput } from "./tool-output-guard.js";
 import { missionSatisfied } from "./mission-satisfaction.js";
 import { redactInternalPaths } from "./founder-text.js";
-import { stripFalsePromises } from "./promise-guard.js";
+import { applyClaimChecks } from "./claim-check.js";
 import { writeTaskOutcome } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { HITL_GATED_TOOLS } from "../infra/hitl.js";
@@ -183,7 +183,7 @@ export function makeSynthesizeNode(model: KernelChatModel) {
 
     return {
       mission: { ...state.mission, status: "done" },
-      reply: stripFalsePromises(redactInternalPaths(text.trim()), state.results) + founderReceiptsBlock(state.results) + budgetNotesBlock(state.results),
+      reply: applyClaimChecks(redactInternalPaths(text.trim()), state.results, state.turn) + founderReceiptsBlock(state.results) + budgetNotesBlock(state.results),
     };
   };
 }
