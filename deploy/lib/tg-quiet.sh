@@ -141,7 +141,8 @@ tg_flush_digest() {
 
     local found=-1
     local idx=0
-    for k in "${keys[@]}"; do
+    # ${keys[@]+...}: macOS bash 3.2 treats an empty array as unbound under set -u.
+    for k in ${keys[@]+"${keys[@]}"}; do
       if [[ "$k" == "${daemon}"$'\t'"${msg}" ]]; then
         found=$idx
         break
