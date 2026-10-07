@@ -72,7 +72,7 @@ export interface WorkerSpec {
 // Failure classification lives in its own module (LOC budget); re-exported here
 // because worker.ts has always been its import site.
 export { TOOL_FAILURE_MARKER, REJECTION_MARKER, isFailureResult } from "./tool-failure.js";
-import { isFailureResult, REJECTION_MARKER, TOOL_FAILURE_MARKER } from "./tool-failure.js";
+import { isFailureResult, isNoActionResult, REJECTION_MARKER, TOOL_FAILURE_MARKER } from "./tool-failure.js";
 
 export function currentStep(state: KernelStateType): TaskEnvelope {
   const step = state.mission.plan?.steps[state.mission.cursor];
@@ -282,6 +282,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         result_digest: digestToolResult(resultStr),
         ok,
         at: new Date().toISOString(),
+        ...(ok && isNoActionResult(resultStr) ? { acted: false } : {}),
       });
       messages.push(new ToolMessage({ content: clampToolOutput(resultStr), tool_call_id: callId, name: call.name }));
     }
