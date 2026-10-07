@@ -114,6 +114,9 @@ function callbackDeps(w: World, env: Record<string, string | undefined> = ENV): 
     async comment(_r, _i, body) {
       w.comments.push(body);
     },
+    async startJob() {
+      return { status: "started" as const };
+    },
     async inspectPr() {
       return w.pr;
     },

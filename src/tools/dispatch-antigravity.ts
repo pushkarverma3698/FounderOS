@@ -32,7 +32,7 @@ import { childLogger } from "../infra/logger.js";
 import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
 import { listRegisteredDispatchRepos } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
-import { kickDispatchTick } from "./dispatch-tick.js";
+import { startDispatchJob, startFailureNote } from "./dispatch-tick.js";
 import { ENGINES, engineLabel, parseEngine, readDefaultEngine } from "./coding-engine.js";
 import { DEFAULT_ACCEPTANCE_TEXT } from "./dispatch-roles.js";
 import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.js";
@@ -355,7 +355,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
         data: { missing: lint.missing, missing_headings: lint.missingHeadings, missing_paths: lint.missingPaths },
       };
     }
-    const { warnings } = prepared; const body = filedBody(prepared.body, founderRequest);
+    const { warnings: preparedWarnings } = prepared; const body = filedBody(prepared.body, founderRequest);
 
     try {
       const { data } = await octokit.rest.issues.create({
@@ -368,15 +368,14 @@ export const dispatchAntigravityTool: UnifiedTool = {
 
       log.info({ owner, repo, issue_number: data.number, url: data.html_url }, "Dispatched issue to Antigravity");
 
-      // Shorten the wait from "up to 15 minutes" to "seconds". Wrapped because the
-      // issue is already filed at this point: nothing about claiming it sooner may
-      // turn a successful dispatch into a reported failure.
-      try {
-        kickDispatchTick(data.number, `${owner}/${repo}`);
-      } catch (err) {
-        // allow-failopen: cron claims the issue on its next tick regardless.
-        log.warn({ issue_number: data.number, err: (err as Error).message }, "dispatch kick failed");
-      }
+      // The run starts now, in its own process, and reports its own outcome. When it cannot start, the
+      // founder hears it in this reply: the issue is filed, but nothing is working on it.
+      const stage = labels.includes("agent:spec") ? "spec" : "build";
+      const started = await startDispatchJob(data.number, `${owner}/${repo}`, stage);
+      const warnings =
+        started.status === "failed"
+          ? [...preparedWarnings, startFailureNote(data.number, `${owner}/${repo}`, started.reason)]
+          : preparedWarnings;
 
       return {
         success: true,

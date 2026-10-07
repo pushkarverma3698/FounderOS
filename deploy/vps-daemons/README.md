@@ -22,7 +22,7 @@ directory; only `agent-dispatch`'s documented location was wrong.
 | Daemon | Source in this repo | VPS path (deployed, live) | Crontab | What it does |
 |---|---|---|---|---|
 | `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, clears it or requests changes (the `claude` engine may also push a fix), then **merges** once cleared. The reviewer is an engine, `PR_BRAIN_ENGINE`: **`agy` by default** (see "The reviewer" below), `claude` as before. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
-| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` and `* * * * * … --kicked` | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
+| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *`; one job per /task through `fos-job.socket` (`deploy/job-run`) | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
 | `onboard-repo.sh` | `deploy/onboard-repo.sh` | `~/bin/onboard-repo.sh` | — (run by hand, and `--check` by every agent-dispatch tick) | Puts a repo on the loop, or reports what it is missing. See "Adding a repo". |
 | helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both), `agy-failure.sh` (the failure classifier), `agy-run.sh` (one agy turn, streamed live into one Telegram message; shared by both) and `ci-state.sh` (what a PR's required CI checks say; shared by both). **A daemon refuses to start without them.** |
 
@@ -70,18 +70,23 @@ required checks, `gh` fails) the review is spent as before: a quiet failure must
 `~/.claude/pr-brain.ci/` (what CI said about a head), `~/.claude/pr-brain.reviews` (one line per review started, last
 24 h), `~/.claude/pr-brain.ceiling` (the day the notice was sent). Delete `pr-brain.reviews` to reset the ceiling.
 
-## Live progress and the kick
+## Live progress and the job socket
 
 `deploy/lib/agy-run.sh` runs agy with `--output-format stream-json` and edits **one** Telegram message every
 20 s: `🔧 Antigravity #44 · owner/repo`, the clock and model, the last five tool calls (`✅ run npm test`,
 `⏳ read src/…`). When the run ends it is left in the chat with the outcome appended (`📦 PR #9 opened`). It
 used to show the last line agy printed: `</app_notification>`, `root agent idle; waiting…`.
 
-Approving a `/task` files the issue and the bot appends a line to `~/.claude/agent-dispatch.kick`. The bot cannot
-start the dispatcher itself (it runs under systemd with `NoNewPrivileges`, where every `sudo` fails, and `/tmp` is
-private to it): a per-minute cron line, `agent-dispatch --kicked`, turns the note into a tick within a minute.
-`deploy/sync-daemons.sh` installs that line (copied from the `agent-dispatch` line already in the crontab, so the
-same user, PATH and env file), idempotently. With no note it exits at once, silently.
+Filing or approving a `/task` hands the job to `fos-job.socket`: the bot writes one JSON line
+`{"repo","issue","stage"}` to `/run/fos-job.sock` and systemd starts `deploy/job-run` (`fos-job@.service`) for the
+connection. The bot cannot start the dispatcher itself (it runs under systemd with `NoNewPrivileges`, where every
+`sudo` fails, and `/tmp` is private to it); the job unit runs as the same user without those flags. `job-run` runs
+`agent-dispatch --issue N --repo R --stage spec|build --wait-lock 3600` (it waits behind a running sweep and says
+so), runs `pr-brain` on the PR a build opened, and ends with the card it posted or ONE Telegram message: `repo#N`,
+the stage, the exit code and the last 15 log lines. It reads the models and timeouts from the `agent-dispatch` cron
+line, so a job runs what the sweep runs. Logs: `~/.claude/jobs/` (14 days) and `journalctl -u 'fos-job@*'`.
+`deploy/sync-daemons.sh` installs the units and enables the socket; if the socket is missing the bot says so in the
+same chat. The 15-minute sweep cron stays. The old per-minute `--kicked` cron line is removed by the same script.
 
 ## Telegram quiet hours
 
