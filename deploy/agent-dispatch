@@ -983,7 +983,7 @@ claim_and_implement() {
   gh issue comment "$issue" --repo "$REPO" \
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
-  prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX)"
   set_integration_branch
   local target_branch="$INTEGRATION_BRANCH"
 
@@ -1033,7 +1033,7 @@ EOF
   else
     log "invoking agy for #${issue} (timeout ${TIMEOUT_SEC}s, --new-project pinned to ${WORKSPACE})"
   fi
-  local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX.log)"
+  local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX)"
   # The timeouts that matter (the outer `timeout`, and --print-timeout set just under it, without which every
   # real task died at 5m05s) live with the invocation, in deploy/lib/agy-run.sh (claude-run.sh for Claude Code).
   run_engine_with_progress "$engine" "${ename} #${issue} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
@@ -1371,7 +1371,7 @@ redispatch_unresolved_reviews() {
 
     local branch prompt_file
     branch=$(gh pr view "$pr" --repo "$REPO" --json headRefName --jq .headRefName)
-    prompt_file="$(mktemp /tmp/agent-dispatch-redispatch-XXXXXX.txt)"
+    prompt_file="$(mktemp /tmp/agent-dispatch-redispatch-XXXXXX)"
     chmod 644 "$prompt_file"
     if [[ "$mode" == nonblockers ]]; then
       {
@@ -1416,7 +1416,7 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
-    local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX.log)"
+    local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX)"
     run_engine_with_progress "$engine" "${ename} fixing PR #${pr} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
     agy_log_append "$agy_log"
     local quota_until wall

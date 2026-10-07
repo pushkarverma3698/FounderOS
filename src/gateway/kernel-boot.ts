@@ -37,6 +37,7 @@ import { readScreen } from "../infra/screen-log.js";
 import { chatIdFromThreadId } from "../infra/telegram-send.js";
 import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
+import { describeStageModels, getEffectiveWorkerModelId, modelNameOf } from "../agents/model-truth.js";
 import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
 import { env } from "../core/config.js";
@@ -301,22 +302,31 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
   // reach the provider call. The fallback models are wrapped with the SAME
   // identity — a fallback's spend belongs to the stage that asked for it, and
   // the `model` column already records which model actually answered.
-  const identify = (stage: CostStage, agent: string) =>
-    (m: KernelBindableModel): KernelBindableModel => withCostIdentity(m, { agent, stage });
-  const asPlanner = identify("planner", "planner");
-  const asWorker = identify("worker", "worker");
-  const asSynthesizer = identify("synthesizer", "synthesizer");
+  // `model` is the id the stage was built to call (see CostAttribution.model);
+  // a fallback names itself from the instance, since its chain id is not known here.
+  const identify = (stage: CostStage, agent: string, model?: string) =>
+    (m: KernelBindableModel): KernelBindableModel => withCostIdentity(m, { agent, stage, model: model ?? modelNameOf(m) });
+  const workerModel = getWorkerModel() as unknown as KernelBindableModel; // resolves the effective id below
+  const plannerId = getConfiguredModelId();
+  const workerId = getEffectiveWorkerModelId() ?? getWorkerModelId();
+  const asPlanner = identify("planner", "planner", plannerId);
+  const asWorker = identify("worker", "worker", workerId);
+  const asSynthesizer = identify("synthesizer", "synthesizer", workerId);
+  const asPlannerFallback = identify("planner", "planner");
+  const asWorkerFallback = identify("worker", "worker");
+  const asSynthFallback = identify("synthesizer", "synthesizer");
+  log.info(describeStageModels(plannerId), "Effective model per stage");
   return buildKernel({
     plannerModel: cachePlanner(
       withModelFallbacks(
         withModelRetry(asPlanner(getModel() as unknown as KernelBindableModel), { label: "planner" }),
-        plannerFallbacks.map((m) => asPlanner(m)),
+        plannerFallbacks.map((m) => asPlannerFallback(m)),
         "planner",
       ),
     ),
     workerModel: withModelFallbacks(
-      withModelRetry(asWorker(getWorkerModel() as unknown as KernelBindableModel), { label: "worker" }),
-      workerFallbacks.map((m) => asWorker(m)),
+      withModelRetry(asWorker(workerModel), { label: "worker" }),
+      workerFallbacks.map((m) => asWorkerFallback(m)),
       "worker",
     ),
     synthesizerModel: cacheSynth(
@@ -324,7 +334,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
         withModelRetry(asSynthesizer(getWorkerModel() as unknown as KernelBindableModel), {
           label: "synthesizer",
         }),
-        workerFallbacks.map((m) => asSynthesizer(m)),
+        workerFallbacks.map((m) => asSynthFallback(m)),
         "synthesizer",
       ),
     ),
