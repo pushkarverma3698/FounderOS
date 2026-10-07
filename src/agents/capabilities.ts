@@ -262,7 +262,7 @@ export function buildDepartmentsSummary(): string {
   return (
     `${departments.length} kernel workers, each with its own capped tool set (* = founder approves in Telegram before it runs): ` +
     `${departments.join(", ")}. ` +
-    "What is running in the background (automatic PR review, coding dispatch, built-in routines) and which models they use: ask ops_state with scope background_jobs."
+    "What is running in the background (automatic PR review, coding dispatch, built-in routines), which models they use, and which commit is deployed (what is live, did X ship): ask ops_state with scope background_jobs."
   );
 }
 
