@@ -12,9 +12,8 @@
  *  - specDraftingReply: what the founder reads. It says a spec is being drafted and a card will follow, never
  *    "queued": nothing is queued for execution yet.
  *
- * The dispatch kick is deliberately still written. `agent-dispatch --kicked` runs an ordinary tick (it only logs the
- * note; it does not force the issue), so it cannot claim an `agent:spec` issue for building; it only starts the
- * tick that runs Pass P sooner.
+ * The job is started with stage `spec` (src/tools/dispatch-antigravity.ts), so `agent-dispatch --stage spec` runs
+ * Pass P for the issue and never claims an `agent:spec` issue for building.
  */
 
 import { LABEL_READY, LABEL_SPEC, pipelineV2Enabled } from "./pipeline-pending.js";

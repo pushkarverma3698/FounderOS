@@ -9,14 +9,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockIssuesCreate = vi.fn();
 const mockGetContent = vi.fn();
 const mockRepoGet = vi.fn();
-const mockKickDispatchTick = vi.fn();
+const mockStartDispatchJob = vi.fn(async () => ({ status: "started" }));
 
 vi.mock("octokit", () => ({
   Octokit: vi.fn().mockImplementation(() => ({
     rest: { issues: { create: mockIssuesCreate }, repos: { getContent: mockGetContent, get: mockRepoGet } },
   })),
 }));
-vi.mock("../../../src/tools/dispatch-tick.js", () => ({ kickDispatchTick: mockKickDispatchTick }));
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({ startDispatchJob: mockStartDispatchJob, startFailureNote: () => "" }));
 
 const { dispatchAntigravityTool, AGENT_READY_LABEL, ANTIGRAVITY_LABEL } = await import("../../../src/tools/dispatch-antigravity.js");
 const { LABEL_SPEC } = await import("../../../src/tools/pipeline-pending.js");
@@ -58,6 +58,15 @@ describe("dispatch_antigravity_task: spec intake behind AGENT_PIPELINE_V2", () =
     expect(created().labels).toEqual([LABEL_SPEC, ANTIGRAVITY_LABEL, "engine:claude"]);
     expect(created().labels).not.toContain(AGENT_READY_LABEL);
     expect((res.data as { labels: string[] }).labels).toEqual(created().labels);
+  });
+
+  it("flag on: the run starts at the spec stage; flag off it starts at build", async () => {
+    process.env["AGENT_PIPELINE_V2"] = "1";
+    await dispatchAntigravityTool.execute({ ...BRIEF, founder_request: ASK });
+    expect(mockStartDispatchJob).toHaveBeenLastCalledWith(77, "pushkarverma3698/FounderOS", "spec");
+    delete process.env["AGENT_PIPELINE_V2"];
+    await dispatchAntigravityTool.execute({ ...BRIEF, founder_request: ASK });
+    expect(mockStartDispatchJob).toHaveBeenLastCalledWith(77, "pushkarverma3698/FounderOS", "build");
   });
 
   it("flag on: the ask is in the body byte for byte, inside a fence that outlasts the ask's own fence", async () => {

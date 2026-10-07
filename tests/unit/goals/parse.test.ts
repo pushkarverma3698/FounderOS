@@ -10,6 +10,7 @@ import {
   MAX_TITLE_CHARS,
   goalArgsOf,
   parseGoalCommand,
+  parseMetricSpec,
   type ParseContext,
   type ParseIssue,
 } from "../../../src/goals/parse.js";
@@ -290,12 +291,59 @@ describe("unknown subcommands", () => {
   });
 });
 
+describe("parseMetricSpec — whitespace handling", () => {
+  it("trims leading and trailing whitespace from spec, key, and arg tokens", () => {
+    expect(parseMetricSpec("  manual  ", CTX)).toEqual({ ok: true, key: "manual", arg: null });
+    expect(parseMetricSpec("  prs_merged_7d : owner/repo  ", CTX)).toEqual({
+      ok: true,
+      key: "prs_merged_7d",
+      arg: "owner/repo",
+    });
+    expect(parseMetricSpec("  applications_7d : tashi  ", CTX)).toEqual({
+      ok: true,
+      key: "applications_7d",
+      arg: "wife-nl-finance",
+    });
+  });
+
+  it("handles whitespace trimming within parseGoalCommand", () => {
+    const out = parse("add Ship fix | metric=manual  target=1 ");
+    expect(out).toMatchObject({
+      ok: true,
+      command: { kind: "add", draft: { metricKey: "manual", target: 1 } },
+    });
+  });
+});
+
 describe("goalArgsOf — the arguments of a /goal message, read back from a message's text", () => {
   it("strips the command and an @botname", () => {
     expect(goalArgsOf("/goal add x | metric=manual target=1")).toBe("add x | metric=manual target=1");
     expect(goalArgsOf("/goal@founderos_bot add x")).toBe("add x");
     expect(goalArgsOf("  /goal   done 2 ")).toBe("done 2");
     expect(goalArgsOf("/goal")).toBe("");
+  });
+
+  it("extracts /goal command from confirmation cards and wrapped messages", () => {
+    expect(goalArgsOf("Run this?\n/goal add Apply to 20 jobs | target=20")).toBe("add Apply to 20 jobs | target=20");
+    expect(goalArgsOf("Run this?\n<code>/goal add Apply to 20 jobs | target=20</code>")).toBe("add Apply to 20 jobs | target=20");
+    expect(goalArgsOf("❌ Not done. 1 thing to fix:\nCommand: <code>/goal add Ship a fix | target=1</code>")).toBe("add Ship a fix | target=1");
+  });
+
+  it("preserves HTML tags in valid user input without truncation", () => {
+    expect(goalArgsOf("/goal add Fix the </div> bug | metric=manual target=1")).toBe("add Fix the </div> bug | metric=manual target=1");
+  });
+
+  it("avoids false positives when /goal is mentioned in error text or prose", () => {
+    expect(goalArgsOf("❌ Not done.\n• metric: Please don't use /goal in metric\nCommand: /goal add foo")).toBe("add foo");
+    expect(goalArgsOf("❌ Not done.\n• metric: Please don't use /goal in metric")).toBeNull();
+  });
+
+  it("preserves multiline commands without truncation", () => {
+    expect(goalArgsOf("/goal add Implement login\nAnd verify it works | target=1")).toBe("add Implement login\nAnd verify it works | target=1");
+  });
+
+  it("handles valid user commands containing the string Command:", () => {
+    expect(goalArgsOf("/goal add Fix the Command: parsing | target=1")).toBe("add Fix the Command: parsing | target=1");
   });
 
   it("does not read other commands or plain text as a /goal message", () => {
@@ -305,3 +353,5 @@ describe("goalArgsOf — the arguments of a /goal message, read back from a mess
     expect(goalArgsOf("")).toBeNull();
   });
 });
+
+
