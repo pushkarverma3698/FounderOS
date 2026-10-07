@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockHitlGate = vi.fn();
 const mockExecute = vi.fn();
-const kick = vi.fn();
+const kick = vi.fn(async (..._a: unknown[]) => ({ status: "started" }));
 const audit = vi.fn(async () => ({ written: true }));
 const API = "OplifyMessage/oplify-messaging-api";
 const ISSUE_URL = `https://github.com/${API}/issues/41`;
@@ -58,7 +58,10 @@ vi.mock("../../../src/tools/coding-engine.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   readDefaultEngine: () => "agy",
 }));
-vi.mock("../../../src/tools/dispatch-tick.js", () => ({ kickDispatchTick: (...a: unknown[]) => kick(...a) }));
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({
+  startDispatchJob: (...a: unknown[]) => kick(...a),
+  startFailureNote: (n: number, repo: string, why: string) => `${repo}#${n} was filed but its run did not start: ${why}`,
+}));
 vi.mock("octokit", () => ({
   Octokit: vi.fn(() => ({
     paginate: gh.paginate,
@@ -166,13 +169,13 @@ describe("dispatch_antigravity_task on a request that names an existing issue", 
     // Pass P sees only the ask, so the ask carries what #41 says.
     expect(ask.ok && ask.ask).toContain("single product card");
     expect(gh.createComment).toHaveBeenCalledOnce();
-    expect(kick).toHaveBeenCalledWith(41, API);
+    expect(kick).toHaveBeenCalledWith(41, API, "spec");
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "dispatch_antigravity_task" }));
 
     expect(res).toMatch(/#41/);
     expect(res).toMatch(/nothing new filed/i);
     expect(res).toContain(ISSUE_URL);
-    expect(res).toMatch(/No agent is on it yet/);
+    expect(res).not.toMatch(/did not start/);
   });
 
   it("not fixed yet, legacy pipeline: THIS issue gets agent:ready and its body is left alone", async () => {

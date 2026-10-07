@@ -100,13 +100,16 @@ async function choiceKeyboard(deps: GoalCommandDeps, choice: ChoiceRequest): Pro
   return { inline_keyboard: rows };
 }
 
-async function replyIssues(ctx: Context, deps: GoalCommandDeps, issues: readonly ParseIssue[], replyTo?: number): Promise<void> {
+async function replyIssues(ctx: Context, deps: GoalCommandDeps, issues: readonly ParseIssue[], replyTo?: number, rawArgs?: string): Promise<void> {
   const choice = issues.find((i) => i.choices !== undefined)?.choices;
   const keyboard = choice ? await choiceKeyboard(deps, choice) : undefined;
   const lines = [
     `❌ <b>Not done.</b> ${issues.length === 1 ? "One thing to fix" : `${issues.length} things to fix`}:`,
     ...issues.map((i) => `• <b>${esc(i.field)}</b>: ${esc(i.message)}`),
   ];
+  if (rawArgs) {
+    lines.push("", `Command: <code>/goal ${esc(rawArgs)}</code>`);
+  }
   if (choice?.kind === "metric-family") {
     lines.push("", "<b>Metrics</b>", ...METRIC_KEYS.map((k) => `• <code>${k}</code>: ${esc(METRICS[k].summary)}`));
   }
@@ -226,7 +229,7 @@ export async function dispatchGoalCommand(ctx: Context, deps: GoalCommandDeps, r
     ...(opts.metricOverride !== undefined ? { metricOverride: opts.metricOverride } : {}),
   });
   if (!parsed.ok) {
-    await replyIssues(ctx, deps, parsed.issues, opts.replyTo);
+    await replyIssues(ctx, deps, parsed.issues, opts.replyTo, rawArgs);
     return;
   }
   const command = parsed.command;

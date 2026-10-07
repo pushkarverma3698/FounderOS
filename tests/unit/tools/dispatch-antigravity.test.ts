@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 const mockIssuesCreate = vi.fn();
 const mockGetContent = vi.fn();
 const mockRepoGet = vi.fn();
-const mockKickDispatchTick = vi.fn();
+const mockStartDispatchJob = vi.fn(async (..._a: unknown[]): Promise<{ status: string; reason?: string }> => ({ status: "started" }));
 const mockReadDefaultEngine = vi.fn();
 
 vi.mock("octokit", () => {
@@ -27,7 +27,8 @@ vi.mock("octokit", () => {
 });
 
 vi.mock("../../../src/tools/dispatch-tick.js", () => ({
-  kickDispatchTick: mockKickDispatchTick,
+  startDispatchJob: mockStartDispatchJob,
+  startFailureNote: (n: number, repo: string, reason: string) => `could not start ${repo}#${n}: ${reason}`,
 }));
 
 // The default engine is a file under the real home directory. A test that read it would
@@ -354,26 +355,23 @@ describe("dispatchAntigravityTool.execute", () => {
     expect(schema?.required).not.toContain("engine");
   });
 
-  it("kicks the dispatcher for the issue it just filed", async () => {
-    // Without the kick the founder waits up to 15 minutes for the next cron tick with
-    // no visible sign anything happened.
+  it("starts the run for the issue it just filed (build stage for agent:ready)", async () => {
     mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
     await dispatchAntigravityTool.execute({ ...COMPLETE });
 
-    expect(mockKickDispatchTick).toHaveBeenCalledWith(524, "pushkarverma3698/FounderOS");
+    expect(mockStartDispatchJob).toHaveBeenCalledWith(524, "pushkarverma3698/FounderOS", "build");
   });
 
-  it("still reports success when the kick fails — cron is the guaranteed path", async () => {
+  it("tells the founder in the reply when the run could not start: success, plus a warning", async () => {
     mockIssuesCreate.mockResolvedValueOnce({ data: { ...issueCreated(), number: 525 } });
-    mockKickDispatchTick.mockImplementationOnce(() => {
-      throw new Error("spawn EACCES");
-    });
+    mockStartDispatchJob.mockResolvedValueOnce({ status: "failed", reason: "connect ENOENT /run/fos-job.sock" });
 
     const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
 
     expect(res.success).toBe(true);
     expect((res.data as { issue_number: number }).issue_number).toBe(525);
+    expect((res.data as { warnings: string[] }).warnings.join("\n")).toContain("could not start pushkarverma3698/FounderOS#525: connect ENOENT /run/fos-job.sock");
   });
 
   it("surfaces GitHub API errors cleanly without crashing", async () => {
@@ -406,7 +404,7 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
 
     expect(res.success).toBe(false);
     expect(mockIssuesCreate).not.toHaveBeenCalled();
-    expect(mockKickDispatchTick).not.toHaveBeenCalled();
+    expect(mockStartDispatchJob).not.toHaveBeenCalled();
     expect(res.error).toContain("nothing was filed on pushkarverma3698/FounderOS");
     expect(res.error).toContain('1. Section "## Evidence" is empty');
     expect(res.error).toContain("Pass it in the `evidence` input.");
@@ -455,7 +453,7 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     expect(filed).toContain("src/tools/index.ts");
     expect(filed).toContain("src/agents/supervisor.ts (unverified): Integrate Jev AI gateway.");
     expect((res.data as { warnings: string[] }).warnings[0]).toMatch(/^Not found in the repository, so filed as unverified hints, not facts: src\/agents\/supervisor\.ts, src\/tools\/brain\.ts\./);
-    expect(mockKickDispatchTick).toHaveBeenCalledTimes(1);
+    expect(mockStartDispatchJob).toHaveBeenCalledTimes(1);
   });
 
   it("turns the founder's own words into the Evidence when none was given, and never overrides evidence that was", async () => {

@@ -53,7 +53,7 @@ function publish(head: string): void {
   git(["push", "-q", "--force", bare, `${head}:refs/pull/56/head`, "beta:refs/heads/beta"]);
 }
 
-function sweep(head: string, gatedAt: string): void {
+function sweep(head: string, gatedAt: string, extraEnv: Record<string, string> = {}): void {
   spawnSync("bash", [SCRIPT], {
     env: {
       TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
@@ -67,6 +67,7 @@ function sweep(head: string, gatedAt: string): void {
       FAKE_COMMENTS: `<!-- brain-reviewed: ${gatedAt} -->`,
       GH_CALLS: ghCalls,
       CLAUDE_CALLS: claudeCalls,
+      ...extraEnv,
     },
     encoding: "utf8",
     timeout: 30_000,
@@ -109,6 +110,7 @@ beforeEach(() => {
 case "$*" in
   "api user"*) echo owner ;;
   "auth status"*) exit 0 ;;
+  "pr checks"*) echo "${"$"}{FAKE_CHECKS:-}" ;;
   "pr list"*) echo "56 $FAKE_HEAD beta task/issue-56-x" ;;
   *"headRefOid"*) echo "$FAKE_HEAD" ;;
   *"--json comments"*) echo "$FAKE_COMMENTS" ;;
@@ -142,6 +144,41 @@ describe("pr-brain — carrying a verdict forward over its own commits", () => {
     expect(ghLog()).toContain(`pr comment 56 --body <!-- brain-reviewed: ${head} -->`);
     // Already cleared → the merge is attempted without a new review.
     expect(ghLog()).toMatch(/pr merge 56 --squash/);
+  });
+
+  describe("with the coding pipeline on (AGENT_PIPELINE_V2=1)", () => {
+    /** The head a tap's branch update produces: pr-brain's gated head plus a clean merge of a moved beta. */
+    function updatedHead(): string {
+      git(["checkout", "-q", "beta"]);
+      commit(AGY, "other.txt", "beta moved on\n", "unrelated beta commit");
+      git(["checkout", "-q", "task/issue-762"]);
+      git([...BRAIN, "merge", "-q", "--no-edit", "beta"]);
+      const head = git(["rev-parse", "HEAD"]);
+      publish(head);
+      return head;
+    }
+
+    it("waits while the required checks on the updated head are still running: no stamp, no card built on UNKNOWN evidence", () => {
+      const head = updatedHead();
+      sweep(head, gated, { AGENT_PIPELINE_V2: "1", FAKE_CHECKS: '[{"bucket":"pending","name":"Unit + regression tests"}]' });
+      expect(claudeSessions()).toHaveLength(0);
+      expect(brainLog()).toMatch(/required CI is still running/);
+      expect(ghLog()).not.toContain("pr comment 56");
+      expect(ghLog()).not.toMatch(/pr merge 56/);
+    });
+
+    it("carries the verdict forward once the checks have finished", () => {
+      const head = updatedHead();
+      sweep(head, gated, { AGENT_PIPELINE_V2: "1", FAKE_CHECKS: '[{"bucket":"pass","name":"Unit + regression tests"}]' });
+      expect(brainLog()).toMatch(/carried forward/);
+      expect(ghLog()).toContain(`pr comment 56 --body <!-- brain-reviewed: ${head} -->`);
+    });
+
+    it("leaves the flag-off behaviour alone: carries forward without reading CI", () => {
+      const head = updatedHead();
+      sweep(head, gated, { FAKE_CHECKS: '[{"bucket":"pending","name":"Unit + regression tests"}]' });
+      expect(brainLog()).toMatch(/carried forward/);
+    });
   });
 
   it("still gates when anyone else pushed since the last gate", () => {

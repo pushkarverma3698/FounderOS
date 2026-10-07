@@ -1,147 +1,135 @@
 /**
- * Unit tests for the dispatch tick kick.
+ * Unit tests for starting a dispatch job (src/tools/dispatch-tick.ts).
  *
- * The kick used to spawn the dispatcher as a child of the bot. Under the bot's systemd sandbox
- * (NoNewPrivileges) that child could not `sudo`, so it paused the whole loop with a false "agy is not
- * installed" after every approved /task. It now leaves a note in a file that a per-minute cron job
- * (`agent-dispatch --kicked`) turns into a tick. Nothing in this file may start a process.
- *
- * The kick is a convenience: it saves up to 15 minutes of waiting for the VPS cron. It is never
- * load-bearing, so every failure mode must be silent and harmless. The issue is already filed by the
- * time this runs; cron is the guaranteed path and this only shortens it.
+ * One /task = one process that owns the job to its end. The bot's only act is to write one JSON line to the
+ * fos-job socket (systemd starts deploy/job-run for it, outside the bot's NoNewPrivileges sandbox). Unlike the
+ * kick file this replaced, this is THE path: when it cannot start a run the caller must be able to tell the
+ * founder, so the result says so. Nothing here may start a process.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { kickDispatchTick, kickFilePath } = await import("../../../src/tools/dispatch-tick.js");
+const { startDispatchJob, jobSocketPath, jobRequestLine, startFailureNote } = await import("../../../src/tools/dispatch-tick.js");
 
 const ORIGINAL_BIN = process.env["AGENT_DISPATCH_BIN"];
-const ORIGINAL_FILE = process.env["AGENT_DISPATCH_KICK_FILE"];
+const ORIGINAL_SOCK = process.env["FOS_JOB_SOCKET"];
+const REPO = "pushkarverma3698/FounderOS";
 
 beforeEach(() => {
   delete process.env["AGENT_DISPATCH_BIN"];
-  delete process.env["AGENT_DISPATCH_KICK_FILE"];
+  delete process.env["FOS_JOB_SOCKET"];
 });
 
 afterEach(() => {
   if (ORIGINAL_BIN) process.env["AGENT_DISPATCH_BIN"] = ORIGINAL_BIN;
   else delete process.env["AGENT_DISPATCH_BIN"];
-  if (ORIGINAL_FILE) process.env["AGENT_DISPATCH_KICK_FILE"] = ORIGINAL_FILE;
-  else delete process.env["AGENT_DISPATCH_KICK_FILE"];
+  if (ORIGINAL_SOCK) process.env["FOS_JOB_SOCKET"] = ORIGINAL_SOCK;
+  else delete process.env["FOS_JOB_SOCKET"];
 });
 
-describe("kickDispatchTick", () => {
-  it("does nothing when AGENT_DISPATCH_BIN is unset", () => {
-    // This is what keeps every test run, CI run and laptop run inert by default:
-    // only the VPS, where the dispatcher actually exists, sets this.
-    const write = vi.fn();
-    kickDispatchTick(123, "pushkarverma3698/FounderOS", write);
-    expect(write).not.toHaveBeenCalled();
+describe("startDispatchJob", () => {
+  it("is inert when AGENT_DISPATCH_BIN is unset: tests, CI and the laptop never touch a socket", async () => {
+    const send = vi.fn();
+    expect(await startDispatchJob(123, REPO, "build", send)).toEqual({ status: "inert" });
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it("does nothing when AGENT_DISPATCH_BIN is blank", () => {
+  it("is inert when AGENT_DISPATCH_BIN is blank", async () => {
     process.env["AGENT_DISPATCH_BIN"] = "   ";
-    const write = vi.fn();
-    kickDispatchTick(123, "pushkarverma3698/FounderOS", write);
-    expect(write).not.toHaveBeenCalled();
+    const send = vi.fn();
+    expect((await startDispatchJob(123, REPO, "spec", send)).status).toBe("inert");
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it("leaves one line, naming the repo and the issue, in the file the cron job watches", () => {
+  it("writes exactly one JSON line {repo, issue, stage} to /run/fos-job.sock by default", async () => {
     process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    process.env["AGENT_DISPATCH_KICK_FILE"] = "/home/founderos/.claude/agent-dispatch.kick";
-    const write = vi.fn();
+    const send = vi.fn().mockResolvedValue(undefined);
 
-    kickDispatchTick(670, "pushkarverma3698/FounderOS", write);
+    const r = await startDispatchJob(670, REPO, "spec", send);
 
-    expect(write).toHaveBeenCalledWith("/home/founderos/.claude/agent-dispatch.kick", "pushkarverma3698/FounderOS#670\n");
+    expect(r).toEqual({ status: "started" });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("/run/fos-job.sock", `${JSON.stringify({ repo: REPO, issue: 670, stage: "spec" })}\n`);
   });
 
-  it("records an Oplify repo the same way (a bare number is ambiguous across the four repos)", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    const write = vi.fn();
+  it("FOS_JOB_SOCKET overrides the socket path", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    process.env["FOS_JOB_SOCKET"] = "/tmp/other.sock";
+    const send = vi.fn().mockResolvedValue(undefined);
 
-    kickDispatchTick(42, "OplifyMessage/oplify-messaging-api", write);
+    await startDispatchJob(1, REPO, "build", send);
 
-    expect(write).toHaveBeenCalledWith(expect.stringContaining("agent-dispatch.kick"), "OplifyMessage/oplify-messaging-api#42\n");
+    expect(send.mock.calls[0]?.[0]).toBe("/tmp/other.sock");
+    expect(jobSocketPath()).toBe("/tmp/other.sock");
   });
 
-  it("defaults to ~/.claude/agent-dispatch.kick, the file deploy/agent-dispatch reads", () => {
-    expect(kickFilePath()).toMatch(/\.claude[\\/]agent-dispatch\.kick$/);
+  it("a refused or missing socket comes back as a failure with the reason, never a throw", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn().mockRejectedValue(new Error("connect ENOENT /run/fos-job.sock"));
+
+    const r = await startDispatchJob(670, REPO, "build", send);
+
+    expect(r).toEqual({ status: "failed", reason: "connect ENOENT /run/fos-job.sock" });
   });
 
-  it("really appends to the file, one line per kick, creating the directory", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kick-"));
+  it("refuses a bad issue number or repo before it reaches the socket", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn();
+
+    for (const n of [0, -1, Number.NaN, 1.5]) expect((await startDispatchJob(n, REPO, "build", send)).status).toBe("failed");
+    for (const repo of ["", "  ", "no-slash", "a/b/c", "o/r;rm -rf", "o/r\nx"]) {
+      expect((await startDispatchJob(5, repo, "build", send)).status).toBe("failed");
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("jobRequestLine carries the repo exactly as given (trimmed): the dispatcher matches it by name", () => {
+    expect(jobRequestLine(7, ` ${REPO} `, "build")).toBe(`{"repo":"${REPO}","issue":7,"stage":"build"}\n`);
+  });
+
+  it("startFailureNote names the issue and gives the founder the check to run", () => {
+    const note = startFailureNote(41, REPO, "connect ENOENT /run/fos-job.sock");
+    expect(note).toContain(`${REPO}#41`);
+    expect(note).toContain("connect ENOENT /run/fos-job.sock");
+    expect(note).toContain("systemctl status fos-job.socket");
+  });
+
+  it("really delivers one line over a unix socket, and fails when nothing listens", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "job-sock-"));
+    const path = join(dir, "s.sock");
+    const received: string[] = [];
+    let server: Server | undefined;
     try {
-      process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-      process.env["AGENT_DISPATCH_KICK_FILE"] = join(dir, "nested", ".claude", "agent-dispatch.kick");
+      server = createServer((c) => {
+        let buf = "";
+        c.on("data", (d) => (buf += d.toString()));
+        c.on("end", () => received.push(buf));
+      });
+      await new Promise<void>((res) => server!.listen(path, res));
+      process.env["AGENT_DISPATCH_BIN"] = "/x";
+      process.env["FOS_JOB_SOCKET"] = path;
 
-      kickDispatchTick(1, "pushkarverma3698/FounderOS");
-      kickDispatchTick(2, "OplifyMessage/oplify-messaging-app");
+      expect(await startDispatchJob(9, REPO, "build")).toEqual({ status: "started" });
+      await vi.waitFor(() => expect(received).toHaveLength(1));
+      expect(JSON.parse(received[0]!.trim())).toEqual({ repo: REPO, issue: 9, stage: "build" });
 
-      expect(readFileSync(process.env["AGENT_DISPATCH_KICK_FILE"], "utf8")).toBe(
-        "pushkarverma3698/FounderOS#1\nOplifyMessage/oplify-messaging-app#2\n",
-      );
+      await new Promise((res) => server!.close(res));
+      server = undefined;
+      const r = await startDispatchJob(9, REPO, "build");
+      expect(r.status).toBe("failed");
     } finally {
+      server?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   it("never starts a process: that is exactly what could not work under the bot's sandbox", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
     const source = readFileSync(new URL("../../../src/tools/dispatch-tick.ts", import.meta.url), "utf8");
-    // Comments explain the history; only code is checked.
     const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/child_process|spawn\(|exec\(|execFile/);
-  });
-
-  it("swallows a throwing writer — the issue is already filed", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    const write = vi.fn(() => {
-      throw new Error("EACCES");
-    });
-
-    expect(() => kickDispatchTick(670, "pushkarverma3698/FounderOS", write)).not.toThrow();
-    expect(write).toHaveBeenCalled();
-  });
-
-  it("swallows an unwritable path when the real writer is used", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kick-"));
-    try {
-      // A FILE where the directory should be: mkdir fails at once with ENOTDIR, for root and for anyone else.
-      // Not a path under /proc: on Linux Node's recursive mkdir never returns there (procfs answers ENOENT for
-      // a path whose parent exists, and it retries forever). That froze the CI test job for 25 minutes.
-      writeFileSync(join(dir, "blocker"), "");
-      process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-      process.env["AGENT_DISPATCH_KICK_FILE"] = join(dir, "blocker", "nested", "agent-dispatch.kick");
-
-      expect(() => kickDispatchTick(670, "pushkarverma3698/FounderOS")).not.toThrow();
-      expect(existsSync(join(dir, "blocker", "nested"))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses a non-positive issue number rather than leaving a note nothing can act on", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    const write = vi.fn();
-
-    kickDispatchTick(0, "pushkarverma3698/FounderOS", write);
-    kickDispatchTick(-1, "pushkarverma3698/FounderOS", write);
-    kickDispatchTick(Number.NaN, "pushkarverma3698/FounderOS", write);
-
-    expect(write).not.toHaveBeenCalled();
-  });
-
-  it("refuses a blank repo", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    const write = vi.fn();
-
-    kickDispatchTick(670, "", write);
-    kickDispatchTick(670, "   ", write);
-
-    expect(write).not.toHaveBeenCalled();
   });
 });

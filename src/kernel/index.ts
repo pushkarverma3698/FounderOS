@@ -73,6 +73,7 @@ export {
 } from "./tool-output-guard.js";
 export { recordTurnSafely, type TurnLog } from "./turn-log.js";
 export { renderScreenBlock, screenBlockFor, type ScreenSource } from "./screen.js";
+export { AGENT_ORIGINS, RECENT_ACTIVITY_WINDOW_HOURS, recentActivityBlockFor, type ActivityRow, type RecentActivitySource } from "./recent-activity.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

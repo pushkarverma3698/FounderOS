@@ -23,7 +23,7 @@ vi.mock("octokit", () => ({
   })),
 }));
 
-vi.mock("../../../src/tools/dispatch-tick.js", () => ({ kickDispatchTick: vi.fn() }));
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({ startDispatchJob: vi.fn().mockResolvedValue({ status: "inert" }), startFailureNote: () => "" }));
 
 vi.mock("../../../src/tools/coding-engine.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),

@@ -244,6 +244,20 @@ describe("metric choice buttons", () => {
     expect(await h.repo.listOpenGoals("t")).toEqual([]);
   });
 
+  it("continues add when command text is embedded in message text, such as from confirmation cards", async () => {
+    const h = makeDeps();
+    const data = dataFor({ kind: "metric", family: "manual" });
+    const c = await tap(h, data, {
+      callback: {
+        data,
+        messageId: 90,
+        messageText: "❌ Not done. 1 thing to fix:\n• metric: metric is missing\nCommand: <code>/goal add Ship a fix | target=1</code>",
+      },
+    });
+    const [goal] = await h.repo.listOpenGoals("t");
+    expect(goal).toMatchObject({ title: "Ship a fix", metric_key: "manual", target: 1 });
+  });
+
   it("keeps every button it sends inside 64 bytes", async () => {
     const h = makeDeps();
     const data = dataFor({ kind: "metric", family: "prs_merged_7d" });
@@ -251,3 +265,4 @@ describe("metric choice buttons", () => {
     for (const b of c.replies[0]!.opts!.reply_markup!.inline_keyboard.flat()) expect(Buffer.byteLength(b.callback_data, "utf8")).toBeLessThanOrEqual(64);
   });
 });
+

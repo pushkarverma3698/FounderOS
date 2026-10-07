@@ -10,8 +10,8 @@
  *   - a normal sweep leaves the report, with the script's own defaults when the cron line sets nothing and the
  *     cron line's values when it does;
  *   - the report is written EVEN WHEN the kill switch is on, so /review off still shows the models;
- *   - a run that is not the cron's (--dry-run, --list, --repo, --pr, --issue, --check-brief, an idle --kicked
- *     tick) does not overwrite it: a manual run lacks the cron line's variables and would report the wrong models;
+ *   - a run that is not the cron's (--dry-run, --list, --repo, --pr, --issue, --check-brief, a
+ *     --stage job) does not overwrite it: a manual run lacks the cron line's variables and would report the wrong models;
  *   - a report that cannot be written never stops a sweep.
  */
 
@@ -78,8 +78,8 @@ describe("agent-dispatch reports its writer models", () => {
     expect(sb.hasState("agent-dispatch.effective")).toBe(false);
   });
 
-  it("--kicked with no kick note stays free: it writes nothing", () => {
-    sb.tick({ args: ["--kicked"] });
+  it("a --stage job writes nothing", () => {
+    sb.tick({ args: ["--issue", "1", "--repo", "o/r", "--stage", "spec"] });
     expect(sb.hasState("agent-dispatch.effective")).toBe(false);
   });
 
