@@ -93,6 +93,7 @@ describe("buildDepartmentsSummary (the stored founderos_departments is generated
   it("sends 'what is running right now' to the live source instead of describing it", () => {
     expect(summary).toContain("ops_state");
     expect(summary).toContain("background_jobs");
+    expect(summary).toContain("which commit is deployed");
   });
 
   it("does not drift when a tool is added: it is computed from the same registry as the manifest", () => {

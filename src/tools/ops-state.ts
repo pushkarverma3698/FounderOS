@@ -7,7 +7,8 @@
  *   - hitl_approvals
  *   - action_log
  *   - costs (job_ingest_runs)
- *   - background_jobs (the VPS daemons and the bot's own routines: files and a registry, no database)
+ *   - background_jobs (the VPS daemons and the bot's own routines: files and a registry, no database;
+ *     also `deployed`, the commit this process booted on)
  *
  * Always returns `{ count, total, scope, rows }`.
  */
@@ -32,10 +33,11 @@ export const opsStateTool: UnifiedTool = {
     "'costs' (money spent on AI calls — dollar totals and per-model breakdown), " +
     "'job_runs' (job sweep throughput — requested/returned/screened/passed counts), " +
     "'background_jobs' (what is running without being asked: automatic PR review, coding dispatch and the built-in routines — " +
-    "on/off/paused, the models in use, and what needs attention). " +
+    "on/off/paused, the models in use, what needs attention, and which commit is deployed). " +
     "Use 'costs' for any question about spend, budget or what something cost; " +
-    "use 'background_jobs' for 'what is running', 'is review on', 'which model reviews'. " +
-    "Returns { count, total, scope, rows }; 'costs' also returns { totals }; 'background_jobs' also returns { summary, attention }.",
+    "use 'background_jobs' for 'what is running', 'is review on', 'which model reviews', " +
+    "'what is live / what is deployed / did X ship / is the fix deployed'. " +
+    "Returns { count, total, scope, rows }; 'costs' also returns { totals }; 'background_jobs' also returns { summary, attention, deployed }.",
 
   input_schema: {
     type: "object",
@@ -71,7 +73,7 @@ export const opsStateTool: UnifiedTool = {
       const view = readBackgroundJobs();
       return {
         success: true,
-        data: JSON.stringify({ count: view.jobs.length, total: view.jobs.length, scope, summary: view.summary, attention: view.attention, rows: view.jobs }, null, 2),
+        data: JSON.stringify({ count: view.jobs.length, total: view.jobs.length, scope, summary: view.summary, attention: view.attention, deployed: view.deployed, rows: view.jobs }, null, 2),
         observed: { kind: "record", evidence: `scope:${scope},count:${view.jobs.length},attention:${view.attention.length}` },
       };
     }
