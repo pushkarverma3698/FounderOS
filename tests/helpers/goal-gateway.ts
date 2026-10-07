@@ -27,7 +27,7 @@ export interface CtxOptions {
   readonly chatId?: number;
   readonly chatType?: "private" | "supergroup";
   /** A callback tap: its data, and the message the button sits on (with the message it replies to). */
-  readonly callback?: { data: string; messageId?: number; replyTo?: { text?: string; message_id: number } };
+  readonly callback?: { data: string; messageId?: number; messageText?: string; replyTo?: { text?: string; message_id: number } };
 }
 
 export function makeCtx(o: CtxOptions = {}) {
@@ -45,6 +45,7 @@ export function makeCtx(o: CtxOptions = {}) {
           data: o.callback.data,
           message: {
             message_id: o.callback.messageId ?? 50,
+            ...(o.callback.messageText ? { text: o.callback.messageText } : {}),
             ...(o.callback.replyTo ? { reply_to_message: o.callback.replyTo } : {}),
           },
         }

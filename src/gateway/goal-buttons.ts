@@ -77,8 +77,11 @@ async function planNextStep(ctx: Context, deps: GoalCommandDeps, goalId: string)
 async function continueAdd(ctx: Context, deps: GoalCommandDeps, metricOverride: string): Promise<void> {
   const message = ctx.callbackQuery?.message as unknown as PickerMessage | undefined;
   const original = message?.reply_to_message;
-  const args = original?.text === undefined ? null : goalArgsOf(original.text);
-  if (original === undefined || args === null) {
+  let args = original?.text === undefined ? null : goalArgsOf(original.text);
+  if (args === null && (message as Record<string, unknown> | undefined)?.text !== undefined) {
+    args = goalArgsOf(String((message as Record<string, unknown>).text));
+  }
+  if (args === null) {
     await ctx.answerCallbackQuery({ text: "I can no longer read your original /goal message. Send the command again.", show_alert: true });
     return;
   }
@@ -92,7 +95,8 @@ async function continueAdd(ctx: Context, deps: GoalCommandDeps, metricOverride: 
   } catch {
     // allow-failopen: clearing a spent keyboard is cosmetic (the message may be too old to edit); the goal step below is the actual work.
   }
-  await dispatchGoalCommand(ctx, deps, args, { replyTo: original.message_id, metricOverride });
+  const replyTo = original?.message_id ?? message?.message_id;
+  await dispatchGoalCommand(ctx, deps, args, { ...(replyTo !== undefined ? { replyTo } : {}), metricOverride });
 }
 
 /** Handle a goal button. Returns false for a payload that is not a goal button, so the other handlers still see it. */
