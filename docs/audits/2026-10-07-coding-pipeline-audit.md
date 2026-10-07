@@ -70,3 +70,20 @@ For 3 to 5 days nothing gets better, and new code brings new seams.
 
 **My view:** build A now. Then move to B one hop at a time, starting with verify → merge (the hop
 that failed today), and judge each step by whether the canary stays green.
+
+## Who is fixing what (10-07, 13:15Z) and what is still missing
+
+| Session | Branch / PR | Fixes | State |
+|---|---|---|---|
+| Fix evidence-card stale base and missing PR name | `claude/relaxed-turing-0566f6`, no PR yet | A beta move before the tap strands the merge card; the card does not name its PR | Running, 2 min old |
+| Read the issue before "start work on issue N" | draft #985 | The planner filed junk Oplify #83 for work PR #81 had already done | Pushed, idle, needs review |
+| Alert when agent-dispatch cannot reach a repo | `claude/strange-nightingale-90c5cf`, uncommitted edits to `deploy/agent-dispatch` | 600 silent OplifyMessage errors | Running |
+| Agent-dispatch repo unreachable alerts | `claude/dispatch-unreachable-repo-alert-be6046` | Same item as the row above | Running, **duplicate**: no edits, nothing pushed. Stop one. |
+
+Not covered by any session:
+1. **The OplifyMessage token.** The alert only reports the failure; the daemons still cannot reach the repo until the founder issues a token.
+2. **Nothing sends merge cards on its own.** pr-brain is off by the founder's `/review`; #974's card was sent by hand. Every later task stalls at the same place until it is turned on.
+3. **#966/#967** has a spec card from 02:31Z nobody approved, and #967 is blocked after 3 fix attempts.
+4. **No canary** (option A). All three open fixes make the chain stall less often, and none makes a stall visible.
+5. **Beta must stay still until the founder taps #974's card.** #939 (sync main into beta) is CLEAN and not on auto-merge. #984 and #985 also move beta when merged. The tap is refused after any of them, until the session above fixes the re-card path.
+6. **Stale open PRs**: #923, #963, #970 and #939 sit open on beta. Each is a possible beta move.
