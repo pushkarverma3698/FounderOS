@@ -283,7 +283,7 @@ warn_once() {
 
 warn_if_token_old() {
   local created="$1" created_epoch now_epoch age
-  if ! [[ "$created" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || ! created_epoch="$(date -u -d "$created" +%s 2>/dev/null)"; then
+  if ! [[ "$created" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || ! created_epoch="$(date -u -d "$created" +%s 2>/dev/null || date -u -j -f '%Y-%m-%d %H:%M:%S' "$created 00:00:00" +%s 2>/dev/null)"; then
     warn_once "token-no-date" "$TOKEN_FILE has no creation date on line 2 (expected YYYY-MM-DD), so the token's age cannot be watched. Fix: add the date the token was created as line 2."
     return 0
   fi
