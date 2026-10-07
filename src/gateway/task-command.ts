@@ -28,7 +28,7 @@
  */
 
 import type { Context } from "grammy";
-import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos, resolveRepoAlias } from "../tools/dispatch-repos.js";
+import { DISPATCH_REPO_ALLOWLIST, findRepoNamedInText, matchAllowlistedRepos, resolveRepoAlias } from "../tools/dispatch-repos.js";
 import { validateProjectRepoName } from "../tools/create-project-repo.js";
 import { engineDisplay, engineFromCommand, type Engine } from "../tools/coding-engine.js";
 import { REVIEWER_PHRASE } from "../tools/dispatch-roles.js";
@@ -118,7 +118,10 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
     // A first word that IS a repo (exact name or short alias, never a substring) names it, so the
     // founder is not asked about a repository he just typed. Anything looser is a question.
     const alias = resolveRepoAlias(first?.replace(/[:,]+$/, "") ?? "", registered);
-    if (!alias) return { ok: false, kind: "needs-repo", text: trimmed };
+    if (!alias) {
+      const named = findRepoNamedInText(trimmed, registered); // named later: "In oplify-messaging-api start work on #41"
+      return named ? { ok: true, args: { repo: named, text: trimmed } } : { ok: false, kind: "needs-repo", text: trimmed };
+    }
     const aliasText = rest.join(" ").trim();
     if (!aliasText) return { ok: false, kind: "needs-work", message: USAGE, repo: alias };
     return { ok: true, args: { repo: alias, text: aliasText } };

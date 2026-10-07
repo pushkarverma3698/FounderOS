@@ -110,7 +110,7 @@ export function receiptsBlock(results: StepResult[]): string {
  */
 export function founderReceiptsBlock(results: StepResult[]): string {
   if (results.some((r) => r.status === "failed")) return "";
-  const count = okReceipts(results).filter((t) => HITL_GATED_TOOLS.has(t.tool)).length;
+  const count = okReceipts(results).filter((t) => HITL_GATED_TOOLS.has(t.tool) && t.acted !== false).length;
   if (count === 0) return "";
   const noun = count === 1 ? "action" : "actions";
   return `\n\n—\n✓ ${count} ${noun} completed and verified`;
