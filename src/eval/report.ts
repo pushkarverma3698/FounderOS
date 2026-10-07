@@ -32,6 +32,12 @@ function describeFailure(r: TaskResult): string {
   if (!r.hitlCorrect) {
     lines.push(`hitl: expected \`${r.task.expectsHitl}\`, got \`${r.observation.hadInterrupt}\``);
   }
+  if (!r.mentionsCorrect) {
+    const reply = (r.observation.reply ?? "").toLowerCase();
+    const missing = (r.task.mustMention ?? []).filter((m) => !reply.includes(m.toLowerCase()));
+    const forbidden = (r.task.mustNotMention ?? []).filter((m) => reply.includes(m.toLowerCase()));
+    lines.push(`reply: missing [${missing.join(", ")}], forbidden present [${forbidden.join(", ")}]`);
+  }
   if (r.observation.error) {
     lines.push(`error: ${r.observation.error}`);
   }
