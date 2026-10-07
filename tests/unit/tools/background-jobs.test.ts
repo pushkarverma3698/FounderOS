@@ -33,8 +33,11 @@ function deps(files: Record<string, string | Error>, engine: "agy" | "claude" = 
     },
     now: () => NOW,
     engine: () => engine,
+    deployed: () => DEPLOYED,
   };
 }
+
+const DEPLOYED = 'Deployed: fec3075 "fix(pr-brain): kill switch (#996)" (2026-10-07 08:42 UTC), process started 2026-10-07 09:50 UTC';
 
 const HEALTHY = { "pr-brain.effective": FRESH_BRAIN, "agent-dispatch.effective": FRESH_DISPATCH };
 
@@ -79,6 +82,20 @@ describe("background_jobs — healthy", () => {
       expect(r.detail.length).toBeGreaterThan(10);
       expect(r.state).toBe("on");
     }
+  });
+});
+
+describe("background_jobs — which commit is live", () => {
+  it("carries the deployed line as its own field, whatever else is off", () => {
+    expect(readBackgroundJobs(deps(HEALTHY)).deployed).toBe(DEPLOYED);
+    expect(readBackgroundJobs(deps({ ...HEALTHY, "pr-brain.off": "switched off\n" })).deployed).toBe(DEPLOYED);
+    expect(readBackgroundJobs(deps({})).deployed).toBe(DEPLOYED);
+  });
+
+  it("leaves the summary and the attention list alone, so a known deploy is never an alarm", () => {
+    const view = readBackgroundJobs(deps(HEALTHY));
+    expect(view.summary).not.toContain("Deployed");
+    expect(view.attention).toEqual([]);
   });
 });
 

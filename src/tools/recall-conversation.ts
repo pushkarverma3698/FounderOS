@@ -65,6 +65,7 @@ const SHOWN_MORE = 12;
 const QUOTE_MAX = 160;
 const REPLY_MAX = 240;
 const MAX_DAYS_BACK = 3650;
+const RECENT_DAYS = 3;
 
 // ── Time, said the human way ──────────────────────────────────────────────────
 
@@ -182,7 +183,9 @@ export function resolveRecallWindow(phrase: string, now: Date, tz: string): Reca
 
   if (text === "this week") return toNow((todayWd + 6) % 7);
   if (text === "last week") return toNow((todayWd + 6) % 7 + 7);
-  if (text === "recently" || text === "lately" || text === "a few days ago" || text === "other day") return toNow(7);
+  // Loose recency ("recent", "the last few days") is the past 3 days; the planner says "recent" and refusing it ended a prod turn.
+  if (text === "recent" || text === "recently" || text === "lately" || /^(?:past|last|previous) few days$/.test(text)) return toNow(RECENT_DAYS);
+  if (text === "a few days ago" || text === "other day") return toNow(7);
   if (text === "this month" || text === "last month") {
     const mo = text === "this month" ? today.mo : today.mo - 1;
     return window(zonedTimeToUtc(today.y, mo, 1, 0, 0, tz), at(1));
