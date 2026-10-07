@@ -275,7 +275,7 @@ export const githubTool: UnifiedTool = {
             owner, repo, state: "open", per_page: 30, sort: "updated",
           });
           return listResult(
-            issues.map((i) => ({
+            issues.filter((i) => !i.pull_request).map((i) => ({
               number: i.number,
               title: i.title,
               state: i.state,
