@@ -25,7 +25,19 @@ simple fix never lands, and fix it at the root. The audit is
 - The offline chain test (`tests/unit/tools/pipeline-chain-e2e.test.ts`) now spells the repo the
   way pr-brain does. It fails on the old code (4 of 6 tests) and passes on the new one.
 
+## On prod
+
+- #983 deployed 10-07 12:47Z (67204008); `/opt/founderos` code and `~/bin/lib` match the repo.
+- The two contract files written before the fix were copied to lowercase names, byte-identical.
+- A dry run of the deployed card step against a throwaway contracts dir gave CARD, `mergeable:true`.
+- The real card went out by hand at 12:52Z (pr-brain is off): Telegram message 11683, merge record
+  `MesXX0gez48TIEUb.json`, base pinned at beta dd6da94b.
+
 ## Left open
+
+- The founder taps merge on #974. Nothing else may merge into beta first: the record pins beta's
+  sha, the tap then refuses, and pr-brain skips a PR already gated at the same head, so no new card
+  comes (read from the code, not run). The card text also does not name its PR.
 
 - The daemons' GitHub token cannot see OplifyMessage: 600 "Could not resolve to a Repository" lines
   since 10-06 11:00Z, and no alert. The founder has to issue a token; a fine-grained token covers

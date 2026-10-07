@@ -18,7 +18,7 @@ Covers the coding pipeline, the context it runs on, and the Telegram chat for 10
 
 | Task | Where it stopped | Root cause | Status |
 |---|---|---|---|
-| #972, PR #974: `list_issues` returns PRs | pr-brain cleared it 06:54Z; no merge card was ever sent | (1) Contract file is `…__FounderOS__972.json`, pr-brain looks up `…/founderos` (its checkout dir name) and finds nothing. (2) The 56-line locked test that Pass P wrote counted against the executor's 1 file / 20 line limit. | Fixed in #982 |
+| #972, PR #974: `list_issues` returns PRs | pr-brain cleared it 06:54Z; no merge card was ever sent | (1) Contract file is `…__FounderOS__972.json`, pr-brain looks up `…/founderos` (its checkout dir name) and finds nothing. (2) The 56-line locked test that Pass P wrote counted against the executor's 1 file / 20 line limit. | Fixed in #982, on prod 10-07 12:47Z (67204008). Card sent 12:52Z with every check PASS; waiting for the founder's tap |
 | Oplify #41 (10-07 10:40) | Bot asked "which repo?" though the message named it, carded the wrong repo, then filed junk issue #83 ("Start work on issue #41") and said an agent had claimed it | The daemons' GitHub token is scoped to `pushkarverma3698` only. `agent-dispatch.log` has 600 "Could not resolve to a Repository" lines for OplifyMessage since 10-06 11:00Z, and nobody was told. The planner never read #41, which PR #81 already fixed on 10-06. | Token: founder. Alert and read-before-create: not built |
 | #966, `/goal` fix | PR #967 hit 3 review-fix attempts and was blocked. A new spec card went out 10-07 02:31Z and was never approved. | Vague free-text brief on the old path | Waiting on the spec card, or close it |
 | #956 | 403 on the token, then the test already passed (fixed earlier by #834), then the executor made 0 commits | No fail-first check at the time | Closed. #968 now stops this case before a card goes out. |
@@ -40,6 +40,11 @@ Other chat failures in the window:
    directory name in pr-brain. Nothing carries one typed record from start to merge.
 4. **Failures are quiet.** 600 unreachable-repo errors and not one message. #974 was cleared, but
    the founder got only "Merge: not attempted — PR_BRAIN_MERGE=0, a human merges", with no button.
+
+The next seam, found while sending #974's card (read from the code, not yet run): the merge record
+pins beta's sha. If anything else merges into beta before the tap, the tap is refused with "A fresh
+evidence card follows", but pr-brain skips a PR it already gated at the same head, so that card
+never comes. The card text also does not name the PR it is for.
 
 ## Options for "replace it with simple LangGraph nodes"
 
