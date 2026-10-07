@@ -8,6 +8,7 @@ import { Octokit } from "octokit";
 import { TENANT } from "../core/config.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import { contractsDir, type StoreFs } from "../tools/contract-store.js";
+import { startDispatchJob } from "../tools/dispatch-tick.js";
 import type { CodingDeps } from "./coding-callbacks.js";
 
 export const realFs: StoreFs = {
@@ -55,6 +56,7 @@ export function liveCodingDeps(env: Record<string, string | undefined> = process
       const { owner, repo } = split(slug);
       await client().rest.issues.createComment({ owner, repo, issue_number: issue, body });
     },
+    startJob: (slug, issue, stage) => startDispatchJob(issue, slug, stage),
     async inspectPr(slug, pr) {
       const octokit = client();
       const { owner, repo } = split(slug);
@@ -73,6 +75,10 @@ export function liveCodingDeps(env: Record<string, string | undefined> = process
       const { owner, repo } = split(slug);
       const res = await client().rest.pulls.merge({ owner, repo, pull_number: pr, merge_method: "squash", sha });
       return res.data.sha;
+    },
+    async updateBranch(slug, pr, expectedHead) {
+      const { owner, repo } = split(slug);
+      await client().rest.pulls.updateBranch({ owner, repo, pull_number: pr, expected_head_sha: expectedHead });
     },
     alreadyDone: (key) => hasBeenAudited(key),
     async audit(row) {
