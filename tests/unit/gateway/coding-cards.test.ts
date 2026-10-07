@@ -63,6 +63,7 @@ function evidence(over: Partial<EvidenceCardInput> = {}): EvidenceCardInput {
     notVerified: [],
     prUrl: "https://github.com/acme/widgets/pull/9",
     nonce: "abc123",
+    subject: { repo: "acme/widgets", pr: 9, issue: 12, title: "Fix the health check" },
   };
   return Object.assign({}, base, over);
 }
@@ -149,6 +150,24 @@ describe("renderEvidenceCard", () => {
     expect(b.find((x) => x.callback_data === "cp:merge:abc123")?.text).toContain("Merge");
     expect(b.find((x) => x.url)?.url).toBe("https://github.com/acme/widgets/pull/9");
     expect(b.some((x) => x.callback_data?.startsWith("cp:merge_ack:"))).toBe(false);
+  });
+
+  it("opens with the repo, PR number, issue number and PR title, so the card names what it is about", () => {
+    const first = renderEvidenceCard(evidence()).html[0]!.split("\n")[0]!;
+    expect(first).toBe("<b>Evidence</b> for acme/widgets#9 (issue #12): Fix the health check");
+  });
+
+  it("escapes the PR title and keeps it on one line", () => {
+    const title = LT + "script>alert(1)" + LT + "/script>\nsecond line";
+    const first = renderEvidenceCard(evidence({ subject: { repo: "acme/widgets", pr: 9, issue: 12, title } })).html[0]!.split("\n")[0]!;
+    expect(first).not.toContain(LT + "script");
+    expect(first).toContain("&lt;script&gt;");
+    expect(first).toContain("second line");
+  });
+
+  it("a PR with no title still names itself", () => {
+    const first = renderEvidenceCard(evidence({ subject: { repo: "acme/widgets", pr: 9, issue: 12, title: "  " } })).html[0]!.split("\n")[0]!;
+    expect(first).toBe("<b>Evidence</b> for acme/widgets#9 (issue #12): (no title)");
   });
 
   it("null review is ? UNKNOWN, never a tick, and offers no merge", () => {

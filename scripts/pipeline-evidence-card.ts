@@ -72,6 +72,7 @@ interface PrFacts {
   baseRef: string;
   baseSha: string;
   url: string;
+  title: string;
 }
 
 async function ghJson(gh: GhRunner, endpoint: string): Promise<unknown> {
@@ -85,7 +86,7 @@ async function ghJson(gh: GhRunner, endpoint: string): Promise<unknown> {
 }
 
 async function readPr(gh: GhRunner, repo: string, pr: number): Promise<PrFacts> {
-  const p = (await ghJson(gh, `repos/${repo}/pulls/${pr}`)) as { state?: unknown; html_url?: unknown; head?: { sha?: unknown }; base?: { ref?: unknown } };
+  const p = (await ghJson(gh, `repos/${repo}/pulls/${pr}`)) as { state?: unknown; title?: unknown; html_url?: unknown; head?: { sha?: unknown }; base?: { ref?: unknown } };
   const baseRef = p.base?.ref;
   if (typeof p.state !== "string" || typeof p.head?.sha !== "string" || typeof baseRef !== "string" || typeof p.html_url !== "string") {
     throw new Error("the pull request response lacks state, head, base or url");
@@ -94,7 +95,7 @@ async function readPr(gh: GhRunner, repo: string, pr: number): Promise<PrFacts> 
   // The PR's own base.sha is where it branched; the tip of the base branch is what a merge lands on (as coding-callbacks-live.ts reads it).
   const ref = (await ghJson(gh, `repos/${repo}/git/ref/heads/${baseRef}`)) as { object?: { sha?: unknown } };
   if (typeof ref.object?.sha !== "string" || !/^[0-9a-f]{40}$/.test(ref.object.sha)) throw new Error("the base branch tip is not a sha");
-  return { state: p.state, headSha: p.head.sha, baseRef, baseSha: ref.object.sha, url: p.html_url };
+  return { state: p.state, headSha: p.head.sha, baseRef, baseSha: ref.object.sha, url: p.html_url, title: typeof p.title === "string" ? p.title : "" };
 }
 
 export async function runEvidenceCard(argv: string[], env: Record<string, string | undefined>, deps: EvidenceCardDeps): Promise<string> {
@@ -144,6 +145,7 @@ export async function runEvidenceCard(argv: string[], env: Record<string, string
       notVerified,
       prUrl: facts.url,
       nonce,
+      subject: { repo: a.repo, pr: a.pr, issue: a.issue, title: facts.title },
     });
   } catch (err) {
     return failed("card: " + errText(err));
