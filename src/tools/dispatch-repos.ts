@@ -214,3 +214,24 @@ export function resolveRepoAlias(word: string, registered: readonly string[] = [
   });
   return exact.length === 1 ? (exact[0] as string) : null;
 }
+
+/** Aliases that are also ordinary words in a task ("try it in a sandbox"): they name a repo only as the first word. */
+const FIRST_WORD_ONLY = new Set(["sandbox"]);
+const REPO_PREFIX_IN_TEXT = "repo:";
+
+/**
+ * The one repo a request names ANYWHERE in its text, or null: a github.com URL, `owner/repo`, `name#41`, or a word
+ * that resolveRepoAlias accepts exactly. Prod 2026-10-07: "/task In oplify-messaging-api \nStart work on issue #41."
+ * was asked "Which repo?" because only the first word was read. Two different repos named is still a question, and
+ * a `repo:` token anywhere but first stays text (it is honoured only as the first token).
+ */
+export function findRepoNamedInText(text: string, registered: readonly string[] = []): string | null {
+  const words = [...text.matchAll(/github\.com\/([\w.-]+\/[\w.-]+)/gi)].map((m) => m[1] ?? "");
+  for (const token of text.split(/\s+/)) {
+    if (token.toLowerCase().startsWith(REPO_PREFIX_IN_TEXT) || /github\.com\//i.test(token)) continue;
+    const word = token.replace(/^[("'“‘[]+/, "").replace(/[)"'”’\].,:;!?]+$/, "").replace(/#\d+$/, "");
+    if (word && !FIRST_WORD_ONLY.has(word.toLowerCase())) words.push(word);
+  }
+  const named = new Set(words.map((w) => resolveRepoAlias(w, registered)).filter((r): r is string => r !== null));
+  return named.size === 1 ? ([...named][0] as string) : null;
+}

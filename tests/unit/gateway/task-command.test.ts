@@ -788,11 +788,28 @@ describe("parseTaskArgs — repo alias as the first word", () => {
   });
 
   it("does NOT read loose words as aliases: a substring is a guess, and a guess retargets the dispatch", () => {
-    for (const raw of ["app fix the login", "api is slow", "frontend needs a fix", "of course fix it", "fos broke", "fix founderos"]) {
+    for (const raw of ["app fix the login", "api is slow", "frontend needs a fix", "of course fix it", "fos broke"]) {
       const parsed = parseTaskArgs(raw);
       expect(parsed.ok, raw).toBe(false);
       if (!parsed.ok) expect(parsed.kind, raw).toBe("needs-repo");
     }
+  });
+
+  it("uses a repo named later in the message instead of asking (prod 2026-10-07: 'Which repo?' after he named it)", () => {
+    const parsed = parseTaskArgs("In oplify-messaging-api \nStart work on issue #41.");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.args.repo).toBe("OplifyMessage/oplify-messaging-api");
+    expect(parsed.args.text).toBe("In oplify-messaging-api \nStart work on issue #41.");
+    // A repo's exact name is a name, wherever it sits: "fix founderos" used to be asked about.
+    const named = parseTaskArgs("fix founderos");
+    expect(named.ok && named.args.repo).toBe("pushkarverma3698/FounderOS");
+  });
+
+  it("two repos named later in the message is still a question", () => {
+    const parsed = parseTaskArgs("port the oplify-api retry into founderos");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.kind).toBe("needs-repo");
   });
 
   it("does not guess when two repos share the name", () => {
