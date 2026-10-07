@@ -28,6 +28,47 @@ import { OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { kernelCommand, type CompiledKernel } from "../kernel/index.js";
 import type { Department, GoldenTask, Observation, PlanStepObservation, ToolCallObservation } from "./types.js";
 import type { Invoker } from "./runner.js";
+import type { PriorTurn } from "./types.js";
+
+/** Minimal checkpoint-write surface the history seeding needs (the compiled graph satisfies it). */
+export interface SeedableKernel {
+  updateState?(config: unknown, values: Record<string, unknown>, asNode?: string): Promise<unknown>;
+}
+
+/**
+ * Put earlier turns into the thread's `history` channel, oldest first, one write per turn.
+ * This is what the plan node does after a real turn, minus the model calls: the planner then
+ * sees them the way it sees yesterday's chat in production. Timestamps stay a minute apart so
+ * trimHistory's 6-hour gap rule keeps them all.
+ */
+export async function seedPriorTurns(
+  kernel: SeedableKernel,
+  config: unknown,
+  threadId: string,
+  turns: PriorTurn[],
+): Promise<void> {
+  if (turns.length === 0) return;
+  if (!kernel.updateState) throw new Error("kernel cannot seed prior turns: no updateState");
+  const now = Date.now();
+  for (const [i, t] of turns.entries()) {
+    await kernel.updateState(
+      config,
+      {
+        history: [
+          {
+            turn_id: `${threadId}:prior:${i}`,
+            at: new Date(now - (turns.length - i) * 60_000).toISOString(),
+            user_input: t.user,
+            goal: t.user.slice(0, 200),
+            outcome: "replied",
+            reply: t.reply,
+          },
+        ],
+      },
+      "plan",
+    );
+  }
+}
 
 let counter = 0;
 
@@ -55,6 +96,7 @@ export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
       recursionLimit: OFFICE_RECURSION_LIMIT,
     };
     try {
+      await seedPriorTurns(kernel as unknown as SeedableKernel, config, threadId, task.priorTurns ?? []);
       const res = await kernel.invoke(
         {
           turn: {
@@ -100,7 +142,7 @@ export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
       ];
       const tools = [...new Set(toolCalls.map((t) => t.tool))];
 
-      return { route, tools, hadInterrupt, steps, toolCalls, command: kernelCommand(res as never) };
+      return { route, tools, hadInterrupt, steps, toolCalls, command: kernelCommand(res as never), reply: res.reply };
     } catch (err) {
       return { route: null, tools: [], hadInterrupt: false, error: (err as Error).message };
     }
