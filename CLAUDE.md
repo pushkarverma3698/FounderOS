@@ -48,6 +48,7 @@ Rationale and incidents: [docs/rules/CLAUDE-RULES-RATIONALE.md](docs/rules/CLAUD
 - **Evidence (#24/#34/#36)**: "done" = the verification command run fresh in this session with output shown, through the real path
   (Telegram → kernel → tool → reply → `action_log` row). After a jobhunt/gateway fix, drive it through Telegram
   (`scripts/telegram-probe.ts`). Otherwise write **NOT VERIFIED — reason**. Every PR body names one real-path assertion.
+- **Live-test everything yourself (founder, 2026-10-07)**: FounderOS is the founder's own harness, not a user-facing product, so prod has no customers to protect. After every deploy, drive the change through the real path yourself (Telegram probe, real GitHub, real tool) and show the output. Never hand the live test back to the founder. If a live run is impossible, say NOT VERIFIED and why.
 - **Fix the schema, not the code**: ambiguous requirements → the planner asks for the missing field; never guess data.
 - **Bug fixes start with a failing test** (PR template section is mandatory).
 - **#25**: before non-trivial work, grep for an existing implementation, name the binding constraint, state the strongest argument against your plan.

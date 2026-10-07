@@ -38,6 +38,13 @@ export const PROGRESS_PHRASES: readonly ProgressPhrase[] = [
   { pattern: new RegExp("\\b(?:is|are)\\s+" + ADVERBS + "building\\b", "i"), sample: "The agent is building the feature" },
   { pattern: /\bin\s+progress\b/i, sample: "The build is in progress" },
   { pattern: /\b(?:has|have)\s+(?:now\s+)?started\b/i, sample: "The agent has started on it" },
+  // Prod 2026-10-07 10:44, after a dispatch and no status read: "an Antigravity agent has claimed it".
+  { pattern: /\b(?:has|have)\s+(?:now\s+|already\s+)?claimed\b/i, sample: "An Antigravity agent has claimed it" },
+  {
+    pattern: /\b(?:has|have)\s+(?:now\s+|already\s+)?picked\s+(?:it\s+|this\s+|the\s+(?:task|issue)\s+)?up\b/i,
+    sample: "Antigravity has already picked it up",
+  },
+  { pattern: /\b(?:is|are|was|were|been)\s+(?:now\s+|already\s+)?(?:claimed|picked\s+up)\b/i, sample: "The task has been picked up" },
 ];
 
 const SENTENCE_BOUNDARY = /(?<=[.!?])\s+/;
