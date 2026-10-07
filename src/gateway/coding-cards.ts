@@ -192,6 +192,8 @@ export interface EvidenceCardInput {
   notVerified: readonly string[];
   prUrl: string;
   nonce: string;
+  /** What the card is about: the founder reads this before any row (CLAUDE.md #26). The title is untrusted text. */
+  subject: { repo: string; pr: number; issue: number; title: string };
 }
 
 type Mark = "PASS" | "FAIL" | "UNKNOWN";
@@ -251,7 +253,9 @@ export function renderEvidenceCard(input: EvidenceCardInput): Card {
   const reviewM = reviewMark(input.review);
   const gateMark: Mark = input.merge?.ok === true ? "PASS" : input.merge?.ok === false ? "FAIL" : "UNKNOWN";
 
-  const lines: string[] = [wrap("b", "Evidence")];
+  const title = String(input.subject?.title ?? "").replace(/\s+/g, " ").trim() || "(no title)";
+  const s = input.subject;
+  const lines: string[] = field(wrap("b", "Evidence") + " for ", `${s?.repo}#${s?.pr} (issue #${s?.issue}): ${title}`);
   lines.push(...row("Red before", specMark, strings(input.spec?.reasons)));
   lines.push(...row("Green after", greenMark, strings(input.green?.reasons)));
   lines.push(...row("Gate", gateMark, strings(input.merge?.reasons)));

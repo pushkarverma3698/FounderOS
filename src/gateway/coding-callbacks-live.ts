@@ -76,6 +76,10 @@ export function liveCodingDeps(env: Record<string, string | undefined> = process
       const res = await client().rest.pulls.merge({ owner, repo, pull_number: pr, merge_method: "squash", sha });
       return res.data.sha;
     },
+    async updateBranch(slug, pr, expectedHead) {
+      const { owner, repo } = split(slug);
+      await client().rest.pulls.updateBranch({ owner, repo, pull_number: pr, expected_head_sha: expectedHead });
+    },
     alreadyDone: (key) => hasBeenAudited(key),
     async audit(row) {
       const { written } = await writeAuditEntry({

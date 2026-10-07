@@ -36,6 +36,8 @@ const DIR = "/c";
 const ENV = { AGENT_PIPELINE_V2: "1", FOUNDEROS_CONTRACTS_DIR: DIR, ORACLE_ALLOWED_HOSTS: "app.example.com" };
 const HEAD = "c".repeat(40);
 const BASE = "d".repeat(40);
+const NEW_BASE = "8".repeat(40);
+const NEW_HEAD = "7".repeat(40);
 const MERGE_SHA = "e".repeat(40);
 const DEPLOYED = "f".repeat(40);
 const TEST_FILE = "tests/unit/tools/health.test.ts";
@@ -76,6 +78,7 @@ interface World {
   labels: Array<{ add: readonly string[]; remove: readonly string[] }>;
   comments: string[];
   merges: Array<{ pr: number; sha: string }>;
+  updates: Array<{ pr: number; expectedHead: string }>;
   audits: Array<{ action: string; key: string }>;
   pr: PrState;
   sent: Array<{ text: string; loud: boolean }>;
@@ -89,6 +92,7 @@ function world(): World {
     labels: [],
     comments: [],
     merges: [],
+    updates: [],
     audits: [],
     pr: { state: "open", merged: false, headSha: HEAD, baseSha: BASE, baseRef: "beta" },
     sent: [],
@@ -119,6 +123,11 @@ function callbackDeps(w: World, env: Record<string, string | undefined> = ENV): 
     async merge(_r, pr, sha) {
       w.merges.push({ pr, sha });
       return MERGE_SHA;
+    },
+    async updateBranch(_r, pr, expectedHead) {
+      w.updates.push({ pr, expectedHead });
+      // What GitHub does: a merge commit of beta into the PR branch, so the head moves.
+      w.pr = { ...w.pr, headSha: NEW_HEAD };
     },
     async alreadyDone(key) {
       return done.has(key);
@@ -175,12 +184,12 @@ function evidenceDeps(w: World, nonce: string): EvidenceCardDeps {
     now: () => NOW,
     async gh(args) {
       const ep = args.find((a) => a.startsWith("repos/")) ?? "";
-      if (ep.endsWith(`/pulls/${PR}`)) return { code: 0, stdout: JSON.stringify({ state: "open", merged: false, html_url: `https://github.com/${REPO}/pull/${PR}`, head: { sha: w.pr.headSha }, base: { ref: "beta" } }), stderr: "" };
+      if (ep.endsWith(`/pulls/${PR}`)) return { code: 0, stdout: JSON.stringify({ state: "open", merged: false, title: "Make /health report ok:true", html_url: `https://github.com/${REPO}/pull/${PR}`, head: { sha: w.pr.headSha }, base: { ref: "beta" } }), stderr: "" };
       if (ep.endsWith("/git/ref/heads/beta")) return { code: 0, stdout: JSON.stringify({ object: { sha: w.pr.baseSha } }), stderr: "" };
       return { code: 1, stdout: "", stderr: "not found" };
     },
     async evidence(mode) {
-      return { status: "PASS", reasons: [], head_sha: mode === "spec" ? SHA_B : HEAD };
+      return { status: "PASS", reasons: [], head_sha: mode === "spec" ? SHA_B : w.pr.headSha };
     },
   };
 }
@@ -324,6 +333,38 @@ describe("coding pipeline v2: the whole chain, offline", () => {
     expect(rec.ok && rec.value.merged_sha).toBeUndefined();
     // and so there is nothing for the deploy report to check
     expect(parse(await runOracleReport(["--deployed", DEPLOYED], ENV, reportDeps(w)))).toMatchObject({ checked: 0, sent: false });
+  });
+
+  it("beta moving between the card and the tap does not strand the PR: the tap updates the branch and a fresh card merges the new head", async () => {
+    const w = world();
+    const { card } = await runChain(w, httpOracle);
+    // Someone merges into beta after the card went out. beta requires an up-to-date branch, so GitHub would refuse anyway.
+    w.pr = { ...w.pr, baseSha: NEW_BASE };
+    const stale = await tap(w, mergeButton(card));
+    expect(w.merges).toEqual([]);
+    expect(w.updates).toEqual([{ pr: PR, expectedHead: HEAD }]);
+    expect(stale.said).toContain("base moved");
+    expect(stale.said).toContain("fresh card");
+    // The old card is spent: it cannot be used again.
+    expect((await tap(w, mergeButton(card))).said).toMatch(/already used|expired/);
+    expect(w.updates).toHaveLength(1);
+
+    // The next review sweep carries the verdict over GitHub's clean merge commit and cards the NEW head on the NEW base.
+    const args = ["--repo", PR_BRAIN_REPO, "--issue", String(ISSUE), "--pr", String(PR), "--head", NEW_HEAD, "--verdict", CLEARED];
+    const fresh = parse(await runEvidenceCard(args, ENV, evidenceDeps(w, "mergenonce2")));
+    expect(fresh).toMatchObject({ status: "CARD", mergeable: true });
+    const merged = await tap(w, mergeButton(fresh));
+    expect(merged.said).toContain(`Merged ${PR_BRAIN_REPO}#${PR}`);
+    expect(w.merges).toEqual([{ pr: PR, sha: NEW_HEAD }]);
+  });
+
+  it("the evidence card names the repo, the PR, the issue and the PR's title", async () => {
+    const w = world();
+    const { card } = await runChain(w, httpOracle);
+    const text = card.parts.join("\n");
+    expect(text).toContain(`${PR_BRAIN_REPO}#${PR}`);
+    expect(text).toContain(`issue #${ISSUE}`);
+    expect(text).toContain("Make /health report ok:true");
   });
 
   it("a spent card cannot be used twice: the second Approve changes nothing", async () => {
