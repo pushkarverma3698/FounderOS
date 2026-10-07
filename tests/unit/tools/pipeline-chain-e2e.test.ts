@@ -26,7 +26,10 @@ import type { FetchLike } from "../../../src/tools/oracle-http.js";
 import { SHA_A, SHA_B } from "../../helpers/contract-fixture.js";
 import { memFs, type MemFs } from "../../helpers/mem-fs.js";
 
-const REPO = "pushkarverma3698/fos-journey-sandbox";
+// Pass P spells the repo as GitHub does; pr-brain spells it as its /opt/review checkout dir (lowercase).
+// The two differed on prod (FounderOS vs founderos) and PR #974 lost its Merge card, so the chain uses both.
+const REPO = "pushkarverma3698/FOS-Journey-Sandbox";
+const PR_BRAIN_REPO = REPO.toLowerCase();
 const ISSUE = 12;
 const PR = 40;
 const DIR = "/c";
@@ -179,7 +182,7 @@ function evidenceDeps(w: World, nonce: string): EvidenceCardDeps {
   };
 }
 
-const evidenceArgs = ["--repo", REPO, "--issue", String(ISSUE), "--pr", String(PR), "--head", HEAD, "--verdict", CLEARED];
+const evidenceArgs = ["--repo", PR_BRAIN_REPO, "--issue", String(ISSUE), "--pr", String(PR), "--head", HEAD, "--verdict", CLEARED];
 
 function reportFs(mem: MemFs): ReportFs {
   return {
@@ -263,7 +266,7 @@ describe("coding pipeline v2: the whole chain, offline", () => {
 
     // 6. Merge tap: GitHub is asked to merge exactly the reviewed head, and the merge sha lands in the contract record.
     const merged = await tap(w, mergeData);
-    expect(merged.said).toContain(`Merged ${REPO}#${PR}`);
+    expect(merged.said).toContain(`Merged ${PR_BRAIN_REPO}#${PR}`);
     expect(w.merges).toEqual([{ pr: PR, sha: HEAD }]);
     const after = await readContractRecord(w.fs, DIR, REPO, ISSUE);
     expect(after.ok && after.value.merged_sha).toBe(MERGE_SHA);
