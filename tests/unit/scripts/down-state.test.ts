@@ -225,9 +225,11 @@ describe("down-state — redact_secrets (everything that leaves the box passes t
     const bin = join(root, "bin");
     mkdirSync(bin, { recursive: true });
     for (const tool of ["sed", "awk", "grep", "tr", "cat"]) {
+      // macOS keeps cat in /bin only; Linux (usrmerge) has both.
+      const real = existsSync(`/usr/bin/${tool}`) ? `/usr/bin/${tool}` : `/bin/${tool}`;
       writeFileSync(
         join(bin, tool),
-        `#!/bin/bash\nprintf '%s\\n' "$*" >>"${join(root, "argv.txt")}"\nexec /usr/bin/${tool} "$@"\n`,
+        `#!/bin/bash\nprintf '%s\\n' "$*" >>"${join(root, "argv.txt")}"\nexec ${real} "$@"\n`,
         { mode: 0o755 },
       );
     }

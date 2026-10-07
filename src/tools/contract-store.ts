@@ -3,7 +3,9 @@
  * ==========================
  * One JSON file per approved task, so the PR evidence CLI can read the contract the founder
  * approved instead of trusting anything a PR says about itself. Dir = FOUNDEROS_CONTRACTS_DIR,
- * default /var/lib/founderos/contracts. File = <owner>__<name>__<issue>.json.
+ * default /var/lib/founderos/contracts. File = <owner>__<name>__<issue>.json, lowercased: GitHub
+ * names are case-insensitive, and callers spell the same repo differently (Pass P "owner/FounderOS",
+ * pr-brain "owner/founderos" from its checkout dir).
  *
  * Rules: fs is injected (no module-level I/O); writes are atomic (tmp file, then rename); a write
  * never replaces a record with a different fingerprint, never loosens an approved contract, and
@@ -67,8 +69,14 @@ export function contractsDir(env: Record<string, string | undefined>): string {
   return d ? d : DEFAULT_CONTRACTS_DIR;
 }
 
-/** a/b + 12 -> a__b__12.json. Refuses anything that is not a plain owner/name and a positive integer. */
+/** A/b + 12 -> a__b__12.json. Refuses anything that is not a plain owner/name and a positive integer. */
 export function contractFileName(repo: string, issue: number): StoreResult<string> {
+  const exact = exactFileName(repo, issue);
+  return exact.ok ? { ok: true, value: exact.value.toLowerCase() } : exact;
+}
+
+/** The case-sensitive name records were stored under before 2026-10-07. Read-only fallback. */
+function exactFileName(repo: string, issue: number): StoreResult<string> {
   if (!REPO_RE.test(repo)) return fail("bad_key", "repo must look like owner/name, got " + JSON.stringify(repo));
   if (!Number.isInteger(issue) || issue <= 0) return fail("bad_key", "issue must be a positive integer, got " + String(issue));
   const [owner, name] = repo.split("/") as [string, string];
@@ -93,7 +101,10 @@ function issuesOf(err: z.ZodError): string {
 export async function readContractRecord(fs: StoreFs, dir: string, repo: string, issue: number): Promise<StoreResult<ContractRecord>> {
   const name = contractFileName(repo, issue);
   if (!name.ok) return name;
-  return readFile(fs, posix.join(dir, name.value), repo, issue);
+  const found = await readFile(fs, posix.join(dir, name.value), repo, issue);
+  const legacy = exactFileName(repo, issue);
+  if (found.ok || found.code !== "not_found" || !legacy.ok || legacy.value === name.value) return found;
+  return readFile(fs, posix.join(dir, legacy.value), repo, issue);
 }
 
 async function readFile(fs: StoreFs, file: string, repo: string, issue: number): Promise<StoreResult<ContractRecord>> {
@@ -112,7 +123,7 @@ async function readFile(fs: StoreFs, file: string, repo: string, issue: number):
   }
   const p = ContractRecordSchema.safeParse(raw);
   if (!p.success) return fail("invalid", file + " is not a valid contract record: " + issuesOf(p.error));
-  if (p.data.repo !== repo || p.data.issue !== issue) {
+  if (p.data.repo.toLowerCase() !== repo.toLowerCase() || p.data.issue !== issue) {
     return fail("invalid", file + " holds " + p.data.repo + "#" + p.data.issue + ", not " + repo + "#" + issue);
   }
   return { ok: true, value: p.data };
@@ -171,7 +182,7 @@ export async function writeContractRecord(
   if (!name.ok) return name;
   const file = posix.join(dir, name.value);
 
-  const existing = await readFile(fs, file, next.repo, next.issue);
+  const existing = await readContractRecord(fs, dir, next.repo, next.issue);
   if (existing.ok) {
     const why = conflictWith(existing.value, next);
     if (why) return fail("conflict", "refusing to overwrite " + file + ": " + why);
