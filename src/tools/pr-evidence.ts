@@ -240,7 +240,8 @@ function requireLockedTestsRan(f: Findings, checks: CheckRun[], lockedTests: str
  * All required checks green and the locked tests actually run, locked tests byte-identical, no
  * existing non-locked test changed or deleted (new test files are fine), no CI/lint/type/
  * test-config/manifest/verify-script edits, every non-test file inside scope, limits held, and
- * no new dependency. Test files are exempt from the scope globs, not from any other rule.
+ * no new dependency. Test files are exempt from the scope globs, not from any other rule. The
+ * limits bound the executor's change: locked tests are Pass P's, pinned by hash, and not counted.
  */
 export function verifyImplementationGreen(spec: EvidenceSpec, input: ImplementationGreenInput): EvidenceVerdict {
   const head = headOf(input);
@@ -265,11 +266,15 @@ export function verifyImplementationGreen(spec: EvidenceSpec, input: Implementat
     else if (atSpec !== atHead) f.fail("locked test " + t + " was modified after the spec commit (hash differs)");
   }
 
+  let files = 0;
   let additions = 0;
   let deletions = 0;
   for (const file of i.data.diff) {
-    additions += file.additions;
-    deletions += file.deletions;
+    if (!lockedSet.has(norm(file.path))) {
+      files++;
+      additions += file.additions;
+      deletions += file.deletions;
+    }
     const touched = file.previousPath ? [file.path, file.previousPath] : [file.path];
     for (const p of touched) {
       const path = norm(p);
@@ -290,8 +295,7 @@ export function verifyImplementationGreen(spec: EvidenceSpec, input: Implementat
     }
   }
 
-  const n = i.data.diff.length;
-  if (n > limits.files) f.fail("diff touches " + n + " files, over the limit of " + limits.files);
+  if (files > limits.files) f.fail("diff touches " + files + " files, over the limit of " + limits.files);
   if (additions > limits.lines) f.fail("diff adds " + additions + " lines, over the limit of " + limits.lines);
   if (deletions > limits.deleted_lines) {
     f.fail("diff deletes " + deletions + " lines, over the limit of " + limits.deleted_lines);
