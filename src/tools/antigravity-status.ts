@@ -25,6 +25,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Octokit } from "octokit";
 import { REVIEWER } from "./dispatch-roles.js";
+import { fetchCrossRefPrs, findFixingPr } from "./existing-issue.js";
 
 export interface TaskComment {
   readonly body: string;
@@ -55,6 +56,10 @@ export interface TaskFacts {
     readonly labels: readonly string[];
     readonly createdAt: string;
     readonly url: string;
+    /** The description, so a dispatch of this issue can show and extend it. */
+    readonly body?: string;
+    /** GitHub numbers PRs and issues together: #N can be a pull request. */
+    readonly isPull?: boolean;
   };
   readonly comments: readonly TaskComment[];
   readonly pr: TaskPr | null;
@@ -153,7 +158,11 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
   if (labels.has("agent:spec")) {
     return [head, "📝 A spec is being drafted from your request. A spec card will follow in Telegram; nothing is built before you approve it.", issue.url].join("\n");
   }
-  return [head, "Not an Antigravity task — it has no agent:* label.", issue.url].join("\n");
+  return [
+    head,
+    `Not queued for an agent yet: it has no agent:* label. Say “start work on #${issue.number}” and I'll queue this same issue (one tap).`,
+    issue.url,
+  ].join("\n");
 }
 
 // ── Reading the facts ─────────────────────────────────────────────────────────
@@ -186,6 +195,10 @@ export async function fetchTaskFacts(
   if (prNumber === undefined) {
     const { data: prs } = await octokit.rest.pulls.list({ owner, repo, state: "all", per_page: 100 });
     prNumber = prs.find((p) => p.head.ref.startsWith(`task/issue-${issueNumber}-`))?.number;
+  }
+  // Work done outside the dispatcher (#41 was fixed by PR #81 on branch task/issue-78-…) is on the timeline.
+  if (prNumber === undefined && !issue.pull_request) {
+    prNumber = findFixingPr(issueNumber, `${owner}/${repo}`, await fetchCrossRefPrs(octokit, owner, repo, issueNumber))?.number;
   }
 
   let pr: TaskPr | null = null;
@@ -222,6 +235,8 @@ export async function fetchTaskFacts(
       labels: issue.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))),
       createdAt: issue.created_at,
       url: issue.html_url,
+      body: issue.body ?? "",
+      isPull: Boolean(issue.pull_request),
     },
     comments,
     pr,
