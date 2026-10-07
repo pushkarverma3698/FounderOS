@@ -85,6 +85,20 @@ export interface ToolCallObservation {
   ok: boolean;
 }
 
+/**
+ * One LLM call made during a task: the stage that asked, the model that ANSWERED
+ * (the provider-reported name when the response carries one, else the model the
+ * stage was built to call) and the tokens it billed. Thought tokens are in
+ * outputTokens, same reading as the production cost ledger (infra/token-usage.ts).
+ */
+export interface LlmCallUsage {
+  stage: string;
+  agent: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 /** What we actually observed from running one task through the office. */
 export interface Observation {
   /**
@@ -122,6 +136,11 @@ export interface Observation {
    * the task (docs/EVAL-AUDIT-2026-08-28.md D7).
    */
   toolCalls?: ToolCallObservation[];
+  /**
+   * Every LLM call the turn made, when the invoker was given a usage collector
+   * (AG-031 model A/B). Undefined for invokers that do not capture usage.
+   */
+  usage?: LlmCallUsage[];
 }
 
 /** A single golden task after scoring. */
@@ -144,6 +163,8 @@ export interface TaskResult {
   infraError: boolean;
   /** True only when all *applicable* checks passed. */
   passed: boolean;
+  /** Wall-clock milliseconds the invoker took for this task (set by runEval). */
+  latencyMs?: number;
 }
 
 /** Pass/total/accuracy for one metric, computed over its applicable tasks. */

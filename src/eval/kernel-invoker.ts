@@ -28,6 +28,7 @@ import { OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { kernelCommand, type CompiledKernel } from "../kernel/index.js";
 import type { Department, GoldenTask, Observation, PlanStepObservation, ToolCallObservation } from "./types.js";
 import type { Invoker } from "./runner.js";
+import type { UsageSource } from "./usage-collector.js";
 import type { PriorTurn } from "./types.js";
 
 /** Minimal checkpoint-write surface the history seeding needs (the compiled graph satisfies it). */
@@ -83,8 +84,9 @@ function interruptedToolName(value: unknown): string | null {
   return null;
 }
 
-export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
-  return async function invoke(task: GoldenTask): Promise<Observation> {
+/** Pass a usage collector (usage-collector.ts) to get every LLM call of a turn on observation.usage, failed turns included. */
+export function makeKernelInvoker(kernel: CompiledKernel, usage?: UsageSource): Invoker {
+  const runTurn: Invoker = async function invoke(task: GoldenTask): Promise<Observation> {
     const threadId = `eval:${Date.now()}:${counter++}`;
     // Match production's real recursion budget (src/gateway/kernel-run.ts et
     // al. all pass this on every invoke/getState). Without it the eval ran at
@@ -94,6 +96,7 @@ export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
     const config = {
       configurable: { thread_id: threadId },
       recursionLimit: OFFICE_RECURSION_LIMIT,
+      ...(usage && { callbacks: [usage.callback] }),
     };
     try {
       await seedPriorTurns(kernel as unknown as SeedableKernel, config, threadId, task.priorTurns ?? []);
@@ -146,5 +149,10 @@ export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
     } catch (err) {
       return { route: null, tools: [], hadInterrupt: false, error: (err as Error).message };
     }
+  };
+
+  return async (task: GoldenTask): Promise<Observation> => {
+    const obs = await runTurn(task);
+    return usage ? { ...obs, usage: await usage.take() } : obs;
   };
 }
