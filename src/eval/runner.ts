@@ -40,6 +40,7 @@ export async function runEval(
     if (i > 0 && taskDelayMs > 0) await sleep(taskDelayMs);
 
     const task = tasks[i]!;
+    const startedAt = Date.now();
     let obs: Observation;
     try {
       obs = await invoke(task);
@@ -51,7 +52,7 @@ export async function runEval(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-    results.push(scoreTask(task, obs));
+    results.push({ ...scoreTask(task, obs), latencyMs: Date.now() - startedAt });
   }
   return aggregate(results);
 }
