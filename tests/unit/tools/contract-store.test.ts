@@ -39,8 +39,9 @@ describe("contractsDir / contractFileName", () => {
     expect(contractsDir({ FOUNDEROS_CONTRACTS_DIR: "  " })).toBe(DEFAULT_CONTRACTS_DIR);
     expect(DEFAULT_CONTRACTS_DIR).toBe("/var/lib/founderos/contracts");
   });
-  it("names the file owner__name__issue.json", () => {
+  it("names the file owner__name__issue.json, lowercased", () => {
     expect(contractFileName("a/b", 12)).toEqual({ ok: true, value: "a__b__12.json" });
+    expect(contractFileName("Owner/FounderOS", 12)).toEqual({ ok: true, value: "owner__founderos__12.json" });
   });
   it("refuses a repo or issue that could escape the directory", () => {
     for (const repo of ["a/b/c", "../x", "a b/c", "a/", "", "a"]) {
@@ -120,6 +121,26 @@ describe("writeContractRecord + readContractRecord", () => {
     expect(await writeContractRecord(fs, DIR, mismatch, ID)).toMatchObject({ ok: false, code: "invalid" });
     expect(await writeContractRecord(fs, DIR, record({ fingerprint: "nothex" }), ID)).toMatchObject({ ok: false, code: "invalid" });
     expect(fs.files.size).toBe(0);
+  });
+  // 2026-10-07: Pass P stored "owner/FounderOS", pr-brain asked for "owner/founderos" (its checkout dir),
+  // got not_found, and PR #974 never got its Merge card. GitHub names are case-insensitive; so is the key.
+  it("finds a record whatever the repo casing, under one lowercase file", async () => {
+    const fs = memFs();
+    const canonical = record({ repo: "Acme/Widgets", contract: contractFixture({ repo: "Acme/Widgets" }) });
+    expect((await writeContractRecord(fs, DIR, canonical, ID)).ok).toBe(true);
+    expect([...fs.files.keys()]).toEqual(["/store/acme__widgets__12.json"]);
+    for (const asked of ["acme/widgets", "Acme/Widgets", "ACME/WIDGETS"]) {
+      expect(await readContractRecord(fs, DIR, asked, 12), asked).toEqual({ ok: true, value: canonical });
+    }
+    const bound = await writeContractRecord(fs, DIR, { ...canonical, pr: 7 }, ID);
+    expect(bound.ok).toBe(true);
+    expect([...fs.files.keys()]).toEqual(["/store/acme__widgets__12.json"]);
+  });
+  it("still reads a record stored before the key was lowercased, by its exact casing", async () => {
+    const fs = memFs();
+    const legacy = record({ repo: "Acme/Widgets", contract: contractFixture({ repo: "Acme/Widgets" }) });
+    fs.files.set("/store/Acme__Widgets__12.json", JSON.stringify(legacy));
+    expect(await readContractRecord(fs, DIR, "Acme/Widgets", 12)).toEqual({ ok: true, value: legacy });
   });
   it("returns not_found for a missing task, never a throw", async () => {
     expect(await readContractRecord(memFs(), DIR, "acme/widgets", 99)).toMatchObject({ ok: false, code: "not_found" });

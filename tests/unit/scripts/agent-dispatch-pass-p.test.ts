@@ -8,13 +8,19 @@
  *
  * What these cases defend: the founder's words reach the model fenced as data; only the declared test files leave the
  * sandbox directory; a spec that fails any check never becomes a card; a card that could not be sent is retried, not
- * lost; with the flag off the dispatcher behaves exactly as before.
+ * lost; with the flag off the dispatcher behaves exactly as before; a locked test that already passes on the unchanged
+ * code never becomes a card (#956 → #965).
+ *
+ * vitest: most cases use a fake (fakes/fake-vitest.sh) that reads the test file it is given: "fails now" is a red
+ * assertion, "passes now" a green one, anything else a file that does not load. The cases under "real vitest" run the
+ * real binary through the node_modules symlink the dispatcher puts in the sandbox, so the JSON report shape is real.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DispatchSandbox, goodBrief } from "./dispatch-sandbox.js";
 import { verbatimAskSection } from "../../../src/tools/dispatch-spec-intake.js";
 
@@ -27,6 +33,12 @@ const TEST_FILE = "tests/unit/readme.test.ts";
 let sb: DispatchSandbox;
 let contracts: string;
 let work: string;
+const fakeVitest = fileURLToPath(new URL("./fakes/fake-vitest.sh", import.meta.url));
+
+const vitestRuns = (): string[] => {
+  const p = join(sb.root, "fake-vitest.log");
+  return existsSync(p) ? readFileSync(p, "utf8").split("\n").filter(Boolean) : [];
+};
 
 const specBody = (ask: string = ASK): string => ["## Goal", "", "Do the thing.", "", ...verbatimAskSection(ask)].join("\n");
 
@@ -61,6 +73,8 @@ const tick = (hook: string, env: Record<string, string> = {}, curlRc = 0) =>
       AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(),
       AGENT_DISPATCH_SPEC_WORK: work,
       FOUNDEROS_CONTRACTS_DIR: contracts,
+      AGENT_DISPATCH_SPEC_VITEST: fakeVitest,
+      FAKE_VITEST_LOG: join(sb.root, "fake-vitest.log"),
       ...env,
     },
   });
@@ -256,6 +270,90 @@ describe("REJECT: a run that did something it may not do never produces a card",
     expect(sb.labelsOf(1)).toEqual([SPEC]);
     expect(sb.commentsOf(1).join("\n")).toContain("exit 1");
     expect(pendingFiles()).toEqual([]);
+  });
+});
+
+describe("fail-first: a locked test must fail on the code as it is (#956 → #965)", () => {
+  const passingTest = (contract: Record<string, unknown> = draft()): string =>
+    [
+      "mkdir -p .spec-out tests/unit",
+      `printf '%s' '${JSON.stringify(contract)}' > .spec-out/contract.json`,
+      `printf 'import { it } from "vitest";\\nit("passes now", () => {});\\n' > ${TEST_FILE}`,
+    ].join("\n");
+
+  it("runs the locked test in the sandbox copy, as the spec user, before anything is committed", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(writes());
+    const runs = vitestRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toContain(work);
+    expect(runs[0]).toContain(TEST_FILE);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+  });
+
+  it("already passes: no branch, no record, no card; needs-brief with the reason, one message, no second run", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(passingTest());
+    expect(hasBranch("task/issue-1")).toBe(false);
+    expect(pendingFiles()).toEqual([]);
+    expect(sb.markups()).toEqual([]);
+    expect(sb.labelsOf(1)).toContain(NEEDS_BRIEF);
+    expect(sb.labelsOf(1)).not.toContain(SPEC);
+    const comment = sb.commentsOf(1).join("\n");
+    expect(comment).toContain("<!-- pass-p-already-passes -->");
+    expect(comment).toContain("already pass");
+    expect(comment).toContain("the readme is a single placeholder line");
+    expect(comment).not.toContain("<!-- pass-p-attempt:");
+    const msgs = sb.messages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toContain("#1");
+    expect(msgs[0]).toContain("already");
+    tick(passingTest());
+    expect(sb.claudeRuns()).toBe(1);
+  });
+
+  it("a locked test that does not load is a failed attempt, not a card", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(["mkdir -p .spec-out tests/unit", `printf '%s' '${JSON.stringify(draft())}' > .spec-out/contract.json`, `echo 'it((' > ${TEST_FILE}`].join("\n"));
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    const c = sb.commentsOf(1).join("\n");
+    expect(c).toContain("<!-- pass-p-attempt: 1 -->");
+    expect(c).toContain("does not load");
+    expect(hasBranch("task/issue-1")).toBe(false);
+    expect(sb.markups()).toEqual([]);
+  });
+
+  it("gives the model node_modules to run its own test, and tells it the test must fail now", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(writes(draft(), "test -e node_modules/.bin/vitest || echo missing >> README.md"));
+    // README.md untouched (the manifest would reject the run) = the model saw a working vitest; node_modules itself is
+    // not in the manifest, so it never counts as a file the run wrote.
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+    const prompt = sb.claudePrompts()[0] ?? "";
+    expect(prompt).toContain("node_modules/.bin/vitest run --cache=false");
+    expect(prompt).toContain("must FAIL");
+  });
+});
+
+describe("fail-first with the real vitest (the report shape is not faked)", () => {
+  const real = { AGENT_DISPATCH_SPEC_VITEST: "" };
+
+  it("a red test passes the check and becomes a card", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(writes(), real);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+    expect(hasBranch("task/issue-1")).toBe(true);
+  });
+
+  it("a green test is stopped: needs-brief, no branch", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(
+      ["mkdir -p .spec-out tests/unit", `printf '%s' '${JSON.stringify(draft())}' > .spec-out/contract.json`, `printf 'import { it, expect } from "vitest";\\nit("ok", () => { expect(1).toBe(1); });\\n' > ${TEST_FILE}`].join("\n"),
+      real,
+    );
+    expect(sb.labelsOf(1)).toContain(NEEDS_BRIEF);
+    expect(hasBranch("task/issue-1")).toBe(false);
+    expect(sb.commentsOf(1).join("\n")).toContain("all 1 locked assertions already pass");
   });
 });
 

@@ -44,6 +44,8 @@ export interface RagFilter {
   memory_type?: string;
   /** brain_memories only: the real `project` column — scopes results to one project (e.g. "oplify"). */
   project?: string;
+  /** brain_memories only: drop rows with `metadata.visibility = 'founder'` (Mac capture, AG-027). Set for every non-founder-DM caller. */
+  excludeFounderOnly?: boolean;
 }
 
 /** Throws if `table` is not one of the allowed RAG tables. */
@@ -61,8 +63,8 @@ export function assertAllowedRagTable(table: string): asserts table is RagTable 
  */
 function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void {
   if (table === "brain_memories") return;
-  if (filter?.memory_type || filter?.project) {
-    throw new Error(`memory_type/project filters require table "brain_memories", got "${table}"`);
+  if (filter?.memory_type || filter?.project || filter?.excludeFounderOnly) {
+    throw new Error(`memory_type/project filters require table "brain_memories", got "${table}" (excludeFounderOnly needs it too)`);
   }
 }
 
@@ -72,6 +74,16 @@ function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void
  */
 function liveRowsClause(table: RagTable) {
   return table === "brain_memories" ? sql` AND status NOT IN ('SUPERSEDED', 'ARCHIVED')` : sql``;
+}
+
+/**
+ * Group-chat privacy (AG-027, audit F3): rows the Mac wrote with `visibility: founder` are served to the founder's DM only.
+ * A row with no visibility key stays visible, so every pre-existing row keeps its behaviour. Leading space, like the fragments around it.
+ */
+function visibilityClause(table: RagTable, filter?: RagFilter) {
+  return table === "brain_memories" && filter?.excludeFounderOnly
+    ? sql` AND COALESCE(metadata->>'visibility', 'all') <> 'founder'`
+    : sql``;
 }
 
 /** The schema these stores actually live in — see {@link ragTableRef}. */
@@ -122,7 +134,7 @@ export async function searchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}${visibilityClause(table, opts?.filter)}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
@@ -208,7 +220,7 @@ export async function keywordSearchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}${visibilityClause(table, opts?.filter)}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project, source, created_at` : sql``;
 

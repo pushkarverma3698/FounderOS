@@ -18,6 +18,7 @@
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
+import { getFile, searchCode } from "./github-code.js";
 import { listResult } from "./list-truncation.js";
 import { getPullRequest, listPullRequests } from "./github-pr.js";
 
@@ -183,8 +184,8 @@ export const githubTool: UnifiedTool = {
     properties: {
       action: {
         type: "string",
-        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr", "create_issue", "create_repo"],
-        description: "The GitHub operation to perform. list_issues/list_branches/list_commits/list_prs require owner+repo; get_pr also needs number.",
+        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr", "get_file", "search_code", "create_issue", "create_repo"],
+        description: "The GitHub operation to perform. list_issues/list_branches/list_commits/list_prs require owner+repo; get_pr also needs number; get_file needs owner+repo+path (optional ref); search_code needs owner+repo+query.",
       },
       owner: {
         type: "string",
@@ -214,6 +215,9 @@ export const githubTool: UnifiedTool = {
         type: "number",
         description: "For get_pr: the pull request number.",
       },
+      path: { type: "string", description: "For get_file: file path in the repo." },
+      ref: { type: "string", description: "For get_file: branch, tag or commit (default: the default branch)." },
+      query: { type: "string", description: "For search_code: search terms (max 20 hits, each as path:line)." },
       since: {
         type: "string",
         description: "For list_commits: only commits after this ISO date (e.g. 2026-10-05). Use it for 'what shipped in the last N days'.",
@@ -271,7 +275,7 @@ export const githubTool: UnifiedTool = {
             owner, repo, state: "open", per_page: 30, sort: "updated",
           });
           return listResult(
-            issues.map((i) => ({
+            issues.filter((i) => !i.pull_request).map((i) => ({
               number: i.number,
               title: i.title,
               state: i.state,
@@ -337,6 +341,23 @@ export const githubTool: UnifiedTool = {
           if (!owner || !repo || !Number.isInteger(number) || number <= 0)
             return { success: false, error: "get_pr requires owner, repo, and number (the PR number)" };
           return await getPullRequest(octokit, owner, repo, number);
+        }
+
+        case "get_file": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          const path = args["path"] as string;
+          const ref = args["ref"] as string | undefined;
+          if (!owner || !repo || !path) return { success: false, error: "get_file requires owner, repo, and path" };
+          return await getFile(octokit, owner, repo, path, ref);
+        }
+
+        case "search_code": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          const query = args["query"] as string;
+          if (!owner || !repo || !query) return { success: false, error: "search_code requires owner, repo, and query" };
+          return await searchCode(octokit, owner, repo, query);
         }
 
         case "create_issue": {

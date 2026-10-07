@@ -46,6 +46,7 @@ import { messageContentText } from "./message-text.js";
 import { verifyStepResult } from "./verify.js";
 import { describeInterceptedError, isKernelTerminalError } from "./errors.js";
 import { clampToolOutput, pruneScratchForModel } from "./tool-output-guard.js";
+import { capReachedNote, stepTools } from "./step-budget.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -71,7 +72,7 @@ export interface WorkerSpec {
 // Failure classification lives in its own module (LOC budget); re-exported here
 // because worker.ts has always been its import site.
 export { TOOL_FAILURE_MARKER, REJECTION_MARKER, isFailureResult } from "./tool-failure.js";
-import { isFailureResult, REJECTION_MARKER, TOOL_FAILURE_MARKER } from "./tool-failure.js";
+import { isFailureResult, isNoActionResult, REJECTION_MARKER, TOOL_FAILURE_MARKER } from "./tool-failure.js";
 
 export function currentStep(state: KernelStateType): TaskEnvelope {
   const step = state.mission.plan?.steps[state.mission.cursor];
@@ -132,8 +133,9 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
     const scratch = state.scratch[step.step_id] ?? [];
     const remaining = Math.max(0, step.constraints.max_tool_calls - executedToolCalls(scratch));
     const system = new SystemMessage(resolveWorkerPrompt(spec, config) + workerProtocol(step, remaining));
-    const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
-      ? model.bindTools(spec.tools)
+    const boundTools = stepTools(step, spec.tools);
+    const bindable = remaining > 0 && boundTools.length > 0 && model.bindTools
+      ? model.bindTools(boundTools)
       : model;
     // Read-time projection only — the checkpointed scratch stays untouched;
     // oldest oversized tool results are collapsed before the model re-reads them.
@@ -226,7 +228,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         );
         continue;
       }
-      const tool = spec.tools.find((t) => t.name === call.name);
+      const tool = stepTools(step, spec.tools).find((t) => t.name === call.name);
       if (!tool) {
         messages.push(
           new ToolMessage({
@@ -280,6 +282,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         result_digest: digestToolResult(resultStr),
         ok,
         at: new Date().toISOString(),
+        ...(ok && isNoActionResult(resultStr) ? { acted: false } : {}),
       });
       messages.push(new ToolMessage({ content: clampToolOutput(resultStr), tool_call_id: callId, name: call.name }));
     }
@@ -378,6 +381,7 @@ export async function collect(state: KernelStateType): Promise<KernelUpdate> {
     step_id: step.step_id,
     output: parsed,
     tool_receipts: state.step_receipts[step.step_id] ?? [],
+    ...(executedToolCalls(scratch) >= step.constraints.max_tool_calls ? { note: capReachedNote(step) } : {}),
   };
   const validated = validateStepResult(candidate, step);
   if (!validated.ok) return failedValidation(validated.error);

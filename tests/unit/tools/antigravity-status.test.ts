@@ -10,8 +10,8 @@
  * into one legible answer. Pure: every fact is passed in, including "now".
  */
 
-import { describe, it, expect } from "vitest";
-import { describeTaskStatus, type TaskFacts } from "../../../src/tools/antigravity-status.js";
+import { describe, it, expect, vi } from "vitest";
+import { describeTaskStatus, fetchTaskFacts, type TaskFacts } from "../../../src/tools/antigravity-status.js";
 
 const NOW = new Date("2026-09-28T18:59:53Z");
 
@@ -147,5 +147,62 @@ describe("describeTaskStatus", () => {
     const text = describeTaskStatus(facts(), NOW);
     expect(text).not.toMatch(/I'll monitor|keep you posted/i);
     expect(text).toMatch(/Telegram message/);
+  });
+});
+
+describe("an issue nobody dispatched (prod 2026-10-07, OplifyMessage/oplify-messaging-api #41)", () => {
+  it("no agent:* label: says it is not queued yet and how to queue THIS issue, not that it cannot be", () => {
+    const text = describeTaskStatus(facts({ issue: { ...facts().issue, labels: ["P2", "bug-tracker-import"] } }), NOW);
+    expect(text).not.toMatch(/Not an Antigravity task/);
+    expect(text).toMatch(/Not queued for an agent yet/);
+    expect(text).toContain("start work on #762");
+  });
+
+  it("finds the PR that fixed it from the issue's timeline when no agent PR is linked", async () => {
+    const pullsGet = vi.fn(async () => ({
+      data: {
+        number: 81, html_url: "https://github.com/OplifyMessage/oplify-messaging-api/pull/81", state: "closed",
+        merged: true, draft: false, head: { sha: "abc1234", ref: "task/issue-78-carousel" }, base: { ref: "beta" },
+      },
+    }));
+    const octokit = {
+      paginate: vi.fn(async () => [
+        {
+          event: "cross-referenced",
+          source: {
+            issue: {
+              number: 81, title: "feat(catalog): add multi-product carousel support (#41)", body: "", state: "closed",
+              html_url: "https://github.com/OplifyMessage/oplify-messaging-api/pull/81",
+              repository: { full_name: "OplifyMessage/oplify-messaging-api" },
+              pull_request: { merged_at: "2026-10-06T09:35:19Z" },
+            },
+          },
+        },
+      ]),
+      rest: {
+        issues: {
+          get: vi.fn(async () => ({
+            data: {
+              number: 41, title: "[PROD-010] Catalog: no multi-product carousel", body: "Only a single product card.",
+              state: "open", labels: [{ name: "P2" }], created_at: "2026-09-20T00:00:00Z",
+              html_url: "https://github.com/OplifyMessage/oplify-messaging-api/issues/41",
+            },
+          })),
+          listComments: vi.fn(async () => ({ data: [] })),
+          listEventsForTimeline: vi.fn(),
+        },
+        pulls: { list: vi.fn(async () => ({ data: [{ number: 81, head: { ref: "task/issue-78-carousel" } }] })), get: pullsGet },
+        checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
+      },
+    };
+
+    const f = await fetchTaskFacts(octokit as never, "OplifyMessage", "oplify-messaging-api", 41, async () => null);
+
+    expect(pullsGet).toHaveBeenCalledWith({ owner: "OplifyMessage", repo: "oplify-messaging-api", pull_number: 81 });
+    expect(f.issue.body).toBe("Only a single product card.");
+    expect(f.issue.isPull).toBe(false);
+    const text = describeTaskStatus(f, NOW);
+    expect(text).toMatch(/Done — PR #81 merged into beta/);
+    expect(text).toContain("https://github.com/OplifyMessage/oplify-messaging-api/pull/81");
   });
 });

@@ -15,7 +15,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from "@langc
 import { jsonrepair } from "jsonrepair";
 import {
   KERNEL_SCHEMA_VERSION,
-  MAX_TOOL_CALLS_PER_STEP,
+  MAX_TOOL_CALLS_PER_STEP, MAX_READ_TOOL_CALLS_PER_STEP,
   OUTPUT_CONTRACTS,
   validatePlannerDecision,
   WORKERS,
@@ -130,7 +130,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
     `Output schema_refs: ${refs}`,
     ``,
     `Rules:`,
-    `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}.`,
+    `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}. A read-only investigation ("why does X happen" about FounderOS code or data: hitl_required=false, kind data, github_read get_file/search_code) may use max_tool_calls up to ${MAX_READ_TOOL_CALLS_PER_STEP}; any step that can write or send is capped at ${MAX_TOOL_CALLS_PER_STEP}.`,
     `- expected.kind is "action_receipt" whenever the step SENDS/POSTS/WRITES anything external; those steps also set hitl_required=true when using a gated tool.`,
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
     `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory, recall_conversation for what the founder said in past chats). Past decisions, bugs, or what Claude or Antigravity did or decided → search_knowledge (admin or engineering); if it returns \"No strong match\", say so, do not guess. Read first, then answer — never answer from priors or ask permission to check.`,
@@ -148,7 +148,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
     // preference. Filing an agent:ready issue IS what dispatch_antigravity_task
     // does; it simply was not named as a route.
     `- Creating, filing or opening a GitHub issue — including "label it agent:ready so the dispatcher picks it up" — IS a dispatch: engineering with dispatch_antigravity_task, which opens the issue and applies the agent:ready label. Never plan a memory or context tool for it.`,
-    `- Where an Antigravity task stands ("where are we on #762", "is it done", "why isn't it picked up") → engineering with antigravity_task_status. Sending EXISTING work back to Antigravity ("dispatch it again", "retry #762", "it wasn't picked up") → engineering with requeue_antigravity_task — never a second dispatch_antigravity_task for work that already has an issue.`,
+    `- Where an Antigravity task stands ("where are we on #762", "is it done", "why isn't it picked up") → engineering with antigravity_task_status. Sending EXISTING work to Antigravity ("start work on issue #41", "dispatch it again", "retry #762", "it wasn't picked up") → engineering with requeue_antigravity_task — never a second dispatch_antigravity_task for work that already has an issue.`,
     `- update_context / remember record a DURABLE preference or fact the founder states about himself or his business. They are never a substitute for a task, action or request he asked you to perform: if he asked for something to be DONE, plan the step that does it. A stated preference alongside a task is recorded IN ADDITION to that step, never instead of it.`,
     `- Requests to fix, build, or change something in Oplify — Pushkar's employer's WhatsApp business-messaging product — are engineering with dispatch_antigravity_task, never github_read: repo "OplifyMessage/oplify-messaging-api" for backend/API/Prisma/Redis/BullMQ/socket work, "OplifyMessage/oplify-messaging-app" for frontend/React/UI/mobile work. Ask which repo if the message doesn't make the side clear rather than guessing.`,
     `- Draft is not send: "draft/write/prepare" means produce the content for review (expected.kind "draft", no posting/sending tool, hitl_required=false). Only an explicit instruction to post/send/publish/schedule uses a gated action tool.`,

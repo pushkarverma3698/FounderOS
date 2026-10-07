@@ -30,6 +30,8 @@ import { runRagSearch } from "../db/rag-query.js";
 import { ragErrorMessage, renderRagSuccess } from "../db/retrieval-result.js";
 import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
+import { env, TENANT } from "../core/config.js";
+import { visibilityFilter } from "../db/brain-visibility.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
@@ -37,17 +39,20 @@ const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 10;
 
 export const searchKnowledge = tool(
-  async ({ query, entry_type, top_k }) =>
+  async ({ query, entry_type, top_k }, config) =>
     withToolErrorBoundary("db", "query brain_memories (hybrid) in Postgres", async () => {
       const topK = Math.min(Math.max(Math.round(top_k ?? DEFAULT_TOP_K), 1), MAX_TOP_K);
       log.debug({ query, entry_type, topK }, "Knowledge search");
 
-      let result = await runRagSearch(
-        "brain_memories",
-        query,
-        topK,
-        entry_type ? { filter: { entry_type } } : undefined,
-      );
+      // Group-chat privacy (AG-027): the thread comes from the run, never from an argument. Only the founder DM
+      // reads `visibility: founder` rows (Mac capture); no thread (the IDE MCP does not use this tool) counts as not the DM.
+      const threadId = String(config?.configurable?.["thread_id"] ?? "");
+      const visibility = visibilityFilter(threadId, TENANT, env.TELEGRAM_CHAT_ID);
+      const scoped = { ...visibility };
+      const typed = entry_type ? { ...visibility, entry_type } : visibility;
+      const optsFor = (filter: typeof typed) => (Object.keys(filter).length > 0 ? { filter } : undefined);
+
+      let result = await runRagSearch("brain_memories", query, topK, optsFor(typed));
 
       // entry_type is a FORGIVING post-filter, never a query-dropping
       // replacement. A model that guesses a type with zero rows (e.g.
@@ -56,7 +61,7 @@ export const searchKnowledge = tool(
       // fabricated Turicks ICP). If the filtered search comes back empty, retry
       // unfiltered before reporting nothing found — real content over a false miss.
       if (entry_type && !("error" in result) && result.hits.length === 0) {
-        const unfiltered = await runRagSearch("brain_memories", query, topK);
+        const unfiltered = await runRagSearch("brain_memories", query, topK, optsFor(scoped));
         if (!("error" in unfiltered)) result = unfiltered;
       }
 

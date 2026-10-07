@@ -129,6 +129,7 @@ function taskBlock(i: ExecutorPromptInput): string {
     "Commit on this branch; do not create, rename or switch branches (the dispatcher finds your PR by this exact name).",
     "Push with `git push -u origin HEAD`.",
     `Open the PR as a draft targeting ${i.targetBranch}, with three sections: What changed, How it was verified (commands and their output), NOT VERIFIED.`,
+    "Put the line `Moves: A` at the top of the PR body: the PR scope check fails without it.",
     "Stop once the PR is open. Do not keep iterating.",
   ];
   return lines.join("\n");
