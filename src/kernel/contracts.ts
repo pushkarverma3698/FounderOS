@@ -57,6 +57,8 @@ export const ToolReceiptSchema = z.object({
   ok: z.boolean(),
   at: z.string().datetime(),
   idempotency_key: z.string().optional(),
+  /** false when the tool succeeded by deliberately doing nothing (tool-failure.ts NO_ACTION_PREFIX). */
+  acted: z.boolean().optional(),
 });
 export type ToolReceipt = z.infer<typeof ToolReceiptSchema>;
 
