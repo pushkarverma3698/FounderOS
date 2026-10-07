@@ -492,6 +492,20 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     this.writeGh(s);
   }
 
+  /** Makes `slug` invisible to the token, as GitHub answers a repo outside a fine-grained PAT's owner. */
+  hideRepo(slug: string): RepoState {
+    const s = this.readGh();
+    const r = this.repoState(s, slug);
+    delete s.repos[slug];
+    this.writeGh(s);
+    return r;
+  }
+  restoreRepo(slug: string, state: RepoState): void {
+    const s = this.readGh();
+    s.repos[slug] = state;
+    this.writeGh(s);
+  }
+
   patchGh(patch: Partial<Pick<GhState, "authOk" | "failIssueEdit" | "failLabelList" | "failApi">>): void {
     this.writeGh({ ...this.readGh(), ...patch });
   }

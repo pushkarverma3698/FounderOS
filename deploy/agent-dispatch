@@ -1469,6 +1469,47 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
+# A repo the gh token cannot see: ONE Telegram message, not one log line per tick. A fine-grained PAT scoped to a
+# single owner answers every other owner's repo with "Could not resolve to a Repository" (2026-10-06: 600 log lines,
+# nobody told, while the bot's own classic token kept filing OplifyMessage issues this daemon could never pick up).
+# State: one file per repo under UNREACHABLE_DIR, removed the first tick the repo answers again, so a relapse alerts again.
+UNREACHABLE_DIR="${AGENT_DISPATCH_UNREACHABLE_DIR:-$HOME/.claude/agent-dispatch.unreachable}"
+
+# repo_reachable REPO — 0 when gh can read the repo's issues (or failed for a reason that is not access), 1 when it is
+# unreachable and the repo must be skipped this tick.
+repo_reachable() {
+  local repo="$1" marker err
+  marker="$UNREACHABLE_DIR/${repo//\//__}"
+  if err=$(gh issue list --repo "$repo" --limit 1 --json number 2>&1 >/dev/null); then
+    if [[ -f "$marker" ]]; then
+      rm -f "$marker"
+      log "repo $repo is reachable again"
+      notify "✅ agent-dispatch can reach ${repo} again on ${HOST}. Its agent:ready issues are being picked up."
+    fi
+    return 0
+  fi
+  err=$(printf '%s' "$err" | head -n1 | redact_secrets)
+  # Only an access failure is an alert. A network blip or rate limit is retried next tick without a message.
+  if ! printf '%s' "$err" | grep -qiE 'could not resolve to a repository|not found|HTTP 404|HTTP 403'; then
+    log "gh could not list issues in $repo (not an access error, continuing): $err"
+    return 0
+  fi
+  if [[ -f "$marker" ]]; then
+    log "skipping $repo — still unreachable"
+    return 1
+  fi
+  mkdir -p "$UNREACHABLE_DIR" 2>/dev/null
+  if ! printf '%s\n%s\n' "$(date -u '+%Y-%m-%d %H:%M UTC')" "$err" >"$marker" 2>/dev/null; then
+    log "could not record $repo as unreachable in $marker — NOT announcing it: an unrecorded alert would repeat every tick"
+    return 1
+  fi
+  log "repo $repo is unreachable: $err"
+  notify "⚠️ agent-dispatch cannot reach ${repo} on ${HOST}, so none of its issues are picked up.
+gh said: ${err}
+Likely cause: the gh token on this box has no access to that repo's owner (a fine-grained token is scoped to ONE owner). Fix: give the token access to ${repo%%/*}, or tell me to stop dispatching that repo. This message is sent once until the repo is reachable again."
+  return 1
+}
+
 # Indexed (not associative) array — bash 3.2 on macOS has no `declare -A`,
 # and this script runs locally (--dry-run) as well as on the VPS's bash 5.
 claims_done=()
@@ -1491,6 +1532,7 @@ run_tick() {
       export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
     fi
 
+    repo_reachable "$REPO" || continue
     log "Processing repo: $REPO (workspace: $WORKSPACE)"
     WALLS_LOGGED=" "
 
