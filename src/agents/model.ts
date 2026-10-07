@@ -15,6 +15,7 @@ import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
 import { geminiThinkingConfig } from "../core/gemini-thinking.js";
+import { missingCredentialReason, noteWorkerModelChoice } from "./model-truth.js";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
@@ -271,11 +272,16 @@ export function getWorkerModelId(): string {
 
 export function getWorkerModel(): BaseChatModel {
   const workerId = getWorkerModelId();
-  if (workerId === getConfiguredModelId()) return getModel(); // no split configured
+  const primaryId = getConfiguredModelId();
   const parsed = parseModelId(workerId);
-  const model = buildModel(parsed, resolveTemperature(), { optional: true });
-  if (model) return model;
-  // Misconfigured worker model (e.g. missing key) — fail safe to the primary.
+  const model = workerId === primaryId ? null : buildModel(parsed, resolveTemperature(), { optional: true });
+  if (model) {
+    noteWorkerModelChoice({ requestedId: workerId, effectiveId: workerId });
+    return model;
+  }
+  // No split, or a misconfigured worker model (e.g. missing key): the primary serves; say why.
+  const fallbackReason = workerId === primaryId ? undefined : missingCredentialReason(parsed.provider);
+  noteWorkerModelChoice({ requestedId: workerId, effectiveId: primaryId, ...(fallbackReason && { fallbackReason }) });
   return getModel();
 }
 
