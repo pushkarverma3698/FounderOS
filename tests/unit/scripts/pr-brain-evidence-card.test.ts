@@ -45,6 +45,7 @@ function sweep(opts: {
   curlFail?: boolean;
   quietNow?: string;
   owner?: string;
+  onePr?: boolean;
 }): void {
   execFileSync("git", ["remote", "set-url", "origin", `https://github.com/${opts.owner ?? "owner"}/widgets.git`], { cwd: repo });
   const env = {
@@ -58,6 +59,7 @@ function sweep(opts: {
     PR_BRAIN_NODE: join(bin, "fakenode"),
     QA_APP_ROOT: join(root, "no-founderos"),
     FAKE_PRS: `7 aaaa1111 beta ${opts.headRef ?? "task/issue-7-x"}`,
+    FAKE_HEAD_REF: opts.headRef ?? "task/issue-7-x",
     FAKE_EC_OUT: opts.ec ?? "",
     FAKE_CURL_FAIL: opts.curlFail ? "1" : "",
     GH_LOG: f("gh.log"),
@@ -66,7 +68,7 @@ function sweep(opts: {
     TG_QUIET_NOW: opts.quietNow ?? "12",
     ...(opts.flag === undefined ? {} : { AGENT_PIPELINE_V2: opts.flag }),
   };
-  spawnSync("bash", [SCRIPT], { env, encoding: "utf8", timeout: 30_000 });
+  spawnSync("bash", [SCRIPT, ...(opts.onePr ? ["--pr", "7"] : [])], { env, encoding: "utf8", timeout: 30_000 });
 }
 
 const merged = (): boolean => /pr merge 7 --squash/.test(read("gh.log"));
@@ -95,6 +97,7 @@ case "$*" in
   "api user"*) echo owner ;;
   "auth status"*) exit 0 ;;
   "pr list"*) echo "$FAKE_PRS" ;;
+  *"headRefName"*) echo "$FAKE_HEAD_REF" ;;
   *"headRefOid"*) echo aaaa1111 ;;
   *"--json comments"*) echo "" ;;
   *"reviewDecision"*) echo "CLEARED — marked ready · title" ;;
@@ -195,6 +198,13 @@ describe("pr-brain + evidence card: a contract exists", () => {
     expect(args).toContain("--pr 7");
     expect(args).toContain("--head aaaa1111");
     expect(args).toContain("--verdict CLEARED");
+  });
+
+  it("--pr mode (a hand run) reads the branch from GitHub, so the card path still runs", () => {
+    sweep({ ec: CARD, flag: "1", onePr: true });
+    expect(read("ec-args.log")).toContain("--issue 7");
+    expect(cardSends()).toHaveLength(2);
+    expect(merged()).toBe(false);
   });
 
   it("parses the issue from task/issue-N with no slug", () => {

@@ -71,6 +71,8 @@ export interface CodingDeps {
   inspectPr(repo: string, pr: number): Promise<PrState>;
   /** Squash-merges pinned to `sha`; returns the merge commit's sha. Throws when GitHub refuses. */
   merge(repo: string, pr: number, sha: string): Promise<string>;
+  /** Merges the base branch into the PR branch, pinned to `expectedHead`, so CI reruns on a head that is current. Throws when GitHub refuses. */
+  updateBranch(repo: string, pr: number, expectedHead: string): Promise<void>;
   alreadyDone(key: string): Promise<boolean>;
   /** True when a row was written. */
   audit(row: AuditRow): Promise<boolean>;
@@ -216,8 +218,35 @@ async function mergePr(ctx: Context, deps: CodingDeps, rec: PendingMerge, acknow
     baseNow: facts.baseSha,
   });
   if (!decision.ok) {
+    const reasons = decision.reasons.map((r) => `• ${r}`).join("\n");
+    // Only the base moved: the review and the evidence still describe this head. The base requires an up-to-date branch,
+    // and the review sweep skips a head it already gated, so nothing else would ever produce a new head and a new card.
+    const onlyBaseMoved = canMerge({
+      evidence: rec.evidence,
+      review: rec.review,
+      headAtReview: rec.head_at_review,
+      headNow: facts.headSha,
+      baseAtReview: rec.base_at_review,
+      baseNow: rec.base_at_review,
+    }).ok;
+    if (!onlyBaseMoved) {
+      await clearButtons(ctx);
+      await say(ctx, `⛔ ${label}: not merging.\n${reasons}\nA fresh evidence card follows when the new head has been checked.`);
+      return;
+    }
+    try {
+      await deps.updateBranch(rec.repo, rec.pr, facts.headSha);
+    } catch (err) {
+      await release(deps, rec.nonce);
+      await say(ctx, `⛔ ${label}: not merging.\n${reasons}\nThe PR branch was not updated either: ${errText(err)}\nNothing was merged. Fix that, then tap again.`);
+      return;
+    }
     await clearButtons(ctx);
-    await say(ctx, `⛔ ${label}: not merging.\n${decision.reasons.map((r) => `• ${r}`).join("\n")}\nA fresh evidence card follows when the new head has been checked.`);
+    await say(
+      ctx,
+      `⛔ ${label}: not merging.\n${reasons}\nI merged the new ${facts.baseRef} into the PR branch, so its checks rerun on a current head. ` +
+        `A fresh card follows from the next review sweep once those checks finish; if the review sweep is switched off, none comes until it is on again.`,
+    );
     return;
   }
 

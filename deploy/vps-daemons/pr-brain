@@ -1311,12 +1311,29 @@ while IFS= read -r repo; do
       continue
     fi
 
+    # --pr mode is given only the number: read the branch names the sweep gets from `gh pr list`. Without head_ref,
+    # ec_issue_of finds no issue and the PR silently takes the legacy path (no evidence card; PR #974, 10-07).
+    if [[ -n "$ONE_PR" ]]; then
+      head_ref="$(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null)"
+      base_ref="$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)"
+    fi
+
     # Nothing new but pr-brain's own fix commits and clean merges of the base:
     # re-stamp, retry the merge if it was already cleared, spend no review session.
     if [[ -z "$ONE_PR" && "$DRY_RUN" -eq 0 ]]; then
       last=$(last_gated_head "$comments")
       pr_base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null || true)
       if only_our_commits_since "$last" "$head" "$pr_base" "$pr"; then
+        # A tap on a stale-base card updates the PR branch, which reruns CI on a new head. A card built while those
+        # checks run reads UNKNOWN evidence and carries no merge button, and the stamp below would stop a later sweep
+        # from building a better one. Leave the head unstamped; the next sweep tries again once the checks finish.
+        if ec_enabled && [[ "$head_ref" == task/issue-* ]]; then
+          required_ci_state "$pr"
+          if [[ "$CI_STATE" == pending ]]; then
+            log "$repo_name#$pr head ${head:0:8}: required CI is still running — card held until it finishes, head not stamped"
+            continue
+          fi
+        fi
         log "$repo_name#$pr head ${head:0:8}: only pr-brain's own commits / clean $pr_base merges since gated ${last:0:8} — verdict carried forward, no review session spent"
         gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->
 Carried forward from \`${last:0:8}\`: every commit since is pr-brain's own fix or a clean merge of \`${pr_base}\`, so no second review was spent." >>"$LOG" 2>&1 || true
