@@ -45,7 +45,7 @@ Tools:
     HITL-gated.
 - deploy_static_site → publish a built static site (index.html or directory) from ~/Projects to a
     public URL (/clients/{slug}/ or /showcase-1/). HITL-gated. Call AFTER claude_code builds.
-- github_read         → read GitHub (list_repos, get_readme, get_stats, list_issues, list_branches, list_commits). No approval needed.
+- github_read         → read GitHub (list_repos, get_readme, get_stats, list_issues, list_branches, list_commits, get_pr, get_file, search_code). No approval needed.
     Use list_issues for "show open issues", list_branches for "show branches", list_commits for "show git log".
     Always pass owner="pushkarverma3698" and repo="FounderOS" for FounderOS-related queries.
 - vps_run             → run a ONE-OFF containerized job on the VPS (image node/python/ubuntu) when a task
