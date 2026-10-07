@@ -1,90 +1,124 @@
 /**
- * FounderOS — tell the VPS dispatcher an issue was just filed
- * ===========================================================
- * Nudges `agent-dispatch` to claim an issue within a minute instead of waiting for its next
- * 15-minute cron tick. Called right after the issue is created, so the founder sees Antigravity
- * start in seconds-to-a-minute rather than up to a quarter of an hour.
+ * FounderOS — start the job for an issue that was just filed or approved
+ * ======================================================================
+ * One /task = one process that owns the job from start to finish and reports its own outcome (a PR card
+ * or the error) to Telegram. The bot's only act is to hand that process its work: it writes ONE JSON line
+ * `{repo, issue, stage}` to the fos-job socket, and systemd starts `deploy/job-run` for the connection.
  *
- * THE BOT LEAVES A NOTE; IT DOES NOT START THE DISPATCHER. This used to spawn
- * `agent-dispatch --issue N --repo R` as a child of the bot. That could never work, and it did harm:
- * the bot runs under systemd with `NoNewPrivileges=true` and `PrivateTmp=true`, so in that child
+ * THIS IS THE PATH, NOT A SHORTCUT. There is no cron fallback that picks the issue up later for the
+ * founder's benefit: when the socket cannot be reached the result says so, and the caller tells the
+ * founder in the same chat (see `startFailureNote`). Silence about a job that never started is the failure
+ * this design removes.
+ *
+ * WHY A SOCKET, NOT A CHILD PROCESS. The bot runs under systemd with `NoNewPrivileges=true` and
+ * `PrivateTmp=true`, so a dispatcher spawned from it can never work:
  *   - every `sudo` fails ("The 'no new privileges' flag is set, which prevents sudo from running as
  *     root") and the dispatcher's startup check read that as "agy is not installed for the antigravity
  *     user": it PAUSED itself and sent the founder a false "🛑 agent-dispatch PAUSED" after every
- *     approved /task (2026-10-02 14:51, 15:27, 16:51), and "✅ resumed" when the next cron tick ran;
- *   - /tmp is private to the service, so the prompt file the dispatcher writes there would be invisible
- *     to the antigravity user even if sudo had worked.
- * Reproduced with `systemd-run --uid=founderos -p NoNewPrivileges=true`: sudo refused; without the
- * flag it printed agy's path.
+ *     approved /task (2026-10-02);
+ *   - /tmp is private to the service, so the prompt file the dispatcher writes there is invisible to the
+ *     antigravity user even if sudo worked.
+ * `fos-job@.service` (deploy/systemd) runs outside that sandbox, as the same user, without the flag, so
+ * `sudo -n -u antigravity` works exactly as it does for cron. The bot reaches it the way it already
+ * reaches /run/agy-login.sock. Nothing in this file may start a process (a test enforces it).
  *
- * So the bot only appends a line to ~/.claude/agent-dispatch.kick. A cron job outside that sandbox runs
- * `agent-dispatch --kicked` every minute; it costs nothing when the file is absent, and when it is
- * there it runs an ordinary tick, which is the same path cron has always used.
- *
- * THIS IS A SHORTCUT, NEVER A DEPENDENCY. Cron's 15-minute tick remains the guaranteed path: every
- * failure here (not on the VPS, directory unwritable, the per-minute job not installed) costs at most
- * the 15 minutes it was trying to save. So nothing in here throws, nothing is awaited, and nothing
- * reaches the ToolResult. An issue that is filed is the deliverable; when it is claimed is an
- * optimisation.
+ * `stage` is `spec` for an `agent:spec` issue (Pass P writes the spec) and `build` for an `agent:ready`
+ * one (the executor implements it, then pr-brain reviews the PR).
  *
  * Why it lives at the tool layer and not in the /task handler: a gateway turn returns as soon as the
  * HITL approval card is posted (src/gateway/kernel-run.ts), which is minutes to hours BEFORE the issue
- * exists. A note left there would describe an issue that does not exist yet. Writing it after
- * issues.create also covers the plain-English dispatch path and the self-improvement loop, neither of
- * which goes through /task.
+ * exists. Starting the job after issues.create also covers the plain-English dispatch path and the
+ * self-improvement loop, neither of which goes through /task.
+ *
+ * Inert unless `AGENT_DISPATCH_BIN` is set, which only the VPS does: that keeps every test run, CI run
+ * and laptop run from touching a socket.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { connect } from "node:net";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:dispatch-tick" });
 
-/** Where the note goes. Injected in tests so nothing real is ever written. */
-export type KickWriter = (file: string, line: string) => void;
+export type JobStage = "spec" | "build";
 
-const fileWriter: KickWriter = (file, line) => {
-  mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, line, { mode: 0o600 });
-};
+export type StartJobResult = { status: "inert" } | { status: "started" } | { status: "failed"; reason: string };
 
-/** The file `agent-dispatch --kicked` watches (KICK_FILE in deploy/agent-dispatch). */
-export function kickFilePath(): string {
-  return process.env["AGENT_DISPATCH_KICK_FILE"]?.trim() || join(homedir(), ".claude", "agent-dispatch.kick");
+/** Delivers one request line to the socket. Injected in tests so nothing real is ever connected to. */
+export type JobSender = (socketPath: string, line: string) => Promise<void>;
+
+const DEFAULT_JOB_SOCKET = "/run/fos-job.sock";
+const SEND_TIMEOUT_MS = 5_000;
+const REPO_RE = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
+/** The socket `fos-job.socket` listens on (deploy/systemd/fos-job.socket). */
+export function jobSocketPath(): string {
+  return process.env["FOS_JOB_SOCKET"]?.trim() || DEFAULT_JOB_SOCKET;
 }
 
+/** The request line `deploy/job-run` validates. The repo is carried by name: a bare number is ambiguous across repos. */
+export function jobRequestLine(issueNumber: number, repo: string, stage: JobStage): string {
+  return `${JSON.stringify({ repo: repo.trim(), issue: issueNumber, stage })}\n`;
+}
+
+/** What to tell the founder, in the chat that asked for the job, when it could not be started. */
+export function startFailureNote(issueNumber: number, repo: string, reason: string): string {
+  return (
+    `Could not start the run for ${repo}#${issueNumber}: ${reason}. ` +
+    `Nothing is running it. On the VPS check \`systemctl status fos-job.socket\`; the issue is filed and a retry will start it.`
+  );
+}
+
+const socketSender: JobSender = (socketPath, line) =>
+  new Promise<void>((resolve, reject) => {
+    const socket = connect(socketPath);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`timed out connecting to ${socketPath}`));
+    }, SEND_TIMEOUT_MS);
+    const fail = (err: Error): void => {
+      clearTimeout(timer);
+      socket.destroy();
+      reject(err);
+    };
+    socket.once("error", fail);
+    socket.once("connect", () => {
+      socket.end(line, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  });
+
 /**
- * Ask the dispatcher to look at the queue now. A silent no-op unless `AGENT_DISPATCH_BIN` is set, which
- * only the VPS does: that keeps every test run, CI run and laptop run inert.
- *
- * `repo` (owner/name) is recorded with the issue number because the dispatcher's log says what it was
- * kicked for, and a bare number is ambiguous across its four repos (a FounderOS-numbered issue was once
- * "claimed" in place of a same-numbered Oplify one, 2026-09-21).
+ * Start the job for `issueNumber` now. Never throws: a failure is returned so the caller can say so.
+ * `{status: "inert"}` means this host does not run jobs (tests, CI, laptop) and there is nothing to report.
  */
-export function kickDispatchTick(issueNumber: number, repo: string, write: KickWriter = fileWriter): void {
-  if (!process.env["AGENT_DISPATCH_BIN"]?.trim()) return;
+export async function startDispatchJob(
+  issueNumber: number,
+  repo: string,
+  stage: JobStage,
+  send: JobSender = socketSender,
+): Promise<StartJobResult> {
+  if (!process.env["AGENT_DISPATCH_BIN"]?.trim()) return { status: "inert" };
 
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    log.warn({ issueNumber }, "refusing to leave a kick note for a non-positive issue number");
-    return;
+    log.warn({ issueNumber }, "refusing to start a job for a non-positive issue number");
+    return { status: "failed", reason: `invalid issue number ${String(issueNumber)}` };
   }
-
   const repoSlug = repo.trim();
-  if (!repoSlug) {
-    log.warn({ issueNumber }, "refusing to leave a kick note without a repo");
-    return;
+  if (!REPO_RE.test(repoSlug)) {
+    log.warn({ issueNumber, repo }, "refusing to start a job for a malformed repo");
+    return { status: "failed", reason: `invalid repo "${repoSlug}"` };
   }
 
-  const file = kickFilePath();
+  const socketPath = jobSocketPath();
   try {
-    write(file, `${repoSlug}#${issueNumber}\n`);
-    log.info({ file, issueNumber, repo: repoSlug }, "left a kick note for agent-dispatch");
+    await send(socketPath, jobRequestLine(issueNumber, repoSlug, stage));
+    log.info({ socketPath, issueNumber, repo: repoSlug, stage }, "handed the job to fos-job");
+    return { status: "started" };
   } catch (err) {
-    // allow-failopen: the issue is already filed; cron claims it within 15 minutes.
-    log.warn(
-      { file, issueNumber, repo: repoSlug, err: (err as Error).message },
-      "could not leave a kick note — cron will claim the issue on its next tick",
-    );
+    const reason = (err as Error).message;
+    log.warn({ socketPath, issueNumber, repo: repoSlug, stage, err: reason }, "could not start the job");
+    return { status: "failed", reason };
   }
 }

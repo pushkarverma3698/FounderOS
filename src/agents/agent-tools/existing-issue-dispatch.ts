@@ -12,7 +12,7 @@
 import { Octokit } from "octokit";
 import { describeTaskStatus, fetchTaskFacts, type TaskFacts } from "../../tools/antigravity-status.js";
 import { resolveDispatchRepo } from "../../tools/dispatch-antigravity.js";
-import { kickDispatchTick } from "../../tools/dispatch-tick.js";
+import { startDispatchJob, startFailureNote } from "../../tools/dispatch-tick.js";
 import { engineDisplay, engineLabel, parseEngine, readDefaultEngine, type Engine } from "../../tools/coding-engine.js";
 import { LABEL_SPEC, LABEL_SPEC_REVIEW } from "../../tools/pipeline-pending.js";
 import { filedLabels } from "../../tools/dispatch-spec-intake.js";
@@ -92,10 +92,11 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   const refused = refusal(facts);
   if (refused) return `${NO_ACTION_PREFIX} ${refused}\n\n${status}`;
 
-  // Already queued: nudging the dispatcher changes nothing on GitHub, so no card.
+  // Already queued: starting its run changes nothing on GitHub, so no card.
   if (facts.issue.state === "open" && facts.issue.labels.includes("agent:ready")) {
-    kickDispatchTick(n, t.slug);
-    return `${NO_ACTION_PREFIX} #${n} is already queued — I nudged the dispatcher to pick it up now. Nothing new was filed.\n\n${status}`;
+    const started = await startDispatchJob(n, t.slug, "build");
+    const note = started.status === "failed" ? `\n⚠️ ${startFailureNote(n, t.slug, started.reason)}` : "";
+    return `${NO_ACTION_PREFIX} #${n} is already queued — I started its run now. Nothing new was filed.${note}\n\n${status}`;
   }
 
   const fresh = neverRan(facts.issue.labels);
@@ -149,7 +150,8 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
       ? `🔁 Queued from Telegram by the founder: “${request.trim()}”. agent-dispatch picks up this same issue on its next run.`
       : "🔁 Re-queued from Telegram by the founder. agent-dispatch picks up this same issue on its next run.",
   });
-  kickDispatchTick(n, t.slug);
+  const started = await startDispatchJob(n, t.slug, toSpec ? "spec" : "build");
+  const warn = started.status === "failed" ? `\n⚠️ ${startFailureNote(n, t.slug, started.reason)}` : "";
 
   const auditRes = await writeAuditEntry({
     action: opts.action,
@@ -162,12 +164,12 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   if (toSpec) {
     return (
       `✅ #${n} is queued for a spec on ${t.slug} (same issue, nothing new filed). The spec is drafted from your words and ` +
-      `what #${n} says. A spec card will follow here in Telegram; nothing is built until you approve it. No agent is on it yet.\n${facts.issue.url}`
+      `what #${n} says. A spec card will follow here in Telegram; nothing is built until you approve it.${warn}\n${facts.issue.url}`
     );
   }
   const when = facts.quotaUntil && facts.quotaUntil > new Date()
     ? `Antigravity's quota is exhausted until ${facts.quotaUntil.toISOString().slice(0, 16).replace("T", " ")} UTC, so it starts then.`
-    : "agent-dispatch picks it up within 15 minutes, usually at once.";
-  if (fresh) return `✅ #${n} is queued for ${who} (same issue, nothing new filed). ${when} No agent is on it yet.\n${facts.issue.url}`;
-  return `✅ #${n} is back in Antigravity's queue (same issue, nothing new filed). ${when}\n${facts.issue.url}`;
+    : "Its run started now and reports back here.";
+  if (fresh) return `✅ #${n} is queued for ${who} (same issue, nothing new filed). ${when}${warn}\n${facts.issue.url}`;
+  return `✅ #${n} is back in Antigravity's queue (same issue, nothing new filed). ${when}${warn}\n${facts.issue.url}`;
 }

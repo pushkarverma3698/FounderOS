@@ -59,6 +59,6 @@ describe("dispatchAntigravityTask under AGENT_PIPELINE_V2", () => {
     const card = mockHitlGate.mock.calls[0]?.[0] as { summary: string };
     expect(card.summary).toContain("Open agent:ready issue on");
     expect(reply).toContain("✅ Dispatched to Claude Code: Issue #77");
-    expect(reply).toContain("next tick (within 15 minutes)");
+    expect(reply).toContain("Its run started now");
   });
 });

@@ -38,7 +38,7 @@ vi.mock("../../../src/db/queries.js", () => ({
   listRegisteredDispatchRepos: async () => [],
 }));
 
-vi.mock("../../../src/tools/dispatch-tick.js", () => ({ kickDispatchTick: vi.fn() }));
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({ startDispatchJob: vi.fn().mockResolvedValue({ status: "inert" }), startFailureNote: () => "" }));
 
 const { dispatchAntigravityTask } = await import("../../../src/agents/agent-tools/antigravity.js");
 const { AGENT_BRIEF_HEADINGS } = await import("../../../src/tools/agent-brief-lint.js");
