@@ -29,6 +29,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { buildFallbackModels, getWorkerModel, isModelFallbackError } from "./model.js";
+import { getEffectiveWorkerModelId } from "./model-truth.js";
 import {
   BudgetGuardCallback,
   costAttributionMetadata,
@@ -146,7 +147,7 @@ export async function invokeWorkerWithFallbacks(
         // priced with DEFAULT_COST whenever a provider response carried no
         // model name of its own. Measured on prod 2026-08-25. Same class of
         // bug as jq's `//` not catching "" (2026-08-08).
-        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || "", costSink)],
+        callbacks: [new BudgetGuardCallback(createRunBudget(), getEffectiveWorkerModelId() ?? (process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || ""), costSink)],
       }
     : undefined;
 

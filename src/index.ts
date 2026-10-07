@@ -18,6 +18,7 @@ import { env, TELEGRAM_POLLING_ENABLED } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getKernel } from "./gateway/kernel-boot.js";
 import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
+import { DRAIN_TIMEOUT_MS, drainInFlight, notifyDroppedTurns, recordDroppedTurns } from "./gateway/inflight-turns.js";
 import { restorePendingApproval } from "./gateway/kernel-run.js";
 import { startMergeDigestCron } from "./gateway/merge-digest-run.js";
 import { resumeInterruptedMission } from "./gateway/mission-resume.js";
@@ -120,6 +121,10 @@ async function main(): Promise<void> {
 
   if (TELEGRAM_POLLING_ENABLED) {
     startMergeDigestCron(); // 19:00 list of PRs ready to merge, one Merge button each; the daemon never merges for you
+    // One "send it again" per turn the last shutdown cut off (never replayed: the ask may have had a side effect).
+    await notifyDroppedTurns((chatId, text) => getBot().api.sendMessage(chatId, text).then(() => undefined)).catch((err) =>
+      log.warn({ err: (err as Error).message }, "Dropped-turn notice failed"), // allow-failopen: the ledger keeps the entry for the next boot
+    );
     await sendBootNoticeOnce("restart", buildRestartMessage(), (text) => sendToChat(text, "HTML")).catch((err) =>
       log.warn({ err: (err as Error).message }, "Startup notification failed"),
     );
@@ -132,8 +137,15 @@ async function main(): Promise<void> {
 
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
+  const startedAt = Date.now();
   healthServer?.close();
-  await stopBot();
+  await stopBot(); // no new updates from here on
+  // Wait for turns the founder is waiting on; the budget counts from SIGTERM so the unit's TimeoutStopSec still holds.
+  const { drained, dropped } = await drainInFlight(DRAIN_TIMEOUT_MS - (Date.now() - startedAt));
+  if (!drained) {
+    log.warn({ dropped: dropped.map((t) => t.turnId) }, "Drain timed out — turns still running will be reported on the next boot");
+    await recordDroppedTurns(dropped);
+  }
   await closeDatabaseConnections();
   releaseSingleInstanceLock();
   log.info("FounderOS stopped cleanly");

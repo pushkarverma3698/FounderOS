@@ -521,7 +521,7 @@ preflight() {
   if [[ "$ENGINE" == "agy" ]]; then
     # One tiny agy turn in /tmp, in the plain text format (the answer is the word; a failure is the CLI's own error
     # line). The classifier reads the same text it reads for a real gate, so an outage is named identically.
-    local pf_log detail quota_line=""; pf_log="$(mktemp /tmp/pr-brain-preflight-XXXXXX.log)"
+    local pf_log detail quota_line=""; pf_log="$(mktemp /tmp/pr-brain-preflight-XXXXXX)"
     while :; do
       if ! select_review_model; then
         # Nothing left to ask: every candidate is spent, or none may be used (it is the executor's own model).
@@ -793,7 +793,7 @@ run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
     printf 'Error: could not prepare the review workspace %s for %s#%s (see the log above)\n' "$REVIEW_WS_BASE/$name" "$name" "$pr" >"$out"
     return 1
   fi
-  prompt_file="$(mktemp /tmp/pr-brain-prompt-XXXXXX.txt)"
+  prompt_file="$(mktemp /tmp/pr-brain-prompt-XXXXXX)"
   chmod 644 "$prompt_file"
   build_agy_prompt "$pr" "$slug" "$head" "$app_rc" >"$prompt_file"
   agy_run "Reviewing ${name}#${pr}" "$REVIEW_DIR" "$prompt_file" "$MODEL" "$TIMEOUT_SEC" "$out"
