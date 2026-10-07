@@ -29,6 +29,7 @@
 | [AG-033](../antigravity/AG-033-follow-up-referents.md) follow-up referents | 2 | Full | 1 | none (merges after AG-032 if both touch the planner) |
 | [AG-042](../antigravity/AG-042-native-tools-in-the-hub.md) FounderOS read tools in the VPS hub | 3 | Full | 1 | none |
 | [AG-043](../antigravity/AG-043-self-host-for-developers.md) self-host install for developer friends | 5 | Full | 1 | none |
+| AG-044 (found live 10-08, not briefed yet) the bot reads the calendar: a voice note "what is on my calendar tomorrow?" got "I only have a tool to create events". `src/mcp/hub-google.ts` already reads it for the Mac; the bot has no read tool. Needs the founder's Google re-auth first | 2 | Full | 2 | Google re-auth |
 
 Out of scope now: AG-038 (single-agent loop) stays gated on the golden set after AG-031/032/033; option B (LangGraph coding graph) is not built.
 
