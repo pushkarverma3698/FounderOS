@@ -58,6 +58,20 @@ describe("stripUnbackedProgress", () => {
     expect(stripUnbackedProgress(reply, [])).toBe(reply);
   });
 
+  it("prod 2026-10-07 10:44: 'claimed' after a dispatch, with no status read, is replaced", () => {
+    const reply = "Done. Issue #83 is filed and an Antigravity agent has claimed it.\nhttps://github.com/o/r/issues/83";
+    expect(stripUnbackedProgress(reply, [])).toBe(`Done. ${NO_STATUS_NOTICE}\nhttps://github.com/o/r/issues/83`);
+  });
+
+  it.each([
+    ["agent-dispatch picks it up within 15 minutes, usually at once."],
+    ["The VPS agent-dispatch loop will pick it up on its next tick."],
+    ["✅ #41 is queued for Google Antigravity (same issue, nothing new filed). No agent is on it yet."],
+    ["#41 is already fixed — PR #81 merged into beta."],
+  ])("a future or negative statement passes: %s", (reply) => {
+    expect(stripUnbackedProgress(reply, [])).toBe(reply);
+  });
+
   it("STATUS_TOOLS names the three status sources", () => {
     expect([...STATUS_TOOLS].sort()).toEqual(["antigravity_task_status", "github_read", "read_logs"]);
   });
