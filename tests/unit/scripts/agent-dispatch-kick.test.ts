@@ -1,14 +1,15 @@
 /**
- * The bot's kick, the PR target branch, and finished reviews — deploy/agent-dispatch.
- * ===================================================================================
+ * The forced job, the PR target branch, and finished reviews — deploy/agent-dispatch.
+ * ==================================================================================
  * Three things the 2026-10-02 /task session got wrong, each pinned here by what the founder felt.
  *
- * 1. THE KICK. Approving a /task paused the whole loop with "🛑 agent-dispatch PAUSED: the Antigravity CLI
+ * 1. THE JOB. Approving a /task paused the whole loop with "🛑 agent-dispatch PAUSED: the Antigravity CLI
  *    (agy) is not on the PATH", three times in one afternoon, and then "✅ resumed". The bot started the
  *    dispatcher itself, under systemd's NoNewPrivileges, where every `sudo` fails: the startup check read
- *    that as "agy is gone". The bot now leaves a note, and `agent-dispatch --kicked` (a per-minute cron
- *    job) turns it into a tick. The property pinned: a kick starts a tick within a minute, a minute with no
- *    kick costs and says nothing, and a kick is never lost to a running tick or spent on a dead loop twice.
+ *    that as "agy is gone". The bot now hands the issue to fos-job.socket (deploy/job-run), which runs
+ *    `agent-dispatch --issue N --repo R --stage S --wait-lock 3600`. The properties pinned: a job does ONE
+ *    stage of ONE issue and nothing else, it waits for a running tick instead of skipping silently, and it
+ *    says so when it gives up.
  *
  * 2. THE TARGET BRANCH. The daemon asked the workspace whether the repo has a beta branch. The workspace is
  *    mode 750 for the antigravity user, so the question failed with "Permission denied", read as "no beta",
@@ -19,7 +20,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { DispatchSandbox } from "./dispatch-sandbox.js";
 
 const REPO = "owner/founderos";
@@ -36,92 +39,113 @@ afterEach(() => {
   sb.destroy();
 });
 
-const kick = (text = `${REPO}#710\n`): void => writeFileSync(sb.statePath("agent-dispatch.kick"), text);
+const REVIEW_LINK = (pr: number): string => `<!-- agent-pr: ${pr} --> PR opened: https://github.com/${REPO}/pull/${pr}. Awaiting pr-brain review.`;
+const job = (stage: "spec" | "build", extra: readonly string[] = [], opts: Parameters<DispatchSandbox["tick"]>[0] = {}) =>
+  sb.tick({ args: ["--issue", "710", "--repo", REPO, "--stage", stage, ...extra], agyOut: "Error: something else broke", ...opts });
 
-describe("agent-dispatch --kicked (the per-minute cron job)", () => {
-  it("with no kick note it exits 0 having done NOTHING: no log line, no gh call, no Telegram, no agy", () => {
-    const r = sb.tick({ args: ["--kicked"] });
-
-    expect(r.status).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(sb.log()).toBe("");
-    expect(sb.ghCallList()).toEqual([]);
-    expect(sb.telegram()).toEqual([]);
-    expect(sb.agyRuns()).toBe(0);
-  });
-
-  it("an empty kick file is no kick", () => {
-    kick("");
-    const r = sb.tick({ args: ["--kicked"] });
-
-    expect(r.stdout).toBe("");
-    expect(sb.agyRuns()).toBe(0);
-  });
-
-  it("a kick note starts an ordinary tick: the issue is claimed and Antigravity runs, and the note is spent", () => {
-    kick();
-    const r = sb.tick({ args: ["--kicked"], agyOut: "Error: something else broke" });
+describe("agent-dispatch --issue N --repo R --stage S (a job: deploy/job-run)", () => {
+  it("build: claims that one issue and runs Antigravity on it, with no startup false alarm", () => {
+    const r = job("build");
 
     expect(r.status).toBe(0);
     expect(sb.agyRuns()).toBe(1);
-    expect(sb.log()).toContain(`kicked by the bot for: ${REPO}#710`);
     expect(sb.log()).toMatch(/claiming #710/);
-    expect(sb.hasState("agent-dispatch.kick")).toBe(false);
+    expect(sb.messages().filter((m) => m.includes("PAUSED"))).toEqual([]);
+    expect(sb.hasState("agent-dispatch.down")).toBe(false);
   });
 
-  it("a tick that is already running leaves the note where it is, silently: a kick during a 30-minute run is not lost", () => {
-    kick();
-    mkdirSync(sb.statePath("agent-dispatch.lock"));
+  it("build: runs none of the sweeps over OTHER issues (a merged-PR review is left exactly as it was)", () => {
+    sb.addIssue({ number: 711, title: "docs: a finished task", labels: ["agent:review"], comments: [REVIEW_LINK(55)] });
+    sb.addPr({ number: 55, headRefName: "task/issue-711-docs-a-finished-task", state: "MERGED", isDraft: false });
 
-    const r = sb.tick({ args: ["--kicked"] });
+    job("build");
+
+    expect(sb.labelsOf(711)).toEqual(["agent:review"]);
+    expect(sb.issue(711).state).toBe("open");
+  });
+
+  it("without --issue the same sweep still runs (the 15-minute cron path is unchanged)", () => {
+    sb.addIssue({ number: 711, title: "docs: a finished task", labels: ["agent:review"], comments: [REVIEW_LINK(55)] });
+    sb.addPr({ number: 55, headRefName: "task/issue-711-docs-a-finished-task", state: "MERGED", isDraft: false });
+
+    sb.tick({ agyOut: "Error: something else broke" });
+
+    expect(sb.labelsOf(711)).toEqual([]);
+  });
+
+  it("spec: never builds the issue (Pass P owns it); an agent:ready issue is not claimed by a spec job", () => {
+    const r = job("spec");
 
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(sb.log()).toBe("");
-    expect(sb.hasState("agent-dispatch.kick")).toBe(true);
+    expect(sb.agyRuns()).toBe(0);
+    expect(sb.labelsOf(710)).toContain("agent:ready");
+    expect(sb.log()).toMatch(/forced issue #710, stage spec — no claim/);
+  });
+
+  it("--stage needs --issue, and only spec or build", () => {
+    const noIssue = sb.tick({ args: ["--stage", "build"] });
+    const bad = sb.tick({ args: ["--issue", "710", "--stage", "deploy"] });
+
+    expect(noIssue.status).toBe(2);
+    expect(noIssue.stderr).toMatch(/--stage needs --issue/);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).toMatch(/--stage is spec or build/);
+    expect(sb.agyRuns()).toBe(0);
+  });
+});
+
+describe("agent-dispatch --wait-lock (a job waits its turn and never skips silently)", () => {
+  const held = (): void => mkdirSync(sb.statePath("agent-dispatch.lock"));
+
+  it("without --wait-lock a held lock still skips quietly with exit 0 (the cron path is unchanged)", () => {
+    held();
+
+    const r = sb.tick({ args: ["--issue", "710", "--repo", REPO] });
+
+    expect(r.status).toBe(0);
+    expect(sb.log()).toMatch(/another dispatch tick is running/);
     expect(sb.agyRuns()).toBe(0);
   });
 
-  it("the 15-minute cron tick also spends a waiting note, so it does not start a second tick a minute later", () => {
-    kick();
-    sb.tick({ agyOut: "Error: something else broke" });
+  it("with --wait-lock it says it is queued, waits, then gives up LOUDLY with exit 75 and touches nothing", () => {
+    held();
 
-    expect(sb.hasState("agent-dispatch.kick")).toBe(false);
+    const r = job("build", ["--wait-lock", "2"], { env: { AGENT_DISPATCH_LOCK_POLL_SEC: "1" } });
+
+    expect(r.status).toBe(75);
+    expect(r.stdout.match(/queued behind another dispatch tick/g)).toHaveLength(1);
+    expect(r.stderr).toMatch(/gave up waiting 2s for the dispatch lock/);
+    expect(sb.agyRuns()).toBe(0);
+    expect(sb.labelsOf(710)).toContain("agent:ready");
+    expect(existsSync(sb.statePath("agent-dispatch.lock"))).toBe(true); // the other tick's lock is not ours to remove
   });
 
-  it("the kill switch spends the note too, or the per-minute job would log it every minute", () => {
-    kick();
-    writeFileSync(sb.statePath("agent-dispatch.off"), "");
+  it("takes a lock that is released while it waits, and runs the job", () => {
+    held();
+    // The release waits for the job's own "queued behind" line, so a slow machine cannot free the lock before the
+    // job first finds it held.
+    const logFile = join(sb.home, ".claude", "agent-dispatch.log");
+    const releaser = spawn(
+      "bash",
+      ["-c", `until grep -q 'queued behind' '${logFile}' 2>/dev/null; do sleep 0.2; done; sleep 1; rmdir '${sb.statePath("agent-dispatch.lock")}'`],
+      { stdio: "ignore" },
+    );
+    try {
+      const r = job("build", ["--wait-lock", "30"], { env: { AGENT_DISPATCH_LOCK_POLL_SEC: "1" } });
 
-    const r = sb.tick({ args: ["--kicked"] });
-
-    expect(r.status).toBe(0);
-    expect(sb.log().match(/kill switch present/g)).toHaveLength(1);
-    expect(sb.hasState("agent-dispatch.kick")).toBe(false);
-    expect(sb.tick({ args: ["--kicked"] }).stdout).toBe("");
+      expect(r.status).toBe(0);
+      expect(sb.agyRuns()).toBe(1);
+      expect(sb.log()).toMatch(/queued behind another dispatch tick/);
+    } finally {
+      releaser.kill();
+    }
   });
 
-  it("a loop that cannot start (gh logged out) is announced ONCE and the note is spent: no check, no log, every minute", () => {
-    sb.patchGh({ authOk: false });
-    kick();
+  it("rejects a non-numeric wait", () => {
+    const r = sb.tick({ args: ["--wait-lock", "soon"] });
 
-    sb.tick({ args: ["--kicked"] });
-    const second = sb.tick({ args: ["--kicked"] });
-    const third = sb.tick({ args: ["--kicked"] });
-
-    expect(sb.messages().filter((m) => m.includes("PAUSED"))).toHaveLength(1);
-    expect(sb.hasState("agent-dispatch.kick")).toBe(false);
-    expect(second.stdout).toBe("");
-    expect(third.stdout).toBe("");
-  });
-
-  it("is what the approved-/task flow needs: the issue is claimed by --kicked without ever calling sudo for a startup check that can fail", () => {
-    // The old kick ran `agent-dispatch --issue N --repo R` from the bot. Here the bot's only act is the note.
-    kick();
-    sb.tick({ args: ["--kicked"], agyOut: "Error: something else broke" });
-
-    expect(sb.messages().filter((m) => m.includes("PAUSED"))).toEqual([]);
-    expect(sb.hasState("agent-dispatch.down")).toBe(false);
+    expect(r.status).toBe(2);
+    expect(sb.agyRuns()).toBe(0);
   });
 });
 

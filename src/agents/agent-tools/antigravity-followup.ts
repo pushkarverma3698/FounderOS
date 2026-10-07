@@ -15,7 +15,7 @@ import { z } from "zod";
 import { Octokit } from "octokit";
 import { describeTaskStatus, fetchTaskFacts, type TaskFacts } from "../../tools/antigravity-status.js";
 import { resolveDispatchRepo } from "../../tools/dispatch-antigravity.js";
-import { kickDispatchTick } from "../../tools/dispatch-tick.js";
+import { startDispatchJob, startFailureNote } from "../../tools/dispatch-tick.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
@@ -116,8 +116,9 @@ export const requeueAntigravityTask = tool(
 
     // Already queued: nudging the dispatcher changes nothing on GitHub, so no card.
     if (facts.issue.state === "open" && facts.issue.labels.includes("agent:ready")) {
-      kickDispatchTick(n, t.slug);
-      return `#${n} is already queued — I nudged the dispatcher to pick it up now. Nothing new was filed.\n\n${status}`;
+      const started = await startDispatchJob(n, t.slug, "build");
+      const note = started.status === "failed" ? `\n⚠️ ${startFailureNote(n, t.slug, started.reason)}` : "";
+      return `#${n} is already queued — I started its run now. Nothing new was filed.${note}\n\n${status}`;
     }
 
     // State-derived key: once this runs, the labels and comment count change, so a
@@ -147,7 +148,7 @@ export const requeueAntigravityTask = tool(
       ...ref,
       body: "🔁 Re-queued from Telegram by the founder. agent-dispatch picks up this same issue on its next run.",
     });
-    kickDispatchTick(n, t.slug);
+    const started = await startDispatchJob(n, t.slug, "build");
 
     const auditRes = await writeAuditEntry({
       action: "requeue_antigravity_task",
@@ -159,8 +160,9 @@ export const requeueAntigravityTask = tool(
 
     const when = facts.quotaUntil && facts.quotaUntil > new Date()
       ? `Antigravity's quota is exhausted until ${facts.quotaUntil.toISOString().slice(0, 16).replace("T", " ")} UTC, so it starts then.`
-      : "agent-dispatch picks it up within 15 minutes, usually at once.";
-    return `✅ #${n} is back in Antigravity's queue (same issue, nothing new filed). ${when}\n${facts.issue.url}`;
+      : "Its run started now and reports back here.";
+    const warn = started.status === "failed" ? `\n⚠️ ${startFailureNote(n, t.slug, started.reason)}` : "";
+    return `✅ #${n} is back in Antigravity's queue (same issue, nothing new filed). ${when}${warn}\n${facts.issue.url}`;
   },
   {
     name: "requeue_antigravity_task",

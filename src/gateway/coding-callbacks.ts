@@ -68,6 +68,8 @@ export interface CodingDeps {
   now(): Date;
   setLabels(repo: string, issue: number, change: { add: readonly string[]; remove: readonly string[] }): Promise<void>;
   comment(repo: string, issue: number, body: string): Promise<void>;
+  /** Starts the issue's run now (fos-job socket). Never throws; a failure is returned so the founder is told. */
+  startJob(repo: string, issue: number, stage: "spec" | "build"): Promise<{ status: "inert" | "started" } | { status: "failed"; reason: string }>;
   inspectPr(repo: string, pr: number): Promise<PrState>;
   /** Squash-merges pinned to `sha`; returns the merge commit's sha. Throws when GitHub refuses. */
   merge(repo: string, pr: number, sha: string): Promise<string>;
@@ -147,13 +149,16 @@ async function approve(ctx: Context, deps: CodingDeps, rec: PendingSpec): Promis
     log.error({ label, err: errText(err) }, "Spec approved, but the audit row failed");
   }
   try {
-    await deps.comment(rec.repo, rec.issue, `Spec approved by the founder (contract ${rec.fingerprint.slice(0, 12)}, spec commit ${rec.spec_commit.slice(0, 7)}). The executor may pick this up.`);
+    await deps.comment(rec.repo, rec.issue, `Spec approved by the founder (contract ${rec.fingerprint.slice(0, 12)}, spec commit ${rec.spec_commit.slice(0, 7)}). The build run starts now.`);
   } catch (err) {
     // allow-failopen: the comment is a courtesy trail; the contract record and the label are the approval.
     log.warn({ label, err: errText(err) }, "Spec approved, but the issue comment failed");
   }
+  // Approval is done and recorded; the build starts now, or the founder hears here that nothing is running it.
+  const started = await deps.startJob(rec.repo, rec.issue, "build");
+  const notStarted = started.status === "failed" ? `\n⚠️ The build did not start: ${started.reason}. Check \`systemctl status fos-job.socket\` on the VPS, then re-queue ${label}.` : "";
   await clearButtons(ctx);
-  await say(ctx, `✅ ${label}: spec approved (${rec.fingerprint.slice(0, 12)}). Labelled ${LABEL_READY}.${audited ? "" : "\n⚠️ The audit row could not be written; the approval itself is done."}`);
+  await say(ctx, `✅ ${label}: spec approved (${rec.fingerprint.slice(0, 12)}). Labelled ${LABEL_READY}.${audited ? "" : "\n⚠️ The audit row could not be written; the approval itself is done."}${notStarted}`);
 }
 
 async function sendBack(ctx: Context, deps: CodingDeps, rec: PendingSpec, action: "change" | "cancel"): Promise<void> {

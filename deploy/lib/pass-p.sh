@@ -370,7 +370,8 @@ pass_p_finish() {
 pass_p_run() {
   pass_p_enabled || return 0
   # A card at night would sit unseen, and the run that wrote it would have been paid for twice: wait for the morning.
-  if tg_is_quiet 2>/dev/null; then log "pass P: Telegram quiet hours; no spec is written now"; return 0; fi
+  # A forced issue (a job the founder just asked for) is the exception: he is awake and waiting for its card.
+  if [[ -z "$FORCE_ISSUE" ]] && tg_is_quiet 2>/dev/null; then log "pass P: Telegram quiet hours; no spec is written now"; return 0; fi
   local issue
   for issue in $(pass_p_pick); do
     [[ -n "$issue" ]] || continue

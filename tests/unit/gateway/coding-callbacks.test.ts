@@ -69,6 +69,8 @@ interface Harness {
   merges: Array<{ repo: string; pr: number; sha: string }>;
   audits: Array<{ action: string; key: string; payload: Record<string, unknown> }>;
   audited: Set<string>;
+  jobs: Array<{ repo: string; issue: number; stage: string }>;
+  jobResult: { status: "inert" | "started" } | { status: "failed"; reason: string };
   pr: PrState;
 }
 
@@ -81,6 +83,8 @@ function harness(over: { env?: Record<string, string>; pr?: Partial<PrState> } =
     merges: [],
     audits: [],
     audited: new Set(),
+    jobs: [],
+    jobResult: { status: "started" },
     pr: { state: "open", merged: false, headSha: HEAD, baseSha: BASE, baseRef: "beta", ...over.pr },
     deps: undefined as unknown as CodingDeps,
   };
@@ -94,6 +98,10 @@ function harness(over: { env?: Record<string, string>; pr?: Partial<PrState> } =
     },
     async comment(_repo, _issue, body) {
       h.comments.push(body);
+    },
+    async startJob(repo, issue, stage) {
+      h.jobs.push({ repo, issue, stage });
+      return h.jobResult;
     },
     async inspectPr() {
       return h.pr;
@@ -200,6 +208,24 @@ describe("approve", () => {
     expect(r.said()).toMatch(/approved/i);
     expect(r.clear).toHaveBeenCalled();
     // the pending record is spent
+    expect((await readPending(h.fs, DIR, SPEC_NONCE)).ok).toBe(false);
+  });
+
+  it("starts the build run for the approved issue (stage=build)", async () => {
+    const h = harness();
+    await seed(h, specRecord());
+    const r = await tap(h, "approve", SPEC_NONCE);
+    expect(h.jobs).toEqual([{ repo: REPO, issue: 12, stage: "build" }]);
+    expect(r.said()).not.toMatch(/did not start/);
+  });
+
+  it("when the run cannot start the founder is told in the same chat, and the approval stands", async () => {
+    const h = harness();
+    h.jobResult = { status: "failed", reason: "connect ENOENT /run/fos-job.sock" };
+    await seed(h, specRecord());
+    const r = await tap(h, "approve", SPEC_NONCE);
+    expect(r.said()).toContain("The build did not start: connect ENOENT /run/fos-job.sock");
+    expect(h.labels).toHaveLength(1);
     expect((await readPending(h.fs, DIR, SPEC_NONCE)).ok).toBe(false);
   });
 
