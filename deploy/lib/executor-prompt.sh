@@ -65,7 +65,7 @@ exec_build() {
 
 exec_prompt_into() {
   local issue="$1" branch="$2" target="$3" out_file="$4" std rc=0
-  std="$(mktemp /tmp/agent-dispatch-standards-XXXXXX.md)"
+  std="$(mktemp /tmp/agent-dispatch-standards-XXXXXX)"
   # The checkout belongs to the executor's user; a missing file just means a repo with no STANDARDS.md.
   as_antigravity 'head -c "$2" "$1/docs/antigravity/STANDARDS.md" 2>/dev/null || true' "$WORKSPACE" "$EXEC_STANDARDS_MAX" >"$std" 2>/dev/null
   exec_build "$issue" "$branch" "$target" "$out_file" "$std" || rc=$?

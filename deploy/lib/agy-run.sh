@@ -186,7 +186,7 @@ agy_text_view() {
 agy_run() {
   local label="$1" workdir="$2" prompt_file="$3" model="$4" timeout_sec="$5" text_log="$6" key="${7-}"
   local raw pid rc started last text
-  raw="$(mktemp /tmp/agy-run-XXXXXX.jsonl)"
+  raw="$(mktemp /tmp/agy-run-XXXXXX)"
   started="$(date +%s)"
 
   # Positional arguments only: $1 workdir, $2 prompt file, $3 timeout, $4 model, $5 print-timeout. The outer

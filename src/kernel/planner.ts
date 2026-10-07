@@ -15,7 +15,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from "@langc
 import { jsonrepair } from "jsonrepair";
 import {
   KERNEL_SCHEMA_VERSION,
-  MAX_TOOL_CALLS_PER_STEP,
+  MAX_TOOL_CALLS_PER_STEP, MAX_READ_TOOL_CALLS_PER_STEP,
   OUTPUT_CONTRACTS,
   validatePlannerDecision,
   WORKERS,
@@ -129,7 +129,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
     `Output schema_refs: ${refs}`,
     ``,
     `Rules:`,
-    `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}.`,
+    `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}. A read-only investigation ("why does X happen" about FounderOS code or data: hitl_required=false, kind data, github_read get_file/search_code) may use max_tool_calls up to ${MAX_READ_TOOL_CALLS_PER_STEP}; any step that can write or send is capped at ${MAX_TOOL_CALLS_PER_STEP}.`,
     `- expected.kind is "action_receipt" whenever the step SENDS/POSTS/WRITES anything external; those steps also set hitl_required=true when using a gated tool.`,
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
     `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory, recall_conversation for what the founder said in past chats). Past decisions, bugs, or what Claude or Antigravity did or decided → search_knowledge (admin or engineering); if it returns \"No strong match\", say so, do not guess. Read first, then answer — never answer from priors or ask permission to check.`,

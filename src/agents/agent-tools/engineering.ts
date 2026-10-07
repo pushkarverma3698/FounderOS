@@ -166,7 +166,7 @@ function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
-  async ({ action, owner, repo, number, since }, config) => {
+  async ({ action, owner, repo, number, since, path, ref, query }, config) => {
     const threadId = threadIdFrom(config);
     const repeatGuard = _githubRepeatGuards.get(threadId);
     const failureCounter = _githubFailureCounters.get(threadId);
@@ -175,14 +175,17 @@ export const githubRead = tool(
     // input twice, stop hitting the API and force it to answer with what it has.
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
-    if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number, since })) {
+    if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number, since, path, ref, query })) {
       return (
         `You have already called github_read (action="${action}") with these exact ` +
         `arguments and the result is in the conversation above. Do NOT call github_read ` +
         `again — answer the founder now using the data you already retrieved.`
       );
     }
-    const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}), ...(number ? { number } : {}), ...(since ? { since } : {}) });
+    const codeAction = action === "get_file" || action === "search_code";
+    const o = owner || (codeAction ? "pushkarverma3698" : undefined);
+    const r = repo || (codeAction ? "FounderOS" : undefined);
+    const res = await githubTool.execute({ action, ...(o ? { owner: o } : {}), ...(r ? { repo: r } : {}), ...(number ? { number } : {}), ...(since ? { since } : {}), ...(path ? { path } : {}), ...(ref ? { ref } : {}), ...(query ? { query } : {}) });
     if (!res.success) {
       return capConsecutiveToolFailures(
         failureCounter,
@@ -200,13 +203,17 @@ export const githubRead = tool(
       "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo, optional since=ISO date → commits after it; a full page says more exist), " +
       "list_prs (owner+repo → open PRs), get_pr (owner+repo+number → state, draft, CI checks, diff, reviews, latest comments " +
       "including pr-brain's GATE verdicts; use it for any 'review / is PR N ready' question). " +
+      "get_file (path, optional ref; defaults to FounderOS; first 400 lines numbered, with a truncated marker), search_code (query; up to 20 path:line hits in FounderOS). " +
       "For FounderOS queries use owner='pushkarverma3698' repo='FounderOS'.",
     schema: z.object({
-      action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr"]),
+      action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits", "list_prs", "get_pr", "get_file", "search_code"]),
       owner: z.string().optional().nullable(),
       repo: z.string().optional().nullable(),
       number: z.number().int().optional().nullable().describe("PR number, for get_pr"),
       since: z.string().optional().nullable().describe("ISO date, for list_commits: only commits after it"),
+      path: z.string().optional().nullable().describe("File path, for get_file"),
+      ref: z.string().optional().nullable().describe("Branch, tag or commit, for get_file"),
+      query: z.string().optional().nullable().describe("Search terms, for search_code"),
     }),
   },
 );

@@ -18,6 +18,7 @@ import { RESET } from "./state.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import { getSchemaTemplate } from "./contracts.js";
 import type { FailureReport, StepResult, TaskEnvelope } from "./contracts.js";
+import { clampStep } from "./step-budget.js";
 
 export const MAX_ATTEMPTS_PER_STEP = 3; // 1 original + 1 corrected retry + 1 diagnostic retry
 
@@ -117,6 +118,10 @@ function lastResultFor(stepId: string, results: StepResult[]): StepResult | unde
  * The dispatch node. Total: every branch returns a definite state update.
  */
 export function dispatch(state: KernelStateType): KernelUpdate {
+  return dispatchClamped(clampPlanBudgets(state));
+}
+
+function dispatchClamped(state: KernelStateType): KernelUpdate {
   const { mission, results, attempts } = state;
   const plan = mission.plan;
   if (!plan) {
@@ -216,4 +221,13 @@ export function routeAfterDispatch(state: KernelStateType): "agent" | "synthesiz
 /** Conditional edge after the plan node. */
 export function routeAfterPlan(state: KernelStateType): "dispatch" | "finish" {
   return state.mission.status === "executing" ? "dispatch" : "finish";
+}
+
+/** A step that may write never runs above the write cap, whatever the planner asked for (AG-035). */
+function clampPlanBudgets(state: KernelStateType): KernelStateType {
+  const plan = state.mission.plan;
+  if (!plan) return state;
+  const steps = plan.steps.map(clampStep);
+  if (steps.every((s, i) => s === plan.steps[i])) return state;
+  return { ...state, mission: { ...state.mission, plan: { ...plan, steps } } };
 }
