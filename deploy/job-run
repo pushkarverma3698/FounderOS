@@ -137,23 +137,28 @@ jlog "job: ${REPO}#${ISSUE} stage ${STAGE}"
 
 # ------------------------------------------------------------------ the environment cron would have given us
 CRON_ASSIGN_RE='^([A-Za-z_][A-Za-z0-9_]*=([^[:space:]"'"'"'`$\\;&|<>()]*|"[^"`$\\]*"|'"'"'[^'"'"']*'"'"')[[:space:]]+)*$'
+# cron_env NAME: the VAR=value words on this user's crontab line that runs NAME (agent-dispatch, pr-brain).
 cron_env() {
-  local cron="${JOB_RUN_CRONTAB:-crontab}" row words
+  local name="$1" cron="${JOB_RUN_CRONTAB:-crontab}" row words
   command -v "$cron" >/dev/null 2>&1 || return 0
-  row="$("$cron" -l 2>/dev/null | grep -E '^[^#]*[/ ]agent-dispatch([[:space:]]|$)' | head -n1)"
+  row="$("$cron" -l 2>/dev/null | grep -E "^[^#]*[/ ]${name}([[:space:]]|\$)" | head -n1)"
   [[ -n "$row" ]] || return 0
   # five schedule fields, then VAR=value words, then the command
-  words="$(printf '%s\n' "$row" | sed -E 's#^[[:space:]]*([^[:space:]]+[[:space:]]+){5}##; s#[^[:space:]="'"'"']*agent-dispatch([[:space:]].*)?$##')"
+  words="$(printf '%s\n' "$row" | sed -E "s#^[[:space:]]*([^[:space:]]+[[:space:]]+){5}##; s#[^[:space:]=\"']*${name}([[:space:]].*)?\$##")"
   [[ -n "$words" ]] || return 0
   if [[ "$words" =~ $CRON_ASSIGN_RE ]]; then
     local own_path="$PATH"
     eval "export $words"
     PATH="$own_path:$PATH"   # the cron PATH adds directories (a CLI under ~/.local/bin); it never removes ours
   else
-    jlog "crontab environment ignored: not a plain VAR=value list"
+    jlog "crontab environment ignored (${name} line): not a plain VAR=value list"
   fi
 }
-cron_env
+cron_env agent-dispatch
+cron_env pr-brain   # PR_BRAIN_MODELS, PR_BRAIN_ROOT, PR_BRAIN_MERGE live on its own line: the review runs as the sweep's does
+# A job reviews and asks; the founder's tap on the card merges. pr-brain's own default is to merge a PR it clears, so
+# a missing PR_BRAIN_MERGE must never mean "merge".
+export PR_BRAIN_MERGE="${PR_BRAIN_MERGE:-0}"
 export AGENT_DISPATCH_ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-$ENV_FILE}" PR_BRAIN_ENV_FILE="${PR_BRAIN_ENV_FILE:-$ENV_FILE}"
 
 # ------------------------------------------------------------------ the run
@@ -185,13 +190,23 @@ jlog "PR #${PR} opened for #${ISSUE}"
 PHASE="pr-brain review of PR #${PR}"
 CHECKOUT=""
 REPO_NAME="${REPO#*/}"
+# The same repos pr-brain would sweep: the list in ~/.claude/pr-brain.repos, or, when there is none, every directory
+# under PR_BRAIN_ROOT (pr-brain's auto-discovery; /opt/review on the VPS).
+repo_dirs() {
+  if [[ -f "$HOME/.claude/pr-brain.repos" ]]; then
+    grep -vE '^[[:space:]]*(#|$)' "$HOME/.claude/pr-brain.repos"
+  else
+    local d
+    for d in "${PR_BRAIN_ROOT:-$HOME/Projects}"/*/; do printf '%s\n' "${d%/}"; done
+  fi
+}
 while IFS= read -r _row; do
   _dir="${_row/#\~/$HOME}"
   [[ -d "$_dir" && "$(basename "$_dir" | tr 'A-Z' 'a-z')" == "$(printf '%s' "$REPO_NAME" | tr 'A-Z' 'a-z')" ]] && { CHECKOUT="$_dir"; break; }
-done < <(grep -vE '^[[:space:]]*(#|$)' "$HOME/.claude/pr-brain.repos" 2>/dev/null)
-[[ -n "$CHECKOUT" ]] || fail 1 "no local checkout for ${REPO_NAME} in ~/.claude/pr-brain.repos: pr-brain cannot review PR #${PR}. Add its path there."
+done < <(repo_dirs)
+[[ -n "$CHECKOUT" ]] || fail 1 "no local checkout for ${REPO_NAME} (pr-brain.repos, or under ${PR_BRAIN_ROOT:-$HOME/Projects}): pr-brain cannot review PR #${PR}. Add its path to ~/.claude/pr-brain.repos"
 
-run_logged "$PR_BRAIN" --repo "$CHECKOUT" --pr "$PR"
+run_logged "$PR_BRAIN" --repo "$CHECKOUT" --pr "$PR" --wait-lock "$WAIT_LOCK_SEC"
 rc=$?
 [[ "$rc" -eq 0 ]] || fail "$rc" "pr-brain exited ${rc} reviewing PR #${PR}"
 

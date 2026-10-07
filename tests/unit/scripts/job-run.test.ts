@@ -64,7 +64,10 @@ function run(o: Opts = {}): { status: number; sent: string[]; calls: string[]; s
     `echo "agent-dispatch $* MODELS=\${AGENT_DISPATCH_MODELS:-}" >>'${calls}'\n` +
       `printf '%s\\n' '${o.dispatchOut ?? "line"}'\nexit ${o.dispatchRc ?? 0}`,
   );
-  sh("pr-brain", `echo "pr-brain $*" >>'${calls}'\nexit ${o.prBrainRc ?? 0}`);
+  sh(
+    "pr-brain",
+    `echo "pr-brain $* MERGE=\${PR_BRAIN_MERGE:-} MODELS=\${PR_BRAIN_MODELS:-} ROOT=\${PR_BRAIN_ROOT:-}" >>'${calls}'\nexit ${o.prBrainRc ?? 0}`,
+  );
   const labels = JSON.stringify((o.dispatchLabels ?? []).map((name) => ({ name })));
   const prs = JSON.stringify(o.prs ?? []);
   const head = o.prs?.[0]?.headRefOid ?? "abcdef1234567890abcdef1234567890abcdef12";
@@ -148,7 +151,9 @@ describe("deploy/job-run: a build", () => {
     expect(r.calls.find((c) => c.startsWith("agent-dispatch"))).toMatch(
       new RegExp(`--issue 41 --repo ${REPO} --stage build --wait-lock 3600`),
     );
-    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toBe(`pr-brain --repo ${join(dir, "checkouts", "FounderOS")} --pr 77`);
+    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toMatch(
+      new RegExp(`^pr-brain --repo ${join(dir, "checkouts", "FounderOS")} --pr 77 --wait-lock 3600 `),
+    );
     expect(r.sent).toEqual([]); // pr-brain posted the card: job-run adds nothing
   });
 
@@ -303,3 +308,44 @@ describe("deploy/job-run: the environment systemd does not give it", () => {
     expect(r.status).toBe(0);
   });
 });
+
+describe("deploy/job-run: the review runs the way the sweep's does", () => {
+  it("takes PR_BRAIN_* from the pr-brain crontab line, so the job reviews with the sweep's models and root", () => {
+    const r = run({
+      crontab:
+        `*/20 * * * * PATH=/usr/bin PR_BRAIN_MERGE=0 PR_BRAIN_MODELS="r-one r-two" PR_BRAIN_ROOT=/opt/review ${join(dir, "bin", "pr-brain")} >/dev/null 2>>/dev/null\n` +
+        `*/15 * * * * PATH=/usr/bin ${join(dir, "bin", "agent-dispatch")}\n`,
+      prs: [goodPr],
+      marker: true,
+    });
+
+    expect(r.status).toBe(0);
+    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toContain("MODELS=r-one r-two ROOT=/opt/review");
+  });
+
+  it("never lets a job merge: with no PR_BRAIN_MERGE anywhere, pr-brain gets 0 (its own default is to merge)", () => {
+    const r = run({ prs: [goodPr], marker: true });
+
+    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toContain("MERGE=0");
+  });
+
+  it("finds the checkout under PR_BRAIN_ROOT when there is no pr-brain.repos (the VPS has none), case-insensitively", () => {
+    rmSync(join(dir, "home", ".claude", "pr-brain.repos"));
+    mkdirSync(join(dir, "review", "founderos"), { recursive: true });
+    const r = run({ prs: [goodPr], marker: true, env: { PR_BRAIN_ROOT: join(dir, "review") } });
+
+    expect(r.status).toBe(0);
+    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toContain(`--repo ${join(dir, "review", "founderos")} --pr 77`);
+  });
+
+  it("no checkout anywhere is one failure message that says where it looked", () => {
+    rmSync(join(dir, "home", ".claude", "pr-brain.repos"));
+    const r = run({ prs: [goodPr], env: { PR_BRAIN_ROOT: join(dir, "empty-root") } });
+
+    expect(r.status).not.toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("pr-brain"))).toEqual([]);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent.join("")).toMatch(/no local checkout for FounderOS/);
+  });
+});
+
