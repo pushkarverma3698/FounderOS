@@ -33,16 +33,42 @@ simple fix never lands, and fix it at the root. The audit is
 - The real card went out by hand at 12:52Z (pr-brain is off): Telegram message 11683, merge record
   `MesXX0gez48TIEUb.json`, base pinned at beta dd6da94b.
 
+## Later on 10-07: #974 merged, and three more seams
+
+PR #974 (`list_issues` excludes PRs) merged into beta at 14:12Z as 99c08887, through the real path:
+Telegram evidence card, a tap (Claude sent it through the MTProto tester), GitHub squash merge. The
+gateway log shows "Coding pipeline: merged".
+
+It took more than the two bugs above. Three more seams showed up on the way:
+
+1. **A hand run of `pr-brain --pr N` had an empty `head_ref`.** `ec_issue_of` takes the branch name,
+   found no issue number in an empty string, and the PR silently took the legacy no-card path.
+   Fixed in #989.
+2. **Beta is strict, so every beta merge strands the other open PRs.** Beta requires branches to be
+   up to date, and CI takes about 7 minutes, so each merge into beta pushes every other open PR
+   BEHIND. A card is bound to the beta SHA it was made against. The first #974 card (pinned at beta
+   dd6da94b) was refused after beta moved; #985 merged into beta at 13:22Z. `gh pr update-branch 974`,
+   a CI rerun and a new card fixed it by hand. #988 makes the tap call update-branch, pinned to the
+   reviewed head, instead of refusing. #988 also puts the PR name on the card.
+3. **The OplifyMessage repos were invisible to the daemons from 10-06 ~11:00Z.** The token was a
+   fine-grained, single-owner PAT. The founder swapped it 10-07 between 13:00Z and 13:15Z. At 13:16Z
+   the dispatcher picked up Oplify issue #83 and ran spec pass P on it (outcome not checked here).
+
+## Decisions
+
+- The founder decided on 10-07 to replace the cron daemons and labels with direct runs, in three PRs.
+  PR 1 is #990 (`fos-job.socket`, draft). That plan replaces the alert PR #987, which was closed as
+  superseded: the founder rejected detect-and-alert patches.
+- Option A (canary) over option B (LangGraph coding graph), from the audit. The orchestrator chose A on
+  the founder's "use your intelligence" instruction. Journey A (`scripts/journey-coding.ts`) already
+  runs a canary on `pushkarverma3698/fos-journey-sandbox` every 3 nights from the VPS crontab
+  (`0 3 */3 * *`) and was GREEN on 10-04 and 10-07. B would duplicate the direct-run plan.
+
 ## Left open
 
-- The founder taps merge on #974. Nothing else may merge into beta first: the record pins beta's
-  sha, the tap then refuses, and pr-brain skips a PR already gated at the same head, so no new card
-  comes (read from the code, not run). The card text also does not name its PR.
-
-- The daemons' GitHub token cannot see OplifyMessage: 600 "Could not resolve to a Repository" lines
-  since 10-06 11:00Z, and no alert. The founder has to issue a token; a fine-grained token covers
-  one owner.
-- The planner filed junk Oplify issue #83 for work PR #81 had already done, and said an agent had
-  claimed it. Not fixed here.
-- pr-brain is off (the founder's `/review`, 10-07 10:40Z). Until it is back on, nothing sends cards
-  on its own.
+- #988 and #989 are open (#988 is a draft). Until they merge, a beta move between card and tap
+  still strands the card, and a hand-run `pr-brain --pr N` still skips the card.
+- #990 is PR 1 of 3 and is a draft.
+- The planner filed junk Oplify issue #83 for work PR #81 had already done and said an agent had
+  claimed it. #985 (merged 13:22Z) makes a request naming an existing issue read it first.
+- pr-brain was off (the founder's `/review`, 10-07 10:40Z). Not re-checked after that.
