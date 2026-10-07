@@ -261,6 +261,26 @@ describe("verifyImplementationGreen", () => {
     expect(green(w(1, 20)).status).toBe("PASS");
   });
 
+  // 2026-10-07, PR #974: the executor changed 1 line, inside limits of 1 file / 20 lines, but the PR
+  // diff also carries Pass P's spec commit (the 56-line locked test), so the gate said FAIL and no
+  // Merge button was offered. Limits bound the executor's change; locked tests are pinned by hash.
+  it("does not count the locked test toward the limits", () => {
+    const tight = mix(spec, { limits: { files: 1, lines: 20, deleted_lines: 5, new_dependencies: false } });
+    const run = (diff: DiffFile[]) =>
+      verifyImplementationGreen(tight, { head_sha: HEAD, checks: [check()], diff, lockedTestHashes: hs("h1", "h1"), dependencyChanged: false });
+    const locked = file(LOCKED, { status: "added", additions: 56, deletions: 0 });
+    expect(run([file("src/tools/widget.ts", { additions: 1, deletions: 1 }), locked])).toEqual({ status: "PASS", reasons: [], head_sha: HEAD });
+    expect(run([file("src/tools/widget.ts", { additions: 21, deletions: 0 }), locked]).status).toBe("FAIL");
+    expect(run([file("src/tools/widget.ts", { additions: 1, deletions: 6 }), locked]).status).toBe("FAIL");
+    const second = file("src/core/extra.ts", { additions: 1, deletions: 0 });
+    expect(run([file("src/tools/widget.ts", { additions: 1, deletions: 0 }), second, locked]).status).toBe("FAIL");
+    const edited = verifyImplementationGreen(tight, {
+      head_sha: HEAD, checks: [check()], diff: [file("src/tools/widget.ts", { additions: 1, deletions: 1 }), locked],
+      lockedTestHashes: hs("h1", "h2"), dependencyChanged: false,
+    });
+    expect(edited.status).toBe("FAIL");
+  });
+
   it("FAILs a path that escapes the repo", () => {
     const up = String.fromCharCode(46, 46);
     const sneaky = ["src", "core", up, up, "etc", "passwd"].join("/");
