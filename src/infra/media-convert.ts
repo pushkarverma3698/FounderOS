@@ -20,18 +20,24 @@ const execFileAsync = promisify(execFile);
 const log = childLogger({ module: "media-convert" });
 
 const FFMPEG_TIMEOUT_MS = 30_000;
+const REPROBE_INTERVAL_MS = 60_000;
 
 let _ffmpegAvailable: boolean | null = null;
+let _lastFailedProbeTime = 0;
 
-/** Probe ffmpeg once; cached for the process lifetime. */
+/** Probe ffmpeg; cached on success, re-probed at most once every 60s on failure. */
 export async function checkFfmpeg(): Promise<boolean> {
-  if (_ffmpegAvailable !== null) return _ffmpegAvailable;
+  if (_ffmpegAvailable === true) return true;
+  if (_ffmpegAvailable === false && Date.now() - _lastFailedProbeTime < REPROBE_INTERVAL_MS) {
+    return false;
+  }
   try {
     await execFileAsync("ffmpeg", ["-version"], { timeout: 5_000 });
     _ffmpegAvailable = true;
   } catch (err) {
     log.error({ err: (err as Error).message }, "ffmpeg not available — voice features degraded to text-only");
     _ffmpegAvailable = false;
+    _lastFailedProbeTime = Date.now();
   }
   return _ffmpegAvailable;
 }
@@ -39,6 +45,7 @@ export async function checkFfmpeg(): Promise<boolean> {
 /** Test hook: reset the cached probe result. */
 export function resetFfmpegCache(): void {
   _ffmpegAvailable = null;
+  _lastFailedProbeTime = 0;
 }
 
 /** Run ffmpeg over temp files: write input, convert, read output, always clean up. */
