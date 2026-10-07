@@ -67,6 +67,17 @@ export function scoreHitl(task: GoldenTask, obs: Observation): boolean {
 }
 
 /**
+ * Does the reply say what it must and avoid what it must not? Case-insensitive substring
+ * checks. A missing reply fails every mustMention and satisfies every mustNotMention.
+ * Vacuously true when the task declares neither list.
+ */
+export function scoreMentions(task: GoldenTask, obs: Observation): boolean {
+  const reply = (obs.reply ?? "").toLowerCase();
+  const has = (needle: string): boolean => reply.includes(needle.toLowerCase());
+  return (task.mustMention ?? []).every(has) && !(task.mustNotMention ?? []).some(has);
+}
+
+/**
  * Message-shape patterns for a genuine INFRASTRUCTURE failure — mirrors the
  * classification already used in production (`is503Error`/`isModelFallbackError`,
  * src/agents/model.ts) and the per-call timeout (`ModelCallTimeoutError`,
@@ -128,14 +139,16 @@ export function scoreTask(task: GoldenTask, obs: Observation): TaskResult {
   const routeCorrect = scoreRouting(task, obs);
   const toolsCorrect = scoreToolSelection(task, obs);
   const hitlCorrect = scoreHitl(task, obs);
+  const mentionsCorrect = scoreMentions(task, obs);
   return {
     task,
     observation: obs,
     routeCorrect,
     toolsCorrect,
     hitlCorrect,
+    mentionsCorrect,
     infraError: isInfraError(obs),
-    passed: routeCorrect && toolsCorrect && hitlCorrect,
+    passed: routeCorrect && toolsCorrect && hitlCorrect && mentionsCorrect,
   };
 }
 
