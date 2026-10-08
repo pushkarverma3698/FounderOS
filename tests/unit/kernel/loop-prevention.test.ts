@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { MemorySaver } from "@langchain/langgraph";
+import { OFFICE_RECURSION_LIMIT } from "../../../src/core/config.js";
+import { MAX_READ_TOOL_CALLS_PER_STEP } from "../../../src/kernel/step-budget.js";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   buildKernel,
@@ -77,7 +79,7 @@ describe("v3 kernel loop prevention & retry preservation", () => {
     );
 
     const kernel = buildKernel({
-      plannerModel: new ScriptedModel([ai(planJson(2))]), // max 2 tool calls
+      plannerModel: new ScriptedModel([ai(planJson(2))]), // planner asks 2; code sets the cap
       workerModel: worker,
       synthesizerModel: new ScriptedModel([ai("Done.")]),
       workers,
@@ -88,7 +90,7 @@ describe("v3 kernel loop prevention & retry preservation", () => {
       {
         turn: { id: "t_loop", chat_id: "1", received_at: new Date().toISOString(), raw_input: "run" },
       },
-      { configurable: { thread_id: "thread_loop" } }
+      { configurable: { thread_id: "thread_loop" }, recursionLimit: OFFICE_RECURSION_LIMIT }
     );
 
     // The turn should terminate as failed (due to validation/JSON finalization failure)
@@ -99,8 +101,9 @@ describe("v3 kernel loop prevention & retry preservation", () => {
     // The actual tool was invoked exactly ONCE (because subsequent identical calls are blocked by duplicate guard)
     expect(toolInvocations).toBe(1);
 
-    // The LLM was called exactly 9 times (3 calls per attempt * 3 attempts) and did not spin infinitely.
-    expect(worker.calls).toBe(9);
+    // The LLM was called (cap + 1 finalize turn) per attempt * 3 attempts and did not spin infinitely.
+    // The cap is set by code for a read step (the planner's "2" is ignored).
+    expect(worker.calls).toBe((MAX_READ_TOOL_CALLS_PER_STEP + 1) * 3);
     expect(res.attempts["s1"]).toBe(3);
   });
 
