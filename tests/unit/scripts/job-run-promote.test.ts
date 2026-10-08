@@ -28,7 +28,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "job-run-promote-"));
   mkdirSync(join(dir, "bin"));
   mkdirSync(join(dir, "home", ".claude"), { recursive: true });
-  writeFileSync(join(dir, "env"), "TELEGRAM_BOT_TOKEN=123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nTELEGRAM_CHAT_ID=42\n");
+  writeFileSync(join(dir, "env"), "TELEGRAM_BOT_TOKEN=123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nTELEGRAM_CHAT_ID=42\nGITHUB_TOKEN=test-github-token\n");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -45,6 +45,7 @@ function run(stdin: string, promote: { rc: number; result: string } = { rc: 0, r
   sh(
     "promote-run",
     `echo "promote-run $*" >>'${calls}'\n` +
+      `echo "promote-run GH_TOKEN=$GH_TOKEN helpers=$GIT_CONFIG_COUNT" >>'${calls}'\n` +
       `while [ $# -gt 0 ]; do [ "$1" = --result-file ] && out="$2"; shift; done\n` +
       `cp '${join(dir, "result.txt")}' "$out"\nexit ${promote.rc}`,
   );
@@ -79,8 +80,24 @@ describe("deploy/job-run: stage promote", () => {
     const r = run(line({ repo: REPO, stage: "promote", beta_sha: SHA }));
 
     expect(r.status).toBe(0);
-    expect(r.calls).toHaveLength(1);
+    expect(r.calls).toHaveLength(2);
     expect(r.calls[0]).toContain(`promote-run --repo ${REPO} --beta-sha ${SHA} --result-file`);
+  });
+
+  it("hands promote-run the bot's one GitHub token and the git credential helper that reads it", () => {
+    const r = run(line({ repo: REPO, stage: "promote", beta_sha: SHA }));
+
+    expect(r.calls[1]).toBe("promote-run GH_TOKEN=test-github-token helpers=2");
+  });
+
+  it("a promotion with no GITHUB_TOKEN in the env file fails once, before promote-run starts", () => {
+    writeFileSync(join(dir, "env"), "TELEGRAM_BOT_TOKEN=123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nTELEGRAM_CHAT_ID=42\n");
+    const r = run(line({ repo: REPO, stage: "promote", beta_sha: SHA }));
+
+    expect(r.status).not.toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0]).toMatch(/GITHUB_TOKEN is not set/);
   });
 
   it("success is ONE message: the result, with a check mark", () => {

@@ -143,6 +143,18 @@ if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$STAGE" =~ ^(spec|build
 fi
 jlog "job: ${REPO}#${ISSUE} stage ${STAGE}"
 
+# The bot's one GitHub token (AG-039) comes first: promote-run pushes a branch and merges to main with it, the same
+# as the agent-dispatch and pr-brain runs below.
+export AGENT_DISPATCH_ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-$ENV_FILE}" PR_BRAIN_ENV_FILE="${PR_BRAIN_ENV_FILE:-$ENV_FILE}"
+# For this script's own gh calls and, inherited, for promote-run and both daemons. A job with no
+# token fails here, out loud, instead of every daemon discovering it separately.
+if gh_token_load "$AGENT_DISPATCH_ENV_FILE"; then
+  REDACT_LITERALS+=("$GH_TOKEN")
+else
+  unset GH_TOKEN
+  fail 1 "GITHUB_TOKEN is not set in ${AGENT_DISPATCH_ENV_FILE}: add GITHUB_TOKEN=<the bot's token> to that file"
+fi
+
 # ------------------------------------------------------------------ a promotion: its own script, one outcome
 if [[ "$STAGE" == promote ]]; then
   PHASE="promote-run (beta ${BETA_SHA:0:7} to main)"
@@ -180,16 +192,6 @@ cron_env pr-brain   # PR_BRAIN_MODELS, PR_BRAIN_ROOT, PR_BRAIN_MERGE live on its
 # A job reviews and asks; the founder's tap on the card merges. pr-brain's own default is to merge a PR it clears, so
 # a missing PR_BRAIN_MERGE must never mean "merge".
 export PR_BRAIN_MERGE="${PR_BRAIN_MERGE:-0}"
-export AGENT_DISPATCH_ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-$ENV_FILE}" PR_BRAIN_ENV_FILE="${PR_BRAIN_ENV_FILE:-$ENV_FILE}"
-
-# The bot's one GitHub token (AG-039), for this script's own gh calls and, inherited, for both daemons. A job with no
-# token fails here, out loud, instead of every daemon discovering it separately.
-if gh_token_load "$AGENT_DISPATCH_ENV_FILE"; then
-  REDACT_LITERALS+=("$GH_TOKEN")
-else
-  unset GH_TOKEN
-  fail 1 "GITHUB_TOKEN is not set in ${AGENT_DISPATCH_ENV_FILE}: add GITHUB_TOKEN=<the bot's token> to that file"
-fi
 
 # ------------------------------------------------------------------ the run
 PHASE="agent-dispatch (${STAGE})"
