@@ -13,7 +13,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { startDispatchJob, jobSocketPath, jobRequestLine, startFailureNote } = await import("../../../src/tools/dispatch-tick.js");
+const { startDispatchJob, startPromoteJob, jobSocketPath, jobRequestLine, startFailureNote } = await import("../../../src/tools/dispatch-tick.js");
 
 const ORIGINAL_BIN = process.env["AGENT_DISPATCH_BIN"];
 const ORIGINAL_SOCK = process.env["FOS_JOB_SOCKET"];
@@ -131,5 +131,36 @@ describe("startDispatchJob", () => {
     const source = readFileSync(new URL("../../../src/tools/dispatch-tick.ts", import.meta.url), "utf8");
     const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/child_process|spawn\(|exec\(|execFile/);
+  });
+});
+
+describe("startPromoteJob", () => {
+  const SHA = "b".repeat(40);
+
+  it("is inert off the VPS and never touches the socket", async () => {
+    const send = vi.fn();
+    expect(await startPromoteJob(REPO, SHA, send)).toEqual({ status: "inert" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("writes one {repo, stage: promote, beta_sha} line to the job socket", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn().mockResolvedValue(undefined);
+
+    expect(await startPromoteJob(REPO, SHA, send)).toEqual({ status: "started" });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("/run/fos-job.sock", `${JSON.stringify({ repo: REPO, stage: "promote", beta_sha: SHA })}\n`);
+  });
+
+  it("refuses another repo or a bad sha before the socket, and reports a dead socket", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn();
+    expect((await startPromoteJob("o/other", SHA, send)).status).toBe("failed");
+    expect((await startPromoteJob(REPO, "abc", send)).status).toBe("failed");
+    expect(send).not.toHaveBeenCalled();
+
+    const dead = vi.fn().mockRejectedValue(new Error("connect ENOENT /run/fos-job.sock"));
+    expect(await startPromoteJob(REPO, SHA, dead)).toEqual({ status: "failed", reason: "connect ENOENT /run/fos-job.sock" });
   });
 });
