@@ -17,7 +17,8 @@
 #   deploy/systemd/fos-job.socket, fos-job@.service
 #                                   -> /etc/systemd/system  (sudo -n; the socket the bot hands each coding job to)
 #   (crontab)                       the old per-minute `agent-dispatch --kicked` line is REMOVED (see retire_kick_cron);
-#                                   no other crontab line is touched
+#                                   the 08:00 IST journey-daily line is installed and the journey B/C lines it
+#                                   replaces are removed (see ensure_journey_cron); no other crontab line is touched
 #
 # What it guarantees:
 #   * nothing is copied unless every source exists and passes `bash -n` (a syntax error must not ship);
@@ -35,6 +36,7 @@
 #      SYNC_DAEMONS_SRC      the deploy/ directory to copy from (default: the one this script is in)
 #      SYNC_DAEMONS_CRONTAB  the crontab command to edit (default: `crontab`, and only when $HOME is this
 #                            user's own home: a script run against a scratch HOME must never edit the real crontab)
+#      SYNC_DAEMONS_JOURNEY_CRONTAB  the same, for the journey cron (ensure_journey_cron)
 
 set -uo pipefail
 
@@ -161,6 +163,56 @@ retire_kick_cron() {
 retire_kick_cron
 [[ -z "$KICK_CRON_NOTE" ]] || echo "sync-daemons: $KICK_CRON_NOTE"
 
+# 5b. The morning journey run (AG-051). One line runs scripts/journey-daily.ts at 02:30 UTC (08:00 IST): J1-J5, journey B
+# and C inline, journey A's last result, the health line, one Telegram message. The hand-installed journey-where (B) and
+# journey-jobs-group (C) lines are removed because the morning run covers them; journey A keeps its own 3-day line.
+# Same safety as the kick cron: the new crontab is read back, and the old one restored if any kept line did not survive.
+JOURNEY_CRON_LINE='30 2 * * * cd /opt/founderos && PATH=/usr/local/bin:/usr/bin:/bin node --import tsx/esm --env-file=.env scripts/journey-daily.ts >> $HOME/.claude/journey-daily.log 2>&1'
+JOURNEY_CRON_NOTE=""
+ensure_journey_cron() {
+  local cron current wanted after line removed
+  local pattern='^[^#]*scripts/journey-(where|jobs-group|daily)\.ts'
+  if [[ -n "${SYNC_DAEMONS_JOURNEY_CRONTAB:-}" ]]; then
+    cron="$SYNC_DAEMONS_JOURNEY_CRONTAB"
+  else
+    local real_home
+    real_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    if [[ -z "$real_home" || "$HOME" != "$real_home" ]]; then
+      JOURNEY_CRON_NOTE="journey cron left alone (HOME=$HOME is not this user's own home)"
+      return 0
+    fi
+    cron=crontab
+  fi
+  command -v "$cron" >/dev/null 2>&1 || return 0
+  current="$("$cron" -l 2>/dev/null)" || current=""
+  wanted="$(printf '%s\n' "$current" | grep -Ev "$pattern" | grep -v '^$')"
+  wanted="$(printf '%s\n%s' "$wanted" "$JOURNEY_CRON_LINE" | grep -v '^$')"
+  if [[ "$wanted" == "$(printf '%s\n' "$current" | grep -v '^$')" ]]; then
+    JOURNEY_CRON_NOTE="journey cron already installed"
+    return 0
+  fi
+  removed="$(printf '%s\n' "$current" | grep -Ec '^[^#]*scripts/journey-(where|jobs-group)\.ts')"
+  if ! printf '%s\n' "$wanted" | "$cron" - 2>/dev/null; then
+    fail "could not install the journey cron"
+  fi
+  after="$("$cron" -l 2>/dev/null)" || after=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! grep -qxF -- "$line" <<<"$after"; then
+      printf '%s\n' "$current" | "$cron" - 2>/dev/null
+      fail "the crontab lost the line '$line' when the journey cron was installed; the old crontab was restored"
+    fi
+  done <<<"$wanted"
+  if [[ "$(grep -cxF -- "$JOURNEY_CRON_LINE" <<<"$after")" != 1 ]] \
+    || grep -Eq '^[^#]*scripts/journey-(where|jobs-group)\.ts' <<<"$after"; then
+    printf '%s\n' "$current" | "$cron" - 2>/dev/null
+    fail "the journey cron did not read back as exactly one daily line with no B/C lines; the old crontab was restored"
+  fi
+  JOURNEY_CRON_NOTE="journey cron installed: scripts/journey-daily.ts at 02:30 UTC (08:00 IST), $removed old journey lines removed"
+}
+ensure_journey_cron
+[[ -z "$JOURNEY_CRON_NOTE" ]] || echo "sync-daemons: $JOURNEY_CRON_NOTE"
+
 # 6. The systemd units: the agy login helper and the job socket (fos-job.socket, deploy/systemd/fos-job.socket). `/login agy` from Telegram needs a process that runs as the `antigravity` user
 # (the only one that can run agy) behind a unix socket the bot can open: the bot itself runs under NoNewPrivileges and
 # cannot sudo (see deploy/systemd/agy-login.service and src/gateway/login/agy-helper.ts). Unit files live outside ~/bin and
@@ -228,5 +280,72 @@ ensure_units() {
 }
 ensure_units
 [[ -z "$UNIT_NOTE" ]] || echo "sync-daemons: $UNIT_NOTE"
+
+# 7. Clear what earlier runs left behind (AG-052, 2026-10-08). Failed fos-job@ instances stay listed in
+# `systemctl --failed` until someone resets them, so a real failure hides among old ones; and one abandoned
+# container (jolly-babbage-job-tracker-1, the founder's dead experiment) holds memory for nothing. A database
+# backup runs first, and only when there is something to clear: if it fails, nothing is cleared.
+# Only failed fos-job@ units are reset (by name) and only that one container is removed. No image, volume
+# or directory is touched. A failure here warns and leaves the deploy green: none of it is the app.
+# Env: SYNC_DAEMONS_DOCKER (default docker), SYNC_DAEMONS_BACKUP (default: deploy/backup-db.sh into
+#      $HOME/backups, as the nightly cron does), plus SYNC_DAEMONS_SYSTEMCTL / SYNC_DAEMONS_SUDO as above.
+#      Under a scratch HOME with no SYNC_DAEMONS_DOCKER it touches nothing.
+LEFTOVER_CONTAINER=jolly-babbage-job-tracker-1
+CLEANUP_NOTE=""
+clean_leftovers() {
+  local docker="${SYNC_DAEMONS_DOCKER:-docker}" sysctl="${SYNC_DAEMONS_SYSTEMCTL:-systemctl}"
+  local -a sudo_cmd=(sudo -n)
+  if [[ -n "${SYNC_DAEMONS_SUDO+x}" ]]; then
+    read -r -a sudo_cmd <<<"${SYNC_DAEMONS_SUDO}"
+    (( ${#sudo_cmd[@]} > 0 )) || sudo_cmd=(env)
+  fi
+  if [[ -z "${SYNC_DAEMONS_DOCKER:-}" ]]; then
+    local real_home
+    real_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    if [[ -z "$real_home" || "$HOME" != "$real_home" ]]; then
+      CLEANUP_NOTE="leftovers left alone (HOME=$HOME is not this user's own home)"
+      return 0
+    fi
+  fi
+  local -a failed=()
+  if command -v "$sysctl" >/dev/null 2>&1; then
+    local u
+    while read -r u _; do
+      [[ "$u" == fos-job@*.service ]] && failed+=("$u")
+    done < <("$sysctl" list-units --failed --plain --no-legend 'fos-job@*' 2>/dev/null)
+  fi
+  local container=0
+  if command -v "$docker" >/dev/null 2>&1 && "$docker" container inspect "$LEFTOVER_CONTAINER" >/dev/null 2>&1; then
+    container=1
+  fi
+  if (( ${#failed[@]} == 0 && container == 0 )); then
+    CLEANUP_NOTE="no leftovers to clear"
+    return 0
+  fi
+  local -a backup=(env BACKUP_DIR="$HOME/backups" "$SRC/backup-db.sh")
+  [[ -n "${SYNC_DAEMONS_BACKUP:-}" ]] && backup=("$SYNC_DAEMONS_BACKUP")
+  local out
+  if ! out="$("${backup[@]}" 2>&1)"; then
+    CLEANUP_NOTE="WARNING: the database backup failed, so no leftovers were cleared: $(printf '%s' "$out" | tail -n1 | cut -c1-200)"
+    return 0
+  fi
+  local reset=0 bad=""
+  if (( ${#failed[@]} > 0 )); then # bash 3.2 rejects "${failed[@]}" on an empty array under set -u
+    for u in "${failed[@]}"; do
+      if "${sudo_cmd[@]}" "$sysctl" reset-failed "$u" >/dev/null 2>&1; then reset=$((reset + 1)); else bad+=" reset-failed $u;"; fi
+    done
+  fi
+  CLEANUP_NOTE="backup taken; reset $reset failed fos-job@ unit(s)"
+  if (( container )); then
+    if "$docker" stop "$LEFTOVER_CONTAINER" >/dev/null 2>&1 && "$docker" rm "$LEFTOVER_CONTAINER" >/dev/null 2>&1; then
+      CLEANUP_NOTE+="; removed container $LEFTOVER_CONTAINER"
+    else
+      bad+=" remove $LEFTOVER_CONTAINER;"
+    fi
+  fi
+  [[ -z "$bad" ]] || CLEANUP_NOTE="WARNING: $CLEANUP_NOTE; could not:$bad"
+}
+clean_leftovers
+[[ -z "$CLEANUP_NOTE" ]] || echo "sync-daemons: $CLEANUP_NOTE"
 
 echo "sync-daemons: $((${#PAIRS[@]})) files installed into $DEST ($LIB_COUNT libs first), every sha256 matches the checkout, every daemon starts"

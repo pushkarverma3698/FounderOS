@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -371,6 +371,51 @@ describe("hub — stdio entry points", () => {
       "save_decision",
       "save_bug",
     ]);
+  }, 60_000);
+
+  // A hub with an open bridge child never noticed its stdin close, so it outlived the
+  // laptop ssh session that started it. When that session ends, the hub must exit.
+  it("exits when its stdin closes, even with a connected server open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hub-eof-"));
+    writeFileSync(
+      join(dir, "mcp-bridge.json"),
+      JSON.stringify({
+        servers: {
+          echo: {
+            transport: "stdio",
+            command: process.execPath,
+            args: ["--import", "tsx/esm", join(REPO, "tests/fixtures/mcp-echo-server.ts")],
+            department: "research",
+          },
+        },
+      }),
+    );
+    const child = spawn(process.execPath, ["--import", "tsx/esm", join(REPO, "src/mcp/hub.ts")], {
+      cwd: REPO,
+      env: { ...env, MCP_BRIDGE_MANIFEST: join(dir, "mcp-bridge.json") },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    let out = "";
+    const echoed = new Promise<void>((resolve) =>
+      child.stdout.on("data", (d: Buffer) => {
+        out += d.toString();
+        if (out.includes("echo:hi")) resolve();
+      }),
+    );
+    const send = (m: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
+    send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    send({ method: "notifications/initialized" });
+    send({ id: 2, method: "tools/call", params: { name: "call_connected_tool", arguments: { server: "echo", tool: "echo", arguments: { text: "hi" } } } });
+    try {
+      await echoed;
+      child.stdin.end();
+      const code = await Promise.race([exited, new Promise<string>((r) => setTimeout(() => r("still running"), 15_000))]);
+      expect(code).toBe(0);
+    } finally {
+      child.kill("SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it("refuses to start with an unknown HUB_SCOPE", () => {
