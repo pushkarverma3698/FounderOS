@@ -169,3 +169,17 @@ describe("makeToolsNode — cross-step duplicate FAILED call guard (within one t
     expect(invoke).toHaveBeenCalledOnce();
   });
 });
+
+describe("makeToolsNode: step scope for tool guards (AG-046)", () => {
+  it("passes configurable.step_scope = <turnId>:<stepId> and keeps the thread id", async () => {
+    const invoke = vi.fn(async (_args: Record<string, unknown>, _config?: unknown) => "ok");
+    const tool: KernelTool = { name: "probe_tool", invoke };
+    const state = stateWithCalls([{ id: "c1", name: "probe_tool", args: { action: "list" } }], []);
+
+    await makeToolsNode(specWith(tool))(state, { configurable: { thread_id: "thread-9" } });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const passed = invoke.mock.calls[0]![1] as { configurable: Record<string, unknown> };
+    expect(passed.configurable).toMatchObject({ thread_id: "thread-9", step_scope: "t:s1" });
+  });
+});

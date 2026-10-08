@@ -96,7 +96,7 @@ beforeEach(() => {
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(repo, { recursive: true });
-  writeFileSync(join(root, ".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\n");
+  writeFileSync(join(root, ".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\n");
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/oplify-messaging-api.git"], { cwd: repo });
 

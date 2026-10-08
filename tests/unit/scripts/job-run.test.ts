@@ -45,7 +45,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "job-run-"));
   mkdirSync(join(dir, "bin"));
   mkdirSync(join(dir, "home", ".claude"), { recursive: true });
-  writeFileSync(join(dir, "env"), `TELEGRAM_BOT_TOKEN=${ENV_TOKEN}\nTELEGRAM_CHAT_ID=42\n`);
+  writeFileSync(join(dir, "env"), `TELEGRAM_BOT_TOKEN=${ENV_TOKEN}\nTELEGRAM_CHAT_ID=42\nGITHUB_TOKEN=test-github-token\n`);
   writeFileSync(join(dir, "home", ".claude", "pr-brain.repos"), `# repos\n${join(dir, "checkouts", "FounderOS")}\n`);
   mkdirSync(join(dir, "checkouts", "FounderOS"), { recursive: true });
 });

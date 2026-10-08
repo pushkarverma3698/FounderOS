@@ -23,6 +23,8 @@ import {
 import { prepareDispatchBrief, type PreparedBrief } from "../../tools/dispatch-brief-repair.js";
 import { renderCardPreview } from "../../tools/dispatch-brief-preview.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../../tools/dispatch-repos.js";
+import { checkRepoReach } from "../../tools/repo-reach.js";
+import { Octokit } from "octokit";
 import { ENGINES, engineDisplay, engineLabel, parseEngine, readDefaultEngine } from "../../tools/coding-engine.js";
 import { LABEL_SPEC } from "../../tools/pipeline-pending.js";
 import { specDraftingReply, specIntakeOn } from "../../tools/dispatch-spec-intake.js";
@@ -125,6 +127,14 @@ export const dispatchAntigravityTask = tool(
     const key = idemKey("dispatch_antigravity", repoSlug, title, scope, executor);
     if (await hasBeenAudited(key)) {
       return `${NO_ACTION_PREFIX} Already dispatched earlier: "${title}" on ${repoSlug}. Nothing new was filed, and this does not mean an agent has picked it up.`;
+    }
+
+    // Before the card, so the founder is never asked to approve a filing on a repo the bot's token cannot reach (AG-039).
+    // Read-only, so it is safe above hitlGate. No token configured: execute() reports that, as before.
+    const token = process.env["GITHUB_TOKEN"];
+    if (token) {
+      const reach = await checkRepoReach(target, new Octokit({ auth: token }));
+      if (!reach.ok) return `❌ Cannot dispatch: ${reach.message}`;
     }
 
     // The lint comes after the idempotency check (an already-dispatched brief needs none) and
