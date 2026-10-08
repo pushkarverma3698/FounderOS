@@ -17,7 +17,8 @@
 #   deploy/systemd/fos-job.socket, fos-job@.service
 #                                   -> /etc/systemd/system  (sudo -n; the socket the bot hands each coding job to)
 #   (crontab)                       the old per-minute `agent-dispatch --kicked` line is REMOVED (see retire_kick_cron);
-#                                   no other crontab line is touched
+#                                   the 08:00 IST journey-daily line is installed and the journey B/C lines it
+#                                   replaces are removed (see ensure_journey_cron); no other crontab line is touched
 #
 # What it guarantees:
 #   * nothing is copied unless every source exists and passes `bash -n` (a syntax error must not ship);
@@ -35,6 +36,7 @@
 #      SYNC_DAEMONS_SRC      the deploy/ directory to copy from (default: the one this script is in)
 #      SYNC_DAEMONS_CRONTAB  the crontab command to edit (default: `crontab`, and only when $HOME is this
 #                            user's own home: a script run against a scratch HOME must never edit the real crontab)
+#      SYNC_DAEMONS_JOURNEY_CRONTAB  the same, for the journey cron (ensure_journey_cron)
 
 set -uo pipefail
 
@@ -160,6 +162,56 @@ retire_kick_cron() {
 }
 retire_kick_cron
 [[ -z "$KICK_CRON_NOTE" ]] || echo "sync-daemons: $KICK_CRON_NOTE"
+
+# 5b. The morning journey run (AG-051). One line runs scripts/journey-daily.ts at 02:30 UTC (08:00 IST): J1-J5, journey B
+# and C inline, journey A's last result, the health line, one Telegram message. The hand-installed journey-where (B) and
+# journey-jobs-group (C) lines are removed because the morning run covers them; journey A keeps its own 3-day line.
+# Same safety as the kick cron: the new crontab is read back, and the old one restored if any kept line did not survive.
+JOURNEY_CRON_LINE='30 2 * * * cd /opt/founderos && PATH=/usr/local/bin:/usr/bin:/bin node --import tsx/esm --env-file=.env scripts/journey-daily.ts >> $HOME/.claude/journey-daily.log 2>&1'
+JOURNEY_CRON_NOTE=""
+ensure_journey_cron() {
+  local cron current wanted after line removed
+  local pattern='^[^#]*scripts/journey-(where|jobs-group|daily)\.ts'
+  if [[ -n "${SYNC_DAEMONS_JOURNEY_CRONTAB:-}" ]]; then
+    cron="$SYNC_DAEMONS_JOURNEY_CRONTAB"
+  else
+    local real_home
+    real_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    if [[ -z "$real_home" || "$HOME" != "$real_home" ]]; then
+      JOURNEY_CRON_NOTE="journey cron left alone (HOME=$HOME is not this user's own home)"
+      return 0
+    fi
+    cron=crontab
+  fi
+  command -v "$cron" >/dev/null 2>&1 || return 0
+  current="$("$cron" -l 2>/dev/null)" || current=""
+  wanted="$(printf '%s\n' "$current" | grep -Ev "$pattern" | grep -v '^$')"
+  wanted="$(printf '%s\n%s' "$wanted" "$JOURNEY_CRON_LINE" | grep -v '^$')"
+  if [[ "$wanted" == "$(printf '%s\n' "$current" | grep -v '^$')" ]]; then
+    JOURNEY_CRON_NOTE="journey cron already installed"
+    return 0
+  fi
+  removed="$(printf '%s\n' "$current" | grep -Ec '^[^#]*scripts/journey-(where|jobs-group)\.ts')"
+  if ! printf '%s\n' "$wanted" | "$cron" - 2>/dev/null; then
+    fail "could not install the journey cron"
+  fi
+  after="$("$cron" -l 2>/dev/null)" || after=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! grep -qxF -- "$line" <<<"$after"; then
+      printf '%s\n' "$current" | "$cron" - 2>/dev/null
+      fail "the crontab lost the line '$line' when the journey cron was installed; the old crontab was restored"
+    fi
+  done <<<"$wanted"
+  if [[ "$(grep -cxF -- "$JOURNEY_CRON_LINE" <<<"$after")" != 1 ]] \
+    || grep -Eq '^[^#]*scripts/journey-(where|jobs-group)\.ts' <<<"$after"; then
+    printf '%s\n' "$current" | "$cron" - 2>/dev/null
+    fail "the journey cron did not read back as exactly one daily line with no B/C lines; the old crontab was restored"
+  fi
+  JOURNEY_CRON_NOTE="journey cron installed: scripts/journey-daily.ts at 02:30 UTC (08:00 IST), $removed old journey lines removed"
+}
+ensure_journey_cron
+[[ -z "$JOURNEY_CRON_NOTE" ]] || echo "sync-daemons: $JOURNEY_CRON_NOTE"
 
 # 6. The systemd units: the agy login helper and the job socket (fos-job.socket, deploy/systemd/fos-job.socket). `/login agy` from Telegram needs a process that runs as the `antigravity` user
 # (the only one that can run agy) behind a unix socket the bot can open: the bot itself runs under NoNewPrivileges and
