@@ -352,13 +352,12 @@ export const TUI_DISPATCH_ENABLED = env.TUI_DISPATCH_ENABLED === "true";
 export const RAG_RERANK_ENABLED = boolEnv("RAG_RERANK", false);
 
 /**
- * Max recursive supervisor/sub-agent steps before LangGraph aborts a run.
- * Sized for the kernel's worst legitimate single step: dispatch + (agent+tools)
- * hops up to the tool budget + collect, times MAX_ATTEMPTS_PER_STEP (3 since
- * 2026-07-13 — the diagnostic-retry escalation added one attempt; 40 was sized
- * for 2 and could abort a legal third attempt).
+ * Max supervisor/sub-agent hops before LangGraph aborts a run. Sized for the worst legitimate step:
+ * 3 attempts (MAX_ATTEMPTS_PER_STEP) x (dispatch + 2 x 20 read-tool calls + final turn + collect) = 129,
+ * plus plan/synthesize. step-budget.test.ts fails if the caps outgrow it.
  */
-export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 60);
+export const OFFICE_RECURSION_LIMIT_DEFAULT = 150;
+export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", OFFICE_RECURSION_LIMIT_DEFAULT);
 
 /**
  * Hard ceiling on a single office turn (ms). A hung model/tool call otherwise

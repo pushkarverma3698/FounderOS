@@ -41,7 +41,7 @@ export function repairEnvelopeExpected(
   return normalizeUnknownSchemaRef(normalizeExpectedKind(val), isKnownSchemaRef);
 }
 
-/** Safe default tool budget when the planner omits it (mid of the 1–6 range). */
+/** Placeholder when the planner omits max_tool_calls. The supervisor replaces it with the class cap (step-budget.ts). */
 export const DEFAULT_STEP_MAX_TOOL_CALLS = 3;
 
 /**

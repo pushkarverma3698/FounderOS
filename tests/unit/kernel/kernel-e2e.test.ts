@@ -8,6 +8,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { MemorySaver, Command, interrupt } from "@langchain/langgraph";
 import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import { OFFICE_RECURSION_LIMIT } from "../../../src/core/config.js";
+import { MAX_READ_TOOL_CALLS_PER_STEP } from "../../../src/kernel/step-budget.js";
 import {
   buildKernel,
   getPendingKernelApproval,
@@ -70,7 +72,8 @@ const searchTool = (impl?: (args: Record<string, unknown>) => Promise<unknown>):
   invoke: impl ?? (async () => JSON.stringify({ success: true, data: [{ title: "LangGraph 1.4", url: "https://x.dev" }] })),
 });
 
-const cfg = (thread: string) => ({ configurable: { thread_id: thread } });
+// recursionLimit as production passes it (kernel-run.ts); LangGraph's bare default of 25 is below one 20-call step.
+const cfg = (thread: string) => ({ configurable: { thread_id: thread }, recursionLimit: OFFICE_RECURSION_LIMIT });
 
 function kernelWith(planner: ScriptedModel, worker: ScriptedModel, synth: ScriptedModel, tools: KernelTool[]) {
   return buildKernel({
@@ -286,9 +289,10 @@ describe("kernel E2E (scripted models, real graph)", () => {
     const res = await k.invoke(turn("research forever"), cfg("loop"));
     expect(res.mission.status).toBe("failed");
     expect(res.failure?.stage).toBe("validation");
-    // Cap = 2 → exactly 2 executions per attempt, 3 attempts (corrected + diagnostic). Never 10 wasted hops.
-    expect(executions).toBe(6);
-    expect(worker.calls).toBeLessThanOrEqual(12);
+    // The cap is set by code for a read step (the planner's 2 is ignored): exactly that many executions
+    // per attempt, 3 attempts (corrected + diagnostic). Never an unbounded loop.
+    expect(executions).toBe(MAX_READ_TOOL_CALLS_PER_STEP * 3);
+    expect(worker.calls).toBeLessThanOrEqual((MAX_READ_TOOL_CALLS_PER_STEP + 1) * 3);
     // The thread survives with full state (the old system wiped it here).
     const state = await k.getState(cfg("loop"));
     expect(state.values.results.length).toBeGreaterThan(0);

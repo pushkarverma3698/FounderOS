@@ -46,7 +46,7 @@ import { messageContentText } from "./message-text.js";
 import { verifyStepResult } from "./verify.js";
 import { describeInterceptedError, isKernelTerminalError } from "./errors.js";
 import { clampToolOutput, pruneScratchForModel } from "./tool-output-guard.js";
-import { capReachedNote, stepTools } from "./step-budget.js";
+import { capReachedNote } from "./step-budget.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -133,7 +133,7 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
     const scratch = state.scratch[step.step_id] ?? [];
     const remaining = Math.max(0, step.constraints.max_tool_calls - executedToolCalls(scratch));
     const system = new SystemMessage(resolveWorkerPrompt(spec, config) + workerProtocol(step, remaining));
-    const boundTools = stepTools(step, spec.tools);
+    const boundTools = spec.tools;
     const bindable = remaining > 0 && boundTools.length > 0 && model.bindTools
       ? model.bindTools(boundTools)
       : model;
@@ -234,7 +234,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         );
         continue;
       }
-      const tool = stepTools(step, spec.tools).find((t) => t.name === call.name);
+      const tool = spec.tools.find((t) => t.name === call.name);
       if (!tool) {
         messages.push(
           new ToolMessage({
