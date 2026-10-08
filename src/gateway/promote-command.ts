@@ -19,44 +19,45 @@ import { TENANT } from "../core/config.js";
 import { writeAuditEntry } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { startPromoteJob, type StartJobResult } from "../tools/dispatch-tick.js";
-import { PROMOTE_REPO, planFromCompare, promoteCardText } from "../tools/promote-plan.js";
+import { PROMOTE_TARGETS, planFromCompare, promoteCardText, promoteTargetByKey, type PromoteKey, type PromoteTarget } from "../tools/promote-plan.js";
 import { classifyChatAccess, mayActAsOwner, type ChatAccessConfig } from "./chat-access.js";
 
 const log = childLogger({ module: "gateway:promote" });
 
 export const PROMOTE_CALLBACK_PREFIX = "pm:";
 export const PROMOTE_AUDIT_ACTION = "promote_start";
-const CALLBACK_YES_RE = /^pm:y:([0-9a-f]{40})$/;
+// `pm:y:<sha>` is FounderOS (the original card); `pm:y:<key>:<sha>` names another target. Telegram caps callback data at 64 bytes.
+const CALLBACK_YES_RE = /^pm:y:(?:([a-z-]+):)?([0-9a-f]{40})$/;
 
 export interface PromoteDeps {
-  /** Beta's head and the compare result main...<that head>. Throws when the hosting API cannot be read. */
-  read(): Promise<{ betaSha: string; compare: unknown }>;
-  start(betaSha: string): Promise<StartJobResult>;
+  /** Beta's head and the compare result <base>...<that head>. Throws when the hosting API cannot be read. */
+  read(target: PromoteTarget): Promise<{ betaSha: string; compare: unknown }>;
+  start(target: PromoteTarget, betaSha: string): Promise<StartJobResult>;
   /** Written only after the job was handed over. */
-  audit(betaSha: string, messageId: number): Promise<void>;
+  audit(target: PromoteTarget, betaSha: string, messageId: number): Promise<void>;
 }
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export const livePromoteDeps: PromoteDeps = {
-  async read() {
+  async read(target) {
     const token = process.env["GITHUB_TOKEN"];
     if (!token) throw new Error("GITHUB_TOKEN is not set");
     const octokit = new Octokit({ auth: token });
-    const [owner, repo] = PROMOTE_REPO.split("/") as [string, string];
+    const [owner, repo] = target.repo.split("/") as [string, string];
     const branch = await octokit.rest.repos.getBranch({ owner, repo, branch: "beta" });
     const betaSha = branch.data.commit.sha;
-    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `main...${betaSha}`, per_page: 100 });
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${target.base}...${betaSha}`, per_page: 100 });
     return { betaSha, compare: data };
   },
-  start: (betaSha) => startPromoteJob(PROMOTE_REPO, betaSha),
-  async audit(betaSha, messageId) {
+  start: (target, betaSha) => startPromoteJob(target.repo, betaSha),
+  async audit(target, betaSha, messageId) {
     await writeAuditEntry({
       tenant_id: TENANT,
       action: PROMOTE_AUDIT_ACTION,
       // One row per card tap: a redelivered update cannot write a second.
       idempotency_key: `${PROMOTE_AUDIT_ACTION}:${betaSha}:${messageId}`,
-      payload: { repo: PROMOTE_REPO, beta_sha: betaSha, via: "telegram-card" },
+      payload: { repo: target.repo, beta_sha: betaSha, via: "telegram-card" },
     });
   },
 };
@@ -67,26 +68,36 @@ export function _resetPromoteClaimsForTests(): void {
   claimed.clear();
 }
 
-/** `/promote`: read, then either say there is nothing to promote or post the card. Starts nothing. */
+const NAMES = Object.keys(PROMOTE_TARGETS).join(", ");
+
+/** `/promote [name]`: read, then either say there is nothing to promote or post the card. Starts nothing. */
 export async function handlePromote(ctx: Context, deps: PromoteDeps): Promise<void> {
+  const typed = typeof ctx.match === "string" ? ctx.match : "";
+  const picked = promoteTargetByKey(typed);
+  if (!picked) {
+    await ctx.reply(`I can promote: ${NAMES}. "${typed.trim().slice(0, 40)}" is not one of them. Nothing was started.`);
+    return;
+  }
+  const { key, target } = picked;
+  const label = key === "founderos" ? "" : `(${key})`;
   let read: { betaSha: string; compare: unknown };
   try {
-    read = await deps.read();
+    read = await deps.read(target);
   } catch (err) {
     log.error({ err: errText(err) }, "promote: could not read beta and main");
     await ctx.reply(`Could not read beta and main: ${errText(err)}. Nothing was started.`);
     return;
   }
-  const plan = planFromCompare(read.compare, read.betaSha);
+  const plan = planFromCompare(read.compare, read.betaSha, target.base);
   if (plan === null) {
-    await ctx.reply(`Nothing to promote: main already has every change on beta (beta ${read.betaSha.slice(0, 7)}).`);
+    await ctx.reply(`Nothing to promote${label ? ` ${label}` : ""}: ${target.base} already has every change on beta (beta ${read.betaSha.slice(0, 7)}).`);
     return;
   }
-  await ctx.reply(promoteCardText(plan), {
+  await ctx.reply(promoteCardText(plan, label), {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "Promote now", callback_data: `${PROMOTE_CALLBACK_PREFIX}y:${plan.betaSha}` },
+          { text: "Promote now", callback_data: `${PROMOTE_CALLBACK_PREFIX}y:${key === "founderos" ? "" : `${key}:`}${plan.betaSha}` },
           { text: "Cancel", callback_data: `${PROMOTE_CALLBACK_PREFIX}n` },
         ],
       ],
@@ -122,9 +133,11 @@ export async function handlePromoteCallback(ctx: Context, access: ChatAccessConf
     await closeCard(ctx, "Promotion cancelled. Nothing changed.");
     return true;
   }
-  const betaSha = CALLBACK_YES_RE.exec(data)?.[1];
+  const yes = CALLBACK_YES_RE.exec(data);
+  const betaSha = yes?.[2];
+  const picked = promoteTargetByKey(yes?.[1] ?? "");
   const messageId = ctx.callbackQuery?.message?.message_id;
-  if (betaSha === undefined || messageId === undefined) {
+  if (betaSha === undefined || picked === null || messageId === undefined) {
     await ctx.answerCallbackQuery({ text: "That button is not valid any more. Send /promote for a fresh card.", show_alert: true });
     return true;
   }
@@ -135,20 +148,21 @@ export async function handlePromoteCallback(ctx: Context, access: ChatAccessConf
     return true;
   }
   claimed.add(key);
+  const { target } = picked;
   let started = false;
   try {
-    const now = await deps.read();
+    const now = await deps.read(target);
     if (now.betaSha !== betaSha) {
       await ctx.answerCallbackQuery({ text: "Beta moved since this card.", show_alert: true });
       await closeCard(ctx, `Beta moved to ${now.betaSha.slice(0, 7)} since this card (it showed ${betaSha.slice(0, 7)}). Nothing started. Send /promote for a fresh card.`);
       return true;
     }
-    const result = await deps.start(betaSha);
+    const result = await deps.start(target, betaSha);
     if (result.status === "started") {
       started = true;
       await ctx.answerCallbackQuery({ text: "Promoting…" });
-      await closeCard(ctx, `Promoting beta ${betaSha.slice(0, 7)}. One message follows when prod has moved, or where it stopped.`);
-      await deps.audit(betaSha, messageId).catch((err: unknown) => log.error({ err: errText(err) }, "promote: audit row not written"));
+      await closeCard(ctx, `Promoting beta ${betaSha.slice(0, 7)} to ${target.base}. One message follows when prod has moved, or where it stopped.`);
+      await deps.audit(target, betaSha, messageId).catch((err: unknown) => log.error({ err: errText(err) }, "promote: audit row not written"));
     } else if (result.status === "inert") {
       await ctx.answerCallbackQuery({ text: "This host does not run jobs.", show_alert: true });
     } else {
