@@ -76,6 +76,7 @@ describe("verifyStepResult", () => {
       const envelope = makeEnvelope({
         worker: "jobhunt",
         objective: "Export captured jobs to a CSV file",
+        deliverable: "file",
         expected: { kind: "data", schema_ref: "text.summary" },
       });
       const result: StepResult = {
@@ -95,6 +96,7 @@ describe("verifyStepResult", () => {
       const envelope = makeEnvelope({
         worker: "admin",
         objective: "Generate and send spreadsheet deliverable",
+        deliverable: "file",
         expected: { kind: "data", schema_ref: "text.summary" },
       });
       const result: StepResult = {
@@ -113,6 +115,7 @@ describe("verifyStepResult", () => {
       const envelope = makeEnvelope({
         worker: "jobhunt",
         objective: "Give me a CSV of all captured jobs",
+        deliverable: "file",
         expected: { kind: "data", schema_ref: "text.summary" },
       });
       const result: StepResult = {
@@ -139,6 +142,7 @@ describe("verifyStepResult", () => {
       const envelope = makeEnvelope({
         worker: "admin",
         objective: "Save the Q3 ops notes as a markdown file",
+        deliverable: "file",
         expected: { kind: "data", schema_ref: "text.summary" },
       });
       const result: StepResult = {
@@ -157,6 +161,7 @@ describe("verifyStepResult", () => {
       const envelope = makeEnvelope({
         worker: "admin",
         objective: "Export the action log to a csv",
+        deliverable: "file",
         expected: { kind: "data", schema_ref: "text.summary" },
       });
       const result: StepResult = {
@@ -171,6 +176,47 @@ describe("verifyStepResult", () => {
       expect(verified.status).toBe("failed");
       if (verified.status === "failed") {
         expect(verified.failure.message).toContain("no artifact was written or delivered");
+      }
+    });
+
+    // AG-045: the word "file" in an objective is not a deliverable request.
+    it("admin: a read-and-summarise objective that says \"file\" passes with no artifact receipt", async () => {
+      const envelope = makeEnvelope({
+        worker: "admin",
+        objective: "Read the contents of the file docs/plans/x.md and summarise it",
+        expected: { kind: "data", schema_ref: "text.summary" },
+      });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "The plan states three goals." },
+        tool_receipts: [
+          { tool: "read_file", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("ok");
+    });
+
+    it("jobhunt: deliverable \"file\" with write_artifact but no deliver_artifact fails with NOT_DELIVERED", async () => {
+      const envelope = makeEnvelope({
+        worker: "jobhunt",
+        objective: "List the captured jobs for the founder",
+        expected: { kind: "data", schema_ref: "data.generic" },
+        deliverable: "file",
+      });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "Wrote jobs.csv." },
+        tool_receipts: [
+          { tool: "write_artifact", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
+      if (verified.status === "failed") {
+        expect(verified.failure.message).toContain("no successful deliver_artifact receipt");
       }
     });
 

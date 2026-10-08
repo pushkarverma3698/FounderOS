@@ -57,6 +57,7 @@ describe("renderCaseStudy", () => {
           objective: "Research LangGraph",
           inputs: {},
           expected: { kind: "data", schema_ref: "research.findings" },
+          deliverable: "none",
           constraints: { max_tool_calls: 2, hitl_required: false },
         },
         {
@@ -65,6 +66,7 @@ describe("renderCaseStudy", () => {
           objective: "Send summary to sam@client.com",
           inputs: { findings: "s1" },
           expected: { kind: "action_receipt", schema_ref: "action.summary" },
+          deliverable: "none",
           constraints: { max_tool_calls: 1, hitl_required: true },
         },
       ],
