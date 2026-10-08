@@ -134,6 +134,7 @@ export async function getPullRequest(octokit: Octokit, owner: string, repo: stri
       updated_at: pr.updated_at,
       url: pr.html_url,
       body: cap(pr.body, MAX_BODY),
+      ...(typeof checks === "string" ? { ci: checks } : summarizeChecks(checks)), // same verdict list_prs gives
       checks,
       files_changed: files.length,
       files: changedFiles,

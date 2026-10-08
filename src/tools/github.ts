@@ -216,7 +216,7 @@ export const githubTool: UnifiedTool = {
         description: "For get_pr: the pull request number.",
       },
       path: { type: "string", description: "For get_file: file path in the repo." },
-      ref: { type: "string", description: "For get_file: branch, tag or commit (default: the default branch)." },
+      ref: { type: "string", description: "For get_file and list_commits: branch, tag or commit (default: the default branch)." },
       query: { type: "string", description: "For search_code: search terms (max 20 hits, each as path:line)." },
       since: {
         type: "string",
