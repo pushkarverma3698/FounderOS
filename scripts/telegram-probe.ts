@@ -37,11 +37,13 @@ const DEFAULT_WAIT_S = 360;
  * actually took 200s, because "🤔 Working on it…" arrived and the collector
  * went quiet. A probe that exists to catch false greens must not emit one.
  */
-const TRANSIENT_PREFIXES = ["🤔", "🔧", "✍️", "🔍", "📋", "⏳", "📝"];
+const TRANSIENT_PREFIXES = ["🤔", "🔧", "✍️", "🔍", "📋", "⏳", "📝", "🧠"];
+/** Step labels from src/gateway/kernel-progress.ts: on 10-07 "On it: …" passed as the answer at 3s; the reply came at 7s. */
+const PROGRESS_LABELS = [/^On it: /, /^Step \d+ of \d+: /, /^All \d+ steps? done$/];
 
 const isTransient = (text: string): boolean => {
   const t = text.trimStart();
-  return t.length === 0 || TRANSIENT_PREFIXES.some((p) => t.startsWith(p));
+  return t.length === 0 || TRANSIENT_PREFIXES.some((p) => t.startsWith(p)) || PROGRESS_LABELS.some((re) => re.test(t));
 };
 
 async function main(): Promise<void> {
