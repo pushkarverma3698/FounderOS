@@ -591,3 +591,114 @@ esac
     }
   });
 });
+
+describe("sync-daemons.sh — clearing what earlier runs left behind (AG-052)", () => {
+  let log: string;
+  let ctl: string;
+  let docker: string;
+  let backup: string;
+
+  /** Fakes that log every call to one file, so a test can assert the ORDER: backup before any reset or rm. */
+  function fakes(opts: { failed?: string[]; container?: boolean; backupFails?: boolean; rmFails?: boolean } = {}): void {
+    log = join(root, "calls.log");
+    const failedList = (opts.failed ?? []).map((u) => `${u} loaded failed failed FounderOS coding job`).join("\n");
+    ctl = join(root, "systemctl-stub");
+    writeFileSync(
+      ctl,
+      `#!/usr/bin/env bash
+echo "systemctl $*" >>"${log}"
+case "$1" in
+  list-units) printf '%s\\n' "${failedList}" | grep . ; exit 0 ;;
+  is-active) echo active; exit 0 ;;
+  *) exit 0 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    docker = join(root, "docker-stub");
+    writeFileSync(
+      docker,
+      `#!/usr/bin/env bash
+echo "docker $*" >>"${log}"
+case "$1" in
+  container) [ "$2" = inspect ] && [ "$3" = jolly-babbage-job-tracker-1 ] && ${opts.container ? "exit 0" : "exit 1"}; exit 1 ;;
+  rm) ${opts.rmFails ? "exit 1" : "exit 0"} ;;
+  *) exit 0 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    backup = join(root, "backup-stub");
+    writeFileSync(backup, `#!/usr/bin/env bash\necho "backup" >>"${log}"\n${opts.backupFails ? 'echo "pg_dump: connection refused" >&2; exit 1' : "exit 0"}\n`, { mode: 0o755 });
+  }
+  const calls = (): string[] => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
+  const env = (): Record<string, string> => ({
+    SYNC_DAEMONS_DOCKER: docker,
+    SYNC_DAEMONS_BACKUP: backup,
+    SYNC_DAEMONS_SYSTEMCTL: ctl,
+    SYNC_DAEMONS_SUDO: "",
+    SYNC_DAEMONS_UNIT_DEST: join(root, "units"),
+  });
+  beforeEach(() => mkdirSync(join(root, "units"), { recursive: true }));
+
+  it("backs up the database, then resets each failed fos-job@ unit by name and removes the abandoned container", () => {
+    fakes({ failed: ["fos-job@0-27-1.service", "fos-job@5-4124-2.service"], container: true });
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    const c = calls().filter((l) => !l.startsWith("systemctl list-units") && !l.startsWith("docker container") && !/systemctl (daemon-reload|enable|restart|try-restart|is-active)/.test(l));
+    expect(c).toEqual([
+      "backup",
+      "systemctl reset-failed fos-job@0-27-1.service",
+      "systemctl reset-failed fos-job@5-4124-2.service",
+      "docker stop jolly-babbage-job-tracker-1",
+      "docker rm jolly-babbage-job-tracker-1",
+    ]);
+    expect(r.out).toContain("backup taken; reset 2 failed fos-job@ unit(s); removed container jolly-babbage-job-tracker-1");
+  });
+
+  it("never removes an image, a volume or anything but that one container, and never resets all units at once", () => {
+    fakes({ failed: ["fos-job@1-1.service"], container: true });
+    sync(env());
+    expect(calls().filter((l) => /docker (rmi|volume|image|system|rm -v|rm -f)/.test(l))).toEqual([]);
+    expect(calls()).not.toContain("systemctl reset-failed");
+  });
+
+  it("takes no backup and changes nothing when there is nothing to clear (the second deploy)", () => {
+    fakes();
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    expect(calls()).not.toContain("backup");
+    expect(calls().filter((l) => /reset-failed|docker (stop|rm)/.test(l))).toEqual([]);
+    expect(r.out).toContain("no leftovers to clear");
+  });
+
+  it("clears nothing when the backup fails, says why, and keeps the deploy green", () => {
+    fakes({ failed: ["fos-job@1-1.service"], container: true, backupFails: true });
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    expect(calls().filter((l) => /reset-failed|docker (stop|rm)/.test(l))).toEqual([]);
+    expect(r.out).toContain("WARNING: the database backup failed, so no leftovers were cleared: pg_dump: connection refused");
+  });
+
+  it("names what it could not remove", () => {
+    fakes({ container: true, rmFails: true });
+    const r = sync(env());
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("WARNING: backup taken; reset 0 failed fos-job@ unit(s); could not: remove jolly-babbage-job-tracker-1;");
+  });
+
+  it("ignores failed units that are not fos-job@ instances (cloud-init and the rest belong to the OS)", () => {
+    fakes({ failed: ["cloud-init-hotplugd.service"] });
+    const r = sync(env());
+    expect(calls().filter((l) => l.includes("reset-failed"))).toEqual([]);
+    expect(r.out).toContain("no leftovers to clear");
+  });
+
+  it("touches nothing under a scratch HOME when no docker command is given", () => {
+    fakes({ failed: ["fos-job@1-1.service"], container: true });
+    const r = sync({ SYNC_DAEMONS_SYSTEMCTL: ctl, SYNC_DAEMONS_BACKUP: backup });
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("leftovers left alone");
+    expect(calls().filter((l) => /backup|reset-failed|docker/.test(l))).toEqual([]);
+  });
+});
