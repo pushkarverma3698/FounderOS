@@ -230,13 +230,14 @@ notify_photo() {
 # copy list. Without them there is no pause state, so refuse to run.
 #   tg-quiet.sh     Telegram quiet hours helper
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with agent-dispatch)
+#   gh-token.sh     the bot's GITHUB_TOKEN as GH_TOKEN + a git credential helper; as_antigravity_gh passes it on stdin
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with agent-dispatch)
 #   evidence-card.sh  ec_run: AGENT_PIPELINE_V2 only, a reviewed PR with an approved contract gets an evidence card instead of an auto-merge
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh ci-state.sh evidence-card.sh; do
+for _lib in tg-quiet.sh down-state.sh gh-token.sh agy-failure.sh agy-run.sh ci-state.sh evidence-card.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -410,7 +411,16 @@ esac
 for dep in $_deps; do
   command -v "$dep" >/dev/null 2>&1 || { log "FATAL: '$dep' not on PATH"; exit 1; }
 done
-gh auth status >/dev/null 2>&1 || { log "FATAL: gh is not authenticated"; exit 1; }
+# ONE GitHub token for every gh and git call, here and in the antigravity shell: the bot's GITHUB_TOKEN from the env file.
+# No fallback to whatever `gh auth login` a Linux user once did: that is the second token this replaces (AG-039).
+if gh_token_load "$ENV_FILE"; then
+  REDACT_LITERALS+=("$GH_TOKEN")
+else
+  unset GH_TOKEN
+  log "FATAL: GITHUB_TOKEN is not set in ${ENV_FILE:-<PR_BRAIN_ENV_FILE is not set>}: add GITHUB_TOKEN=<the bot's token> to that file"
+  exit 1
+fi
+gh auth status >/dev/null 2>&1 || { log "FATAL: GitHub rejects the GITHUB_TOKEN in ${ENV_FILE} (gh auth status fails)"; exit 1; }
 [[ "$ENGINE" == "claude" ]] && load_oauth_token
 
 # Keep the log bounded — this runs every 20 minutes forever.
@@ -736,7 +746,7 @@ REVIEW_DIR=""
 prepare_review_workspace() { # prepare_review_workspace SLUG NAME PR  -> sets REVIEW_DIR
   local slug="$1" name="$2" pr="$3"
   REVIEW_DIR="$REVIEW_WS_BASE/$name"
-  as_antigravity 'set -e
+  as_antigravity_gh 'set -e
     mkdir -p "$1"
     if [ ! -d "$1/$2/.git" ]; then git clone --quiet "$5/$3.git" "$1/$2"; fi
     cd "$1/$2"
