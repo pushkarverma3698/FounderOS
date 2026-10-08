@@ -53,6 +53,8 @@ export const defaultGoogleDeps: GoogleLoginDeps = {
     await writeFile(tmp, body, { mode: 0o600 });
     await chmod(tmp, 0o600);
     await rename(tmp, path);
+    // gws caches the access token per config dir, not per credentials file: keep it and the check reads the old account.
+    await rm(`${dirname(path)}/token_cache.json`, { force: true });
   },
   backup: async (path) => (existsSync(path) ? (await copyFile(path, `${path}.bak`), true) : false),
   restore: async (path, hadBackup) => {
