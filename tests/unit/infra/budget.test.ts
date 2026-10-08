@@ -59,6 +59,19 @@ describe("estimateCost", () => {
 
 // ── normalizeModelId (G6) ─────────────────────────────────────────────────────
 
+describe("estimateCost — prod models are priced, not defaulted (2026-10-08)", () => {
+  it.each([
+    ["openrouter:anthropic/claude-sonnet-5.5", 2.0, 10.0],
+    ["google-genai:gemini-3.6-flash", 0.75, 3.75],
+    ["openrouter:google/gemini-3.6-flash", 0.75, 3.75],
+    ["openrouter:inclusionai/ling-3.0-flash", 0.021, 0.063],
+    ["inclusionai/ling-3.0-flash", 0.021, 0.063],
+  ])("%s costs $%s/M in and $%s/M out", (model, inPerM, outPerM) => {
+    expect(estimateCost(1_000_000, 0, model)).toBeCloseTo(inPerM, 6);
+    expect(estimateCost(0, 1_000_000, model)).toBeCloseTo(outPerM, 6);
+  });
+});
+
 describe("normalizeModelId — strips provider prefix for MODEL_COSTS lookup", () => {
   it("strips openrouter:google/ prefix", () => {
     expect(normalizeModelId("openrouter:google/gemini-2.5-flash")).toBe("gemini-2.5-flash");

@@ -92,8 +92,8 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-3.6-flash");
-    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("openrouter:anthropic/claude-sonnet-5.5");
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("openrouter:nvidia/nemotron-3-super-120b-a12b:free");
   });
 
   it("pins the measured worker and per-role pools (docs/sessions/2026-10-04-model-pools.md), replacing stale copies", () => {
@@ -101,7 +101,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
       "WORKER_AGENT_MODEL=\n",
       SNAPSHOT_BASE + "WORKER_AGENT_MODEL=\nPLANNER_FALLBACK_MODELS=stale\n",
     );
-    expect(valueOf(rendered, "WORKER_AGENT_MODEL")).toBe("openrouter:inclusionai/ling-3.0-flash");
+    expect(valueOf(rendered, "WORKER_AGENT_MODEL")).toBe("openrouter:anthropic/claude-sonnet-5.5");
     expect(valueOf(rendered, "WORKER_FALLBACK_MODELS")).toBe(
       "openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash",
     );
@@ -111,7 +111,23 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     for (const k of ["WORKER_AGENT_MODEL", "WORKER_FALLBACK_MODELS", "PLANNER_FALLBACK_MODELS"]) {
       expect(countOf(rendered, k), `${k} has no stale duplicate`).toBe(1);
     }
-    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary is unchanged").toBe("google-genai:gemini-3.6-flash");
+    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary").toBe("openrouter:anthropic/claude-sonnet-5.5");
+  });
+
+  it("pins the per-run budget for the heavy model, replacing stale copies", () => {
+    const rendered = render("", SNAPSHOT_BASE + "RUN_BUDGET_USD=0.5\nRUN_BUDGET_TOKENS=100000\n");
+    expect(valueOf(rendered, "RUN_BUDGET_USD")).toBe("1.5");
+    expect(valueOf(rendered, "RUN_BUDGET_TOKENS")).toBe("400000");
+    for (const k of ["RUN_BUDGET_USD", "RUN_BUDGET_TOKENS"]) {
+      expect(countOf(rendered, k), `${k} has no stale duplicate`).toBe(1);
+    }
+  });
+
+  it("keeps no direct Google model: the AI Studio prepay key returned 402 on 2026-10-08", () => {
+    const rendered = render("", SNAPSHOT_BASE);
+    for (const k of ["AGENT_MODEL", "AGENT_FALLBACK_MODELS", "JUDGE_MODEL", "WORKER_AGENT_MODEL"]) {
+      expect(valueOf(rendered, k), k).not.toContain("google-genai:");
+    }
   });
 
   it("drops the withdrawn minimax slug from the shared fallback chain", () => {
@@ -122,7 +138,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("pins the judge model, overriding any stale snapshot value", () => {
     const rendered = render("", SNAPSHOT_BASE + "JUDGE_MODEL=something-else\n");
-    expect(valueOf(rendered, "JUDGE_MODEL")).toBe("google-genai:gemini-3.1-flash-lite");
+    expect(valueOf(rendered, "JUDGE_MODEL")).toBe("openrouter:google/gemini-3.6-flash");
     expect(countOf(rendered, "JUDGE_MODEL"), "no stale duplicate survives").toBe(1);
   });
 
