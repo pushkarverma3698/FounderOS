@@ -124,3 +124,18 @@ export async function earliestConversationTurn(threadId: string): Promise<Date |
     .where(eq(conversationTurns.thread_id, threadId));
   return row?.first ? new Date(row.first) : null;
 }
+
+/** The thread's newest `limit` turns, newest first: one select, no count (the in-flight block). */
+export async function latestConversationTurns(threadId: string, limit: number) {
+  return getDb()
+    .select({
+      turnId: conversationTurns.turn_id,
+      occurredAt: conversationTurns.occurred_at,
+      userInput: conversationTurns.user_input,
+      reply: conversationTurns.reply,
+    })
+    .from(conversationTurns)
+    .where(eq(conversationTurns.thread_id, threadId))
+    .orderBy(desc(conversationTurns.occurred_at))
+    .limit(limit);
+}

@@ -120,6 +120,45 @@ export async function getPendingInterrupt(threadId: string) {
   return row ?? null;
 }
 
+/** What a pending card shows, from its callback_data JSON: the gated tool and its summary (or title). Pure. */
+export function approvalCardText(callbackData: string | null): { action: string; summary: string } {
+  let data: unknown = null;
+  try {
+    data = callbackData ? JSON.parse(callbackData) : null;
+  } catch {
+    data = null; // allow-failopen: a row with unparseable callback_data still lists, as "unknown"
+  }
+  const o = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  return { action: str(o["action"]) || "unknown", summary: str(o["summary"]) || str(o["title"]) };
+}
+
+/**
+ * Pending, unexpired approval cards of one thread (and its `<thread>:<sub>` runs, e.g. `:shell-fp`), oldest first.
+ * One read, for the planner's in-flight block (kernel/in-flight.ts).
+ */
+export async function listPendingApprovalCards(threadId: string, now: Date, limit = 50) {
+  const sub = `${threadId.replace(/[\\%_]/g, "\\$&")}:%`;
+  const rows = await getDb()
+    .select({
+      id: hitlApprovals.interrupt_id,
+      callbackData: hitlApprovals.callback_data,
+      createdAt: hitlApprovals.created_at,
+      expiresAt: hitlApprovals.expires_at,
+    })
+    .from(hitlApprovals)
+    .where(
+      and(
+        or(eq(hitlApprovals.thread_id, threadId), sql`${hitlApprovals.thread_id} LIKE ${sub}`),
+        eq(hitlApprovals.status, "pending"),
+        gt(hitlApprovals.expires_at, now),
+      ),
+    )
+    .orderBy(hitlApprovals.created_at)
+    .limit(limit);
+  return rows.map((r) => ({ id: r.id, ...approvalCardText(r.callbackData), createdAt: r.createdAt, expiresAt: r.expiresAt }));
+}
+
 /** Fetch a single interrupt record by its primary key. */
 export async function getInterruptById(interruptId: string) {
   const db = getDb();
@@ -1618,6 +1657,24 @@ export async function reclaimStrandedReminders(tenantId: string): Promise<Remind
     .set({ status: "scheduled" })
     .where(and(eq(reminders.tenant_id, tenantId), eq(reminders.status, "firing")))
     .returning();
+}
+
+/** Scheduled reminders of one chat with from <= remind_at < until, soonest first (the in-flight block). */
+export async function listRemindersDue(tenantId: string, chatId: string, from: Date, until: Date, limit = 50) {
+  return getDb()
+    .select({ id: reminders.id, text: reminders.text, remindAt: reminders.remind_at })
+    .from(reminders)
+    .where(
+      and(
+        eq(reminders.tenant_id, tenantId),
+        eq(reminders.chat_id, chatId),
+        eq(reminders.status, "scheduled"),
+        gte(reminders.remind_at, from),
+        lt(reminders.remind_at, until),
+      ),
+    )
+    .orderBy(reminders.remind_at)
+    .limit(limit);
 }
 
 /** Upcoming (still-scheduled) reminders for the founder's "what's queued" view. */
