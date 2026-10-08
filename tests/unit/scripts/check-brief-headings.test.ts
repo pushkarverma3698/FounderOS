@@ -226,9 +226,4 @@ describe("the AGENT_BRIEF_HEADINGS contract", () => {
   it("matches the constant the tests use, so a rename cannot leave them checking the old names", () => {
     expect(declared()).toEqual([...BRIEF_HEADINGS]);
   });
-
-  it("keeps DEFAULT_REPOS on ONE line in the format `pnpm repo:add` edits and the serviceability test parses", () => {
-    expect(/^DEFAULT_REPOS=\(("[^"\n]+"\s?)+\)$/m.test(script)).toBe(true);
-    expect(script.match(/^DEFAULT_REPOS=/gm)).toHaveLength(1);
-  });
 });

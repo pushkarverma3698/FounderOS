@@ -28,6 +28,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
         objective: "Draft an outreach email to recipient",
         inputs: {},
         expected: { kind: "draft", schema_ref: "draft.email" },
+        deliverable: "none",
         constraints: dummyConstraints,
       };
       const badResult = await VERIFIERS["comms"]!.verify({ text: "Hello {{name}}, welcome!" }, envelope);
@@ -45,6 +46,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
         objective: "Write persistent deliverable artifact",
         inputs: {},
         expected: { kind: "action_receipt", schema_ref: "action.summary" },
+        deliverable: "none",
         constraints: dummyConstraints,
       };
       const missingResult = await VERIFIERS["admin"]!.verify("written successfully to /tmp/nonexistent_xyz.md", envelope);
@@ -59,6 +61,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
         objective: "Query job applications state",
         inputs: {},
         expected: { kind: "data", schema_ref: "data.generic" },
+        deliverable: "none",
         constraints: dummyConstraints,
       };
       const badResult = await VERIFIERS["jobhunt"]!.verify({ rows: [{ id: "1" }] }, envelope);
@@ -76,6 +79,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
         objective: "Execute code build command",
         inputs: {},
         expected: { kind: "action_receipt", schema_ref: "action.summary" },
+        deliverable: "none",
         constraints: dummyConstraints,
       };
       const badResult = await VERIFIERS["engineering"]!.verify("Command failed with exit code 1", envelope);
@@ -90,6 +94,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
         objective: "Perform web research on target company",
         inputs: {},
         expected: { kind: "data", schema_ref: "research.findings" },
+        deliverable: "none",
         constraints: dummyConstraints,
       };
       const badResult = await VERIFIERS["research"]!.verify(
@@ -111,6 +116,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
           objective: "Query job applications state",
           inputs: {},
           expected: { kind: "data", schema_ref: "data.generic" },
+          deliverable: "none",
           constraints: dummyConstraints,
         },
       ];
@@ -130,6 +136,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
           objective: "Query job applications state",
           inputs: {},
           expected: { kind: "data", schema_ref: "data.generic" },
+          deliverable: "none",
           constraints: dummyConstraints,
         },
       ];
@@ -157,6 +164,7 @@ describe("Phase 4 — Verification & False Success Elimination", () => {
           objective: "Query job applications state",
           inputs: {},
           expected: { kind: "data", schema_ref: "data.generic" },
+          deliverable: "none",
           constraints: dummyConstraints,
         },
       ];

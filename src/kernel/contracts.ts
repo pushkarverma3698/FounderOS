@@ -198,6 +198,8 @@ export const TaskEnvelopeSchema = z.preprocess(
       }),
     ),
     dependencies: z.array(z.string()).optional(),
+    /** "file" only when the founder asked for a file sent to him (CSV, export, attachment). */
+    deliverable: z.enum(["none", "file"]).default("none"),
     constraints: z.object({
       /** Kept for compatibility. The supervisor overwrites it with the class cap, so any positive number parses. */
       max_tool_calls: z.number().int().min(1),

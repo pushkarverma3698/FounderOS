@@ -5,8 +5,8 @@
 #   onboard-repo.sh <owner/repo>               provision what is missing (idempotent), then print
 #                                              a checklist of what it has just VERIFIED
 #   onboard-repo.sh --check [owner/repo ...]   report what is missing and change NOTHING; with no
-#                                              repos, checks DEFAULT_REPOS of the agent-dispatch
-#                                              that sits next to this script (the daemon's list)
+#                                              repos, checks every repo in DISPATCH_REPO_ALLOWLIST
+#                                              (the daemon's list: lib/dispatch-repos.sh)
 #   options:  --porcelain   one row per piece for scripts: repo<TAB>piece<TAB>status<TAB>detail
 #
 # A repo on the loop needs three things on the VPS, and each used to be a manual step nobody could
@@ -293,8 +293,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$MODE" == check && "${#REPOS[@]}" -eq 0 ]]; then
-  if ! DEFAULTS="$(grep -m1 '^DEFAULT_REPOS=(' "$SELF_DIR/agent-dispatch" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"')" || [[ -z "$DEFAULTS" ]]; then
-    echo "onboard-repo: no repos given and no DEFAULT_REPOS=( … ) found in $SELF_DIR/agent-dispatch" >&2
+  # shellcheck source=lib/dispatch-repos.sh
+  for _lib in "$SELF_DIR/lib/dispatch-repos.sh" "$SELF_DIR/../lib/dispatch-repos.sh"; do
+    [[ -f "$_lib" ]] && { . "$_lib"; break; }
+  done
+  if ! declare -F dispatch_repos_print >/dev/null; then
+    echo "onboard-repo: no repos given and lib/dispatch-repos.sh was not found next to $SELF_DIR" >&2
+    exit 2
+  fi
+  if ! DEFAULTS="$(dispatch_repos_print)" || [[ -z "$DEFAULTS" ]]; then
+    echo "onboard-repo: no repos given and the dispatch repo list could not be read (see above)" >&2
     exit 2
   fi
   while IFS= read -r r; do REPOS+=("$r"); done <<<"$DEFAULTS"
