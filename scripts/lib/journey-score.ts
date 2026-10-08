@@ -100,7 +100,8 @@ const VERDICT_WORDS: Record<string, RegExp> = {
   none: /\bno (ci|checks?)\b|\bnone\b|\bno ci\b/i,
 };
 
-const prRef = (n: number): RegExp => new RegExp(`(#|\\bPR\\s*#?)${n}\\b`, "i");
+/** "#1018", "PR 1018", or a bare markdown table cell "| 1018 |" (the bot answers lists as tables). */
+const prRef = (n: number): RegExp => new RegExp(`(#|\\bPR\\s*#?)${n}\\b|\\|\\s*${n}\\s*\\|`, "i");
 
 /** J3: every open PR is named with GitHub's CI verdict on its line; the follow-up names the oldest PR. */
 export function scorePrs(reply: string, followUp: string, prs: readonly OpenPr[]): Verdict {
