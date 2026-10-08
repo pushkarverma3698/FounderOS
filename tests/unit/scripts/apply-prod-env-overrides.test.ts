@@ -92,7 +92,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("openrouter:anthropic/claude-sonnet-5.5");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("openrouter:google/gemini-3.6-flash");
     expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("openrouter:nvidia/nemotron-3-super-120b-a12b:free");
   });
 
@@ -101,17 +101,17 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
       "WORKER_AGENT_MODEL=\n",
       SNAPSHOT_BASE + "WORKER_AGENT_MODEL=\nPLANNER_FALLBACK_MODELS=stale\n",
     );
-    expect(valueOf(rendered, "WORKER_AGENT_MODEL")).toBe("openrouter:anthropic/claude-sonnet-5.5");
+    expect(valueOf(rendered, "WORKER_AGENT_MODEL")).toBe("openrouter:inclusionai/ling-3.0-flash");
     expect(valueOf(rendered, "WORKER_FALLBACK_MODELS")).toBe(
-      "openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash",
+      "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
     );
     expect(valueOf(rendered, "PLANNER_FALLBACK_MODELS")).toBe(
-      "openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router",
+      "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
     );
     for (const k of ["WORKER_AGENT_MODEL", "WORKER_FALLBACK_MODELS", "PLANNER_FALLBACK_MODELS"]) {
       expect(countOf(rendered, k), `${k} has no stale duplicate`).toBe(1);
     }
-    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary").toBe("openrouter:anthropic/claude-sonnet-5.5");
+    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary").toBe("openrouter:google/gemini-3.6-flash");
   });
 
   it("pins the per-run budget for the heavy model, replacing stale copies", () => {
@@ -138,7 +138,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("pins the judge model, overriding any stale snapshot value", () => {
     const rendered = render("", SNAPSHOT_BASE + "JUDGE_MODEL=something-else\n");
-    expect(valueOf(rendered, "JUDGE_MODEL")).toBe("openrouter:google/gemini-3.6-flash");
+    expect(valueOf(rendered, "JUDGE_MODEL")).toBe("openrouter:google/gemini-3.1-flash-lite");
     expect(countOf(rendered, "JUDGE_MODEL"), "no stale duplicate survives").toBe(1);
   });
 
