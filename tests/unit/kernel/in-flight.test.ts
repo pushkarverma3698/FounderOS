@@ -90,6 +90,21 @@ describe("buildInFlight", () => {
     const broken = source({ pendingApprovals: async () => { throw new Error("db down"); } });
     expect(await buildInFlight(broken, IDS, now)).toBe(IN_FLIGHT_UNAVAILABLE);
   });
+
+  // src/index.ts treats an unhandled rejection as fatal: a read that fails after the budget must not kill the bot.
+  it("a reader that fails after the budget raises no unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const late = source({ pendingApprovals: () => new Promise((_, reject) => setTimeout(() => reject(new Error("pool timeout")), 40)) });
+      expect(await buildInFlight(late, IDS, now, 10)).toBe(IN_FLIGHT_UNAVAILABLE);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
 
 describe("renderInFlight", () => {
