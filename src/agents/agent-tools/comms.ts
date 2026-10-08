@@ -16,6 +16,7 @@ import { linkedinPostTool, linkedinAnalyticsTool } from "../../tools/linkedin.js
 import { linkedinReadCommentsTool, linkedinGetMyPostsTool } from "../../tools/linkedin-engagement.js";
 import { scheduleSocialPostTool } from "../../tools/scheduled-post.js";
 import { getCompanyPageMention } from "../../infra/provider-config.js";
+import { listGoogleMailboxes, mailboxNamedIn } from "../../infra/google-mailboxes.js";
 import { getRecentLinkedInPosts, listUpcomingScheduledPosts } from "../../db/queries.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
@@ -645,8 +646,11 @@ export const draftConnectionNote = tool(
 // ── Comms: read emails (read-only, NO approval) ────────────────────────────────
 
 export const readEmails = tool(
-  async ({ query, limit, account }) => {
-    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10, department: "comms", account_key: account ?? undefined });
+  async ({ query, limit, account }, config) => {
+    // The mailbox the founder named in his own words outranks the model's pick (J1, 2026-10-08).
+    const named = mailboxNamedIn(String(config?.configurable?.["founder_text"] ?? ""), listGoogleMailboxes());
+    const account_key = named ?? account ?? undefined;
+    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10, department: "comms", account_key });
     if (!res.success) {
       return `Email read failed: ${res.error ?? "unknown error"}. (Check gws auth.)`;
     }

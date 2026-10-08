@@ -81,6 +81,18 @@ describe("pruneScratchForModel", () => {
     expect(pruned.filter((m) => m instanceof AIMessage)).toHaveLength(3);
   });
 
+  it("J3 (2026-10-08): a small list result survives a fan-out of large reads after it", () => {
+    // list_prs returned 10 rows (~4.4 KB), then the model called get_pr on each (~10 KB apiece).
+    // Pruning oldest-first stubbed the list, and the reply gave five PRs the last get_pr's title.
+    const list = JSON.stringify(Array.from({ length: 10 }, (_, i) => ({ number: 1000 + i, title: `PR title ${i}`, ci: "green" })));
+    const scratch = [new HumanMessage("envelope"), new AIMessage("list"), tool(list, "list")];
+    for (let i = 0; i < 10; i++) scratch.push(new AIMessage(`get_pr ${i}`), tool(`{"number":${1000 + i},"patch":"${"p".repeat(10_000)}"}`, `g${i}`));
+    const pruned = pruneScratchForModel(scratch);
+    expect(String(pruned[2]!.content)).toBe(list);
+    const total = pruned.reduce((n, m) => n + String(m.content).length, 0);
+    expect(total).toBeLessThanOrEqual(48_000);
+  });
+
   it("marks pruned FAILED results as FAILED so the model does not repeat them", () => {
     const failed = `❌ t threw: boom ${"x".repeat(60_000)}`;
     const scratch = [tool(failed, "c1"), tool("k".repeat(30_000), "c2"), tool("k".repeat(30_000), "c3")];
