@@ -21,6 +21,7 @@ export const NEVER_FROM_PLAIN_WORDS: ReadonlySet<string> = new Set(["reset", "st
 export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "where", "tasks", "jobs", "today", "fresh", "csv", "gaps", "status", "budget", "goals", "commands",
   "focus", "projects", "profile", "review", "now",
+  "promote", // reads, then posts its own Promote/Cancel card: that tap is the approval, so no second "Run this?"
 ]);
 
 /** Read-only with no argument, a write with one: `/focus` shows it, `/focus close the pilot` replaces it. */

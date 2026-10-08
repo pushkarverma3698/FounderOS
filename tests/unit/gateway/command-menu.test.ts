@@ -24,7 +24,7 @@ import { buildWifeCommandsHelp, handleWifeCommands } from "../../../src/gateway/
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
 /** Files that call `bot.command(...)`: the transport, and the feature modules whose registration it delegates to. */
-const COMMAND_SOURCES = ["src/gateway/telegram.ts", "src/gateway/goal-commands.ts", "src/gateway/now-command.ts"];
+const COMMAND_SOURCES = ["src/gateway/telegram.ts", "src/gateway/goal-commands.ts", "src/gateway/now-command.ts", "src/gateway/promote-command.ts"];
 
 /** The commands actually wired up, read from those files themselves. */
 function registeredCommands(): string[] {
