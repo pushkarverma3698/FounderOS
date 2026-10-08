@@ -25,21 +25,66 @@ function cap(text: string | null | undefined, max: number): string {
   return t.length > max ? `${t.slice(0, max)}…[${t.length - max} chars cut]` : t;
 }
 
-export async function listPullRequests(octokit: Octokit, owner: string, repo: string): Promise<ToolResult> {
+type CheckRun = { name: string; status: string; conclusion: string | null };
+const PASSING = new Set(["success", "skipped", "neutral"]);
+
+/**
+ * One CI verdict for a head commit. A check name passes when any of its runs passed, so a cancelled
+ * re-run next to a green one does not read as red; it fails when a run finished failing and none passed.
+ */
+export function summarizeChecks(runs: CheckRun[]): { ci: "green" | "red" | "pending" | "none"; failing?: string[] } {
+  if (runs.length === 0) return { ci: "none" };
+  const byName = new Map<string, CheckRun[]>();
+  for (const r of runs) byName.set(r.name, [...(byName.get(r.name) ?? []), r]);
+  const failing: string[] = [];
+  let pending = false;
+  for (const [name, rs] of byName) {
+    if (rs.some((r) => r.status === "completed" && PASSING.has(r.conclusion ?? ""))) continue;
+    if (rs.some((r) => r.status !== "completed")) pending = true;
+    else if (rs.some((r) => r.conclusion !== "cancelled")) failing.push(name);
+    else pending = true; // only cancelled runs: no verdict yet
+  }
+  if (failing.length > 0) return { ci: "red", failing };
+  return { ci: pending ? "pending" : "green" };
+}
+
+async function ciFor(octokit: Octokit, owner: string, repo: string, sha: string) {
+  return octokit.rest.checks
+    .listForRef({ owner, repo, ref: sha, per_page: 100 })
+    .then(({ data }) => summarizeChecks(data.check_runs))
+    .catch((err: unknown) => ({ ci: `unavailable: ${err instanceof Error ? err.message : String(err)}` })); // allow-failopen: CI is reported as unavailable with its reason, never as passing
+}
+
+/** Open PRs with a CI verdict each, or (state "merged") PRs merged since an ISO time with merge time and SHA. */
+export async function listPullRequests(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  opts: { state?: "open" | "merged"; since?: string } = {},
+): Promise<ToolResult> {
+  type Pr = { number: number; title: string; draft?: boolean; head: { ref: string }; base: { ref: string }; user: { login: string } | null; html_url: string };
+  const row = (p: Pr) => ({
+    number: p.number,
+    title: p.title,
+    draft: p.draft ?? false,
+    head: p.head.ref,
+    base: p.base.ref,
+    author: p.user?.login ?? "unknown",
+    url: p.html_url,
+  });
+  if (opts.state === "merged") {
+    const { data } = await octokit.rest.pulls.list({ owner, repo, state: "closed", per_page: 50, sort: "updated", direction: "desc" });
+    const since = opts.since ? Date.parse(opts.since) : 0;
+    const merged = data
+      .filter((p) => p.merged_at && Date.parse(p.merged_at) >= since)
+      .map((p) => ({ ...row(p), merged_at: p.merged_at, merge_sha: (p.merge_commit_sha ?? "").slice(0, 8) }));
+    return listResult(merged, 50);
+  }
   const { data } = await octokit.rest.pulls.list({ owner, repo, state: "open", per_page: 30, sort: "updated", direction: "desc" });
-  return listResult(
-    data.map((p) => ({
-      number: p.number,
-      title: p.title,
-      draft: p.draft ?? false,
-      head: p.head.ref,
-      base: p.base.ref,
-      author: p.user?.login ?? "unknown",
-      updated_at: p.updated_at,
-      url: p.html_url,
-    })),
-    30,
+  const rows = await Promise.all(
+    data.map(async (p) => ({ ...row(p), updated_at: p.updated_at, head_sha: p.head.sha?.slice(0, 8), ...(await ciFor(octokit, owner, repo, p.head.sha)) })),
   );
+  return listResult(rows, 30);
 }
 
 export async function getPullRequest(octokit: Octokit, owner: string, repo: string, number: number): Promise<ToolResult> {
