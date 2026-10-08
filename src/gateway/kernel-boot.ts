@@ -36,6 +36,7 @@ import {
   resolveTemperature,
 } from "../agents/model.js";
 import { recordConversationTurn } from "../db/conversation-turns.js";
+import { buildInFlightSource } from "./in-flight-source.js";
 import { readScreen } from "../infra/screen-log.js";
 import { readRecentBrainActivity } from "../db/recent-activity.js";
 import { chatIdFromThreadId } from "../infra/telegram-send.js";
@@ -357,6 +358,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     lessons: buildLessonStore(),
     turnLog: buildTurnLog(),
     screen: buildScreenSource(),
+    inFlight: buildInFlightSource(),
     ...(env.RECENT_ACTIVITY_ENABLED === "true" ? { recentActivity: buildRecentActivitySource() } : {}),
   });
 }
