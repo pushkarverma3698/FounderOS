@@ -70,7 +70,12 @@ describe("redactInternalPaths", () => {
 describe("redactInternalIdentifiers", () => {
   it("removes a snake_case identifier from ordinary prose, still readable", () => {
     const text = "jobhunt: Retrieve the full set of captured jobs using job_state and summarise them.";
-    expect(redactInternalIdentifiers(text)).toBe("jobhunt: Retrieve the full set of captured jobs using and summarise them.");
+    expect(redactInternalIdentifiers(text)).toBe("jobhunt: Retrieve the full set of captured jobs using a tool and summarise them.");
+  });
+
+  it("leaves no hole where a tool name was (live 2026-10-08: \"Step 1 of 1: Use to open a GitHub issue\")", () => {
+    expect(redactInternalIdentifiers("Use github_write to open a GitHub issue")).toBe("Use a tool to open a GitHub issue");
+    expect(redactInternalIdentifiers("Call the github_read tool for open PRs")).toBe("Call a tool for open PRs");
   });
 
   it("falls back to empty string for a code-shaped key=\"value\" instruction, rather than leaving a dangling '='", () => {
