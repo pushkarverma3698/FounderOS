@@ -81,6 +81,14 @@ export const hitlApprovals = agentsSchema.table(
 
     /** Human edits applied before approving */
     edits: text("edits"),
+
+    /**
+     * A message the founder sent while this card was pending (AG-047): one per card, the newest wins. The gateway
+     * runs it as a normal turn after his tap is answered (src/gateway/held-message.ts). NULL = nothing held.
+     */
+    held_text: text("held_text"),
+    /** When held_text arrived; older than the HITL restore window and it is dropped, not run. */
+    held_at: timestamp("held_at", { withTimezone: true }),
   },
   (t) => ({
     /** Hot path: resolve HITL via thread_id + status filter */
