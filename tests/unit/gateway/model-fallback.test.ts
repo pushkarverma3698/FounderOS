@@ -272,3 +272,25 @@ describe("withModelFallbacks — resolution budget + per-attempt deadlines (2026
     expect(String(reply.content)).toBe("fallback answered");
   });
 });
+
+/**
+ * Prod 2026-10-08 11:29Z: OpenRouter credits ran out and the worker returned "Worker model call failed: 402 This
+ * request would exceed your available credits". The free fallback on the same key sat unused, because the chain
+ * engaged only on 5xx/429/404. A credit 402 now walks the chain; a 401/403 still fails loud.
+ */
+describe("withModelFallbacks — credits exhausted", () => {
+  const credit402 = () =>
+    Object.assign(new Error("402 This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits."), { status: 402 });
+
+  it("engages the free fallback on a credit 402", async () => {
+    const fallback = okModel("free-model-reply");
+    const reply = await withModelFallbacks(failingModel(credit402()), [fallback]).invoke(MSGS);
+    expect(reply.content).toBe("free-model-reply");
+  });
+
+  it("still fails loud on auth", async () => {
+    const fallback = okModel("x");
+    await expect(withModelFallbacks(failingModel(authError()), [fallback]).invoke(MSGS)).rejects.toThrow("401");
+    expect(fallback.invoke).not.toHaveBeenCalled();
+  });
+});
