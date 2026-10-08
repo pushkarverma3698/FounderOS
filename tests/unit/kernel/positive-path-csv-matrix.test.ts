@@ -27,6 +27,7 @@ const makeEnvelope = (over: Partial<TaskEnvelope> = {}): TaskEnvelope =>
     inputs: {},
     expected: { kind: "data", schema_ref: "data.generic" },
     constraints: { max_tool_calls: 5, hitl_required: false },
+    deliverable: "file",
     ...over,
   });
 
@@ -117,6 +118,7 @@ describe("Positive Path CSV Verification & Delivery Matrix (P4/P5)", () => {
     it("Case 4: 0 genuinely matching jobs is VALID EMPTY when count is explicitly reported", async () => {
       const envelope = makeEnvelope({
         objective: "How many jobs are in stage 'interviewing'?",
+        deliverable: "none",
         expected: { kind: "data", schema_ref: "data.generic" },
       });
       const result: StepResult = {
