@@ -136,7 +136,7 @@ beforeEach(() => {
   mkdirSync(join(root, "agy"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(ghDir, { recursive: true });
-  writeFileSync(join(root, ".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\n");
+  writeFileSync(join(root, ".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\n");
   writeFileSync(join(ghDir, "draft"), "true\n");
   writeFileSync(join(root, "SKILL.md"), "---\nname: pr-adversary\ndescription: x\n---\n\n# Adversarial PR Gate\n\nTry to DISPROVE that it is done.\n");
 

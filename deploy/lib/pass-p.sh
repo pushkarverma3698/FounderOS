@@ -21,7 +21,7 @@
 #      agent:spec-review. A card that could not be sent leaves the label alone, so the next tick tries again.
 #   ASK: one comment with the questions, agent:needs-brief, one Telegram message. REJECT x3: the same, saying why.
 #
-# NEEDS FROM THE SOURCING SCRIPT: log, notify, gh, jq, as_antigravity, set_integration_branch, tg_is_quiet, REPO,
+# NEEDS FROM THE SOURCING SCRIPT: log, notify, gh, jq, as_antigravity, as_antigravity_gh (lib/gh-token.sh), set_integration_branch, tg_is_quiet, REPO,
 #   WORKSPACE, ENV_FILE, FORCE_ISSUE, DRY_RUN.
 
 PASS_P_LABEL_SPEC="agent:spec"
@@ -193,7 +193,7 @@ pass_p_issue_body() {
   jq -r '.ask' <<<"$ask_json" >"$tmp/ask"
 
   set_integration_branch
-  if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet "origin/$2" && git clean -fdq' "$WORKSPACE" "$INTEGRATION_BRANCH" >>"$LOG" 2>&1; then
+  if ! as_antigravity_gh 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet "origin/$2" && git clean -fdq' "$WORKSPACE" "$INTEGRATION_BRANCH" >>"$LOG" 2>&1; then
     log "pass P: #${issue}: cannot refresh the workspace ${WORKSPACE}; trying again next tick"
     return 0
   fi
@@ -340,7 +340,7 @@ pass_p_finish() {
       return 0
     fi
   done
-  if ! as_antigravity 'cd "$1" && git -c user.name="FounderOS spec" -c user.email="spec@founderos.invalid" commit -q -m "$2" && git push -q --force-with-lease origin "$3"' \
+  if ! as_antigravity_gh 'cd "$1" && git -c user.name="FounderOS spec" -c user.email="spec@founderos.invalid" commit -q -m "$2" && git push -q --force-with-lease origin "$3"' \
       "$WORKSPACE" "spec: locked test for #${issue}" "$branch" >>"$LOG" 2>&1; then
     log "pass P: #${issue}: could not commit or push ${branch}; trying again next tick"; return 0
   fi
