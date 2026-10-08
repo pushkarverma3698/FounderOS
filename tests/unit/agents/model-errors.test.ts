@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { httpStatusOf, is503Error, isModelFallbackError } from "../../../src/agents/model.js";
+import { httpStatusOf, is503Error, isModelFallbackError, shouldEngageFallback } from "../../../src/agents/model.js";
 
 function sdkError(status: number, message: string): Error {
   const err = new Error(message) as Error & { status: number };
@@ -75,5 +75,14 @@ describe("isModelFallbackError", () => {
     expect(isModelFallbackError(sdkError(503, "boom"))).toBe(true);
     expect(isModelFallbackError(sdkError(401, "bad key"))).toBe(false);
     expect(isModelFallbackError(new Error("403 Host not in allowlist"))).toBe(false);
+  });
+});
+
+describe("shouldEngageFallback", () => {
+  it("adds a credits-empty 402 to the retriable set, keeps auth loud", () => {
+    expect(shouldEngageFallback(sdkError(402, "This request would exceed your available credits"))).toBe(true);
+    expect(shouldEngageFallback(new Error("402 This request would exceed your available credits"))).toBe(true);
+    expect(isModelFallbackError(sdkError(402, "credits"))).toBe(false); // error-reply keeps its rate-limit wording
+    expect(shouldEngageFallback(sdkError(401, "bad key"))).toBe(false);
   });
 });
