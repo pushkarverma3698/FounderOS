@@ -21,4 +21,19 @@ describe("gwsEnv — which credentials the gws CLI actually reads", () => {
     const base = { A: "1" };
     expect(gwsEnv(base, undefined, () => true)).toEqual(base);
   });
+
+  /**
+   * Regression for 2026-10-08 prod: `/login google add work` saved pushkar@oplify.in, but the bot replied
+   * "signed in as pushkarai3698@gmail.com". gws caches access tokens in its config dir, not per credentials
+   * file, so with every account on the one global dir, whichever token was cached first answered for all.
+   */
+  it("gives each signed-in account its own gws config dir, so token caches are not shared", () => {
+    const env = gwsEnv({ HOME: "/h" }, "/h/.founderos/accounts/work/gws", () => true);
+    expect(env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"]).toBe("/h/.founderos/accounts/work/gws");
+  });
+
+  it("drops an inherited config dir for an account with no file, so it cannot read another account's cache", () => {
+    const base = { GOOGLE_WORKSPACE_CLI_CONFIG_DIR: "/h/.founderos/accounts/work/gws" };
+    expect(gwsEnv(base, "/d", () => false)["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"]).toBeUndefined();
+  });
 });

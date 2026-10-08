@@ -39,10 +39,12 @@ export function parseGwsStdout(stdout: string): unknown {
 }
 
 /**
- * The environment one gws call runs in. gws 0.22 ignores GWS_CONFIG_HOME; the variable it reads
- * is GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE, so that is what isolates one Google identity from
- * another (ADR-036). An account with no credentials file yet keeps the host's default login
- * (the pre-/login behaviour) rather than failing; `/login google <account>` creates the file.
+ * The environment one gws call runs in. gws 0.22 ignores GWS_CONFIG_HOME; it reads
+ * GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE for the login and GOOGLE_WORKSPACE_CLI_CONFIG_DIR for its
+ * token cache. Both must be per account (ADR-036): with a shared config dir, the first cached token
+ * answers for every account (prod 2026-10-08, "work" reported the personal Gmail). An account with no
+ * credentials file yet keeps the host's default login rather than failing; `/login google <account>`
+ * creates the file.
  */
 export function gwsEnv(
   base: NodeJS.ProcessEnv,
@@ -51,11 +53,15 @@ export function gwsEnv(
 ): NodeJS.ProcessEnv {
   const env = { ...base };
   if (!profileDir) return env;
-  env["GWS_CONFIG_HOME"] = profileDir;
   const file = `${profileDir}/credentials.json`;
   env["GOOGLE_APPLICATION_CREDENTIALS"] = env["GOOGLE_APPLICATION_CREDENTIALS"] ?? file;
-  if (fileExists(file)) env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = file;
-  else delete env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"];
+  if (fileExists(file)) {
+    env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = file;
+    env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = profileDir;
+  } else {
+    delete env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"];
+    delete env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"];
+  }
   return env;
 }
 

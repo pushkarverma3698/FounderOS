@@ -33,7 +33,7 @@ export interface CredentialRefs {
   author_urn_env?: string;
   /** Env var holding refresh token (optional — manual refresh until vault ships). */
   refresh_token_env?: string;
-  /** Directory passed as GWS_CONFIG_HOME / GOOGLE_APPLICATION_CREDENTIALS parent. */
+  /** Directory passed as GOOGLE_WORKSPACE_CLI_CONFIG_DIR, parent of the credentials file. */
   gws_profile_dir?: string;
   /** Env var holding the service-account JSON path (googleapis backend). */
   google_sa_path_env?: string;
