@@ -1,10 +1,9 @@
 /**
- * `pnpm repo:add <owner/repo>` — one command instead of three hand edits and a checklist.
+ * `pnpm repo:add <owner/repo>` — one command instead of two hand edits and a checklist.
  * =======================================================================================
- * A repo is registered in three places that used to be edited by hand, and one of them
- * (`DEFAULT_REPOS`) silently stranded issues for a whole day when it was forgotten:
- *   src/tools/dispatch-repos.ts              DISPATCH_REPO_ALLOWLIST  what /task accepts
- *   deploy/agent-dispatch                    DEFAULT_REPOS            what the daemon sweeps
+ * A repo is registered in two places that used to be edited by hand (the daemon's own copy of the list is gone:
+ * it reads the allowlist, so forgetting it can no longer strand issues):
+ *   src/tools/dispatch-repos.ts              DISPATCH_REPO_ALLOWLIST  what /task accepts and the daemon sweeps
  *   tests/unit/tools/dispatch-repos.test.ts  PROVISIONED_REPOS        the reviewed pin
  * These tests run against a temp copy of the REAL files (so a reformat of any of them breaks
  * the script's parsers here, in CI, not on the day someone needs a new repo) and never touch
@@ -37,13 +36,9 @@ const read = (rel: string): string => readFileSync(join(root, rel), "utf8");
 const sha = (rel: string): string => createHash("sha256").update(readFileSync(join(root, rel))).digest("hex");
 const snapshot = (): Record<string, string> => Object.fromEntries(FILES.map((rel) => [rel, sha(rel)]));
 
-/** The real slugs inside `DISPATCH_REPO_ALLOWLIST = [ … ]`, `PROVISIONED_REPOS = [ … ]`, `DEFAULT_REPOS=( … )`. */
+/** The real slugs inside `DISPATCH_REPO_ALLOWLIST = [ … ]` and `PROVISIONED_REPOS = [ … ]`. */
 function listsIn(rel: string): string[] {
   const text = read(rel);
-  if (rel === REPO_ADD_TARGETS.daemon) {
-    const inner = /^DEFAULT_REPOS=\((.*)\)$/m.exec(text)?.[1] ?? "";
-    return [...inner.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
-  }
   const opener = rel === REPO_ADD_TARGETS.allowlist ? "export const DISPATCH_REPO_ALLOWLIST = [" : "const PROVISIONED_REPOS = [";
   const body = text.slice(text.indexOf(opener) + opener.length, text.indexOf("] as const;", text.indexOf(opener)));
   return [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
@@ -124,7 +119,7 @@ describe("validateRepoSlug: strict owner/repo, nothing that could reach a shell,
 });
 
 describe("planRepoAdd + applyRepoAdd", () => {
-  it("adds the repo to all three files, each with the same one-line insertion and nothing else changed", () => {
+  it("adds the repo to both files, each with the same one-line insertion and nothing else changed", () => {
     const before = Object.fromEntries(FILES.map((rel) => [rel, read(rel)]));
     const lengthBefore = Object.fromEntries(FILES.map((rel) => [rel, listsIn(rel).length]));
     const plan = planRepoAdd(root, NEW_REPO);
@@ -132,7 +127,6 @@ describe("planRepoAdd + applyRepoAdd", () => {
 
     expect(plan.changed).toBe(true);
     expect(plan.edits.map((e) => [e.file, e.status])).toEqual([
-      [REPO_ADD_TARGETS.daemon, "added"],
       [REPO_ADD_TARGETS.allowlist, "added"],
       [REPO_ADD_TARGETS.fixture, "added"],
     ]);
@@ -142,26 +136,13 @@ describe("planRepoAdd + applyRepoAdd", () => {
       expect(list).toHaveLength((lengthBefore[rel] ?? 0) + 1);
     }
     // Removing the inserted text gives back the original bytes: nothing else moved or reformatted.
-    expect(read(REPO_ADD_TARGETS.daemon).replace(` "${NEW_REPO}")`, ")")).toBe(before[REPO_ADD_TARGETS.daemon]);
-    for (const rel of [REPO_ADD_TARGETS.allowlist, REPO_ADD_TARGETS.fixture]) {
+    for (const rel of FILES) {
       expect(read(rel).replace(`  "${NEW_REPO}",\n`, "")).toBe(before[rel]);
     }
   });
 
-  it("keeps DEFAULT_REPOS on ONE line, in the format the serviceability test and the daemon read", () => {
-    applyRepoAdd(root, planRepoAdd(root, NEW_REPO));
-    const daemon = read(REPO_ADD_TARGETS.daemon);
-
-    expect(daemon.match(/^DEFAULT_REPOS=\(.*\)$/gm)).toHaveLength(1);
-    expect(daemon).toMatch(/^DEFAULT_REPOS=\(("[^"]+" )+"acme\/widget-server"\)$/m);
-  });
-
-  it("preserves the executable bit on deploy/agent-dispatch", () => {
-    expect(statSync(join(root, REPO_ADD_TARGETS.daemon)).mode & 0o111).not.toBe(0);
-    applyRepoAdd(root, planRepoAdd(root, NEW_REPO));
-    expect(statSync(join(root, REPO_ADD_TARGETS.daemon)).mode & 0o777).toBe(
-      statSync(join(REAL_ROOT, REPO_ADD_TARGETS.daemon)).mode & 0o777,
-    );
+  it("does not touch the daemon: deploy/agent-dispatch holds no list", () => {
+    expect(FILES).not.toContain("deploy/agent-dispatch");
   });
 
   it("leaves no temp files behind", () => {
@@ -179,7 +160,7 @@ describe("planRepoAdd + applyRepoAdd", () => {
     applyRepoAdd(root, second);
 
     expect(second.changed).toBe(false);
-    expect(second.edits.map((e) => e.status)).toEqual(["present", "present", "present"]);
+    expect(second.edits.map((e) => e.status)).toEqual(["present", "present"]);
     expect(snapshot()).toEqual(afterFirst);
   });
 
@@ -195,21 +176,18 @@ describe("planRepoAdd + applyRepoAdd", () => {
 
   it("heals a half-applied state: only the files that lack the repo are edited", () => {
     applyRepoAdd(root, planRepoAdd(root, NEW_REPO));
-    // Simulate a crash after the daemon list was written but before the other two were.
-    for (const rel of [REPO_ADD_TARGETS.allowlist, REPO_ADD_TARGETS.fixture]) {
-      copyFileSync(join(REAL_ROOT, rel), join(root, rel));
-    }
-    const daemonBefore = sha(REPO_ADD_TARGETS.daemon);
+    // Simulate a crash after the allowlist was written but before the fixture was.
+    copyFileSync(join(REAL_ROOT, REPO_ADD_TARGETS.fixture), join(root, REPO_ADD_TARGETS.fixture));
+    const allowlistBefore = sha(REPO_ADD_TARGETS.allowlist);
 
     const plan = planRepoAdd(root, NEW_REPO);
     applyRepoAdd(root, plan);
 
     expect(plan.edits.map((e) => [e.file, e.status])).toEqual([
-      [REPO_ADD_TARGETS.daemon, "present"],
-      [REPO_ADD_TARGETS.allowlist, "added"],
+      [REPO_ADD_TARGETS.allowlist, "present"],
       [REPO_ADD_TARGETS.fixture, "added"],
     ]);
-    expect(sha(REPO_ADD_TARGETS.daemon)).toBe(daemonBefore);
+    expect(sha(REPO_ADD_TARGETS.allowlist)).toBe(allowlistBefore);
     for (const rel of FILES) expect(listsIn(rel).at(-1)).toBe(NEW_REPO);
   });
 
@@ -219,7 +197,7 @@ describe("planRepoAdd + applyRepoAdd", () => {
     const before = snapshot();
     const plan = planRepoAdd(root, "acme/never-written");
 
-    expect(plan.edits.map((e) => e.status)).toEqual(["added", "added", "added"]);
+    expect(plan.edits.map((e) => e.status)).toEqual(["added", "added"]);
     expect(snapshot()).toEqual(before);
     for (const rel of FILES) {
       expect(sha(rel)).toBe(createHash("sha256").update(readFileSync(join(REAL_ROOT, rel))).digest("hex"));
@@ -228,18 +206,17 @@ describe("planRepoAdd + applyRepoAdd", () => {
 
   it("writes NOTHING when any one file cannot be edited safely (all-or-nothing)", () => {
     const before = snapshot();
-    // The daemon list reformatted over several lines: not the format the daemon test reads.
+    // The allowlist's opener renamed: not the shape the script edits.
     writeFileSync(
-      join(root, REPO_ADD_TARGETS.daemon),
-      read(REPO_ADD_TARGETS.daemon).replace(/^DEFAULT_REPOS=\((.*)\)$/m, 'DEFAULT_REPOS=(\n  $1\n)'),
+      join(root, REPO_ADD_TARGETS.allowlist),
+      read(REPO_ADD_TARGETS.allowlist).replace("export const DISPATCH_REPO_ALLOWLIST = [", "export const OTHER_LIST = ["),
     );
     const damaged = snapshot();
 
     expect(() => planRepoAdd(root, NEW_REPO)).toThrow(RepoAddError);
-    expect(() => planRepoAdd(root, NEW_REPO)).toThrow(/deploy\/agent-dispatch/);
-    expect(() => planRepoAdd(root, NEW_REPO)).toThrow(/DEFAULT_REPOS/);
+    expect(() => planRepoAdd(root, NEW_REPO)).toThrow(/src\/tools\/dispatch-repos\.ts/);
     expect(snapshot()).toEqual(damaged);
-    expect(damaged[REPO_ADD_TARGETS.allowlist]).toBe(before[REPO_ADD_TARGETS.allowlist]);
+    expect(damaged[REPO_ADD_TARGETS.fixture]).toBe(before[REPO_ADD_TARGETS.fixture]);
   });
 
   it("writes nothing even when the file it cannot edit is the LAST one, after two that it could", () => {
@@ -302,11 +279,10 @@ describe("the CLI (spawned for real, always against a temp root)", () => {
       timeout: 60_000,
     });
 
-  it("edits the three files, prints what changed and the exact VPS command, and exits 0", () => {
+  it("edits both files, prints what changed and the exact VPS command, and exits 0", () => {
     const result = run(NEW_REPO, "--root", root);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("changed  deploy/agent-dispatch");
     expect(result.stdout).toContain("changed  src/tools/dispatch-repos.ts");
     expect(result.stdout).toContain("changed  tests/unit/tools/dispatch-repos.test.ts");
     expect(result.stdout).toContain("ssh founderos-vps '~/bin/onboard-repo.sh acme/widget-server'");
@@ -329,7 +305,7 @@ describe("the CLI (spawned for real, always against a temp root)", () => {
     const result = run(NEW_REPO, "--root", root, "--dry-run");
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("would change  deploy/agent-dispatch");
+    expect(result.stdout).toContain("would change  src/tools/dispatch-repos.ts");
     expect(snapshot()).toEqual(before);
   });
 
@@ -349,12 +325,12 @@ describe("the CLI (spawned for real, always against a temp root)", () => {
   });
 
   it("a file it cannot edit safely exits 1, names the file, and writes nothing", () => {
-    writeFileSync(join(root, REPO_ADD_TARGETS.daemon), "#!/usr/bin/env bash\nDEFAULT_REPOS=()\nDEFAULT_REPOS=()\n");
+    writeFileSync(join(root, REPO_ADD_TARGETS.allowlist), "export const NOTHING = [];\n");
     const before = snapshot();
     const result = run(NEW_REPO, "--root", root);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("deploy/agent-dispatch");
+    expect(result.stderr).toContain("src/tools/dispatch-repos.ts");
     expect(snapshot()).toEqual(before);
   });
 });
