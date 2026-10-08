@@ -131,6 +131,40 @@ export async function getInterruptById(interruptId: string) {
   return row ?? null;
 }
 
+/**
+ * Keep the founder's message on the card it is waiting behind (AG-047): one per card, the newest replaces the
+ * older. False when the card is no longer pending (it was resolved in the meantime), so the caller can say so.
+ */
+export async function holdMessageOnInterrupt(interruptId: string, text: string, heldAt: Date = new Date()): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .update(hitlApprovals)
+    .set({ held_text: text, held_at: heldAt })
+    .where(and(eq(hitlApprovals.interrupt_id, interruptId), eq(hitlApprovals.status, "pending")))
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
+  return rows.length > 0;
+}
+
+/**
+ * Take the held message off a card, at most once: the clear only succeeds if the text is still the one just read,
+ * so two taps or a retry cannot both run it. Null when nothing is held.
+ */
+export async function claimHeldMessage(interruptId: string): Promise<{ text: string; heldAt: Date } | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ text: hitlApprovals.held_text, heldAt: hitlApprovals.held_at })
+    .from(hitlApprovals)
+    .where(eq(hitlApprovals.interrupt_id, interruptId))
+    .limit(1);
+  if (!row?.text) return null;
+  const cleared = await db
+    .update(hitlApprovals)
+    .set({ held_text: null, held_at: null })
+    .where(and(eq(hitlApprovals.interrupt_id, interruptId), eq(hitlApprovals.held_text, row.text)))
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
+  return cleared.length > 0 ? { text: row.text, heldAt: row.heldAt ?? new Date() } : null;
+}
+
 /** Store the Telegram message_id after sending the HITL notification. */
 export async function setInterruptTelegramMsg(
   interruptId: string,
@@ -169,7 +203,7 @@ export async function cancelPendingApprovals(threadId: string): Promise<number> 
   const db = getDb();
   const result = await db
     .update(hitlApprovals)
-    .set({ status: "cancelled", resolved_at: new Date() })
+    .set({ status: "cancelled", resolved_at: new Date(), held_text: null, held_at: null }) // /reset also drops a message held behind the card
     .where(
       and(
         eq(hitlApprovals.thread_id, threadId),
