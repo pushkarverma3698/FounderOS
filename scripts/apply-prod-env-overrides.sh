@@ -150,20 +150,31 @@ fi
 # shared fallback keeps only the free Nemotron slug: the Google-direct slugs are
 # dead while the key is unfunded. Per-run caps rise to fit a 20-call read step
 # on Sonnet (about 12K tokens a call). Golden set before/after: docs/sessions/2026-10-08-heavy-model-live-run.md.
+# 2026-10-08 (AG-050): Sonnet moved the golden set from 53% to 53% at about $0.33 a turn, so
+# the defaults go back to cheap models. The AI Studio key still returns 402 (probed at build
+# time), so all three go through OpenRouter: planner gemini-3.6-flash, workers ling-3.0-flash,
+# judge gemini-3.1-flash-lite (a different model from the drafter). Every fallback list is the
+# free Nemotron slug only (founder rule: no paid fallback; tests/unit/agents/model-output-cap.test.ts
+# fails on any slug without :free). Every model also carries MODEL_MAX_OUTPUT_TOKENS (default
+# 4096, src/core/model-output-cap.ts), so OpenRouter stops reserving a 65K output window.
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS|RUN_BUDGET_USD|RUN_BUDGET_TOKENS)=' .env > .env.patched || true
+primary_model=openrouter:google/gemini-3.6-flash
+worker_model=openrouter:inclusionai/ling-3.0-flash
+# SONNET_TRIAL: uncomment the next line to go back to Sonnet on planner and workers.
+# primary_model=openrouter:anthropic/claude-sonnet-5.5; worker_model=openrouter:anthropic/claude-sonnet-5.5
 {
-  printf '%s\n' 'AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5'
+  printf '%s\n' "AGENT_MODEL=$primary_model"
   printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
-  printf '%s\n' 'JUDGE_MODEL=openrouter:google/gemini-3.6-flash'
-  printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5'
-  printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash'
-  printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router'
+  printf '%s\n' 'JUDGE_MODEL=openrouter:google/gemini-3.1-flash-lite'
+  printf '%s\n' "WORKER_AGENT_MODEL=$worker_model"
+  printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
+  printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
   printf '%s\n' 'RUN_BUDGET_USD=1.5'
   printf '%s\n' 'RUN_BUDGET_TOKENS=400000'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=WORKER_AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5, JUDGE_MODEL=openrouter:google/gemini-3.6-flash"
+echo "==> Patched .env: AGENT_MODEL=$primary_model, WORKER_AGENT_MODEL=$worker_model, JUDGE_MODEL=openrouter:google/gemini-3.1-flash-lite, fallbacks free only"
 
 # Pin the job-sweep spend controls. Both were unset in production until
 # 2026-08-05, and both defaulted quietly rather than loudly:

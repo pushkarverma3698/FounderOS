@@ -18,6 +18,10 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { geminiThinkingConfig } from "../core/gemini-thinking.js";
+import { modelMaxOutputTokens } from "../core/model-output-cap.js";
+
+/** The judge's own limit, never above the shared MODEL_MAX_OUTPUT_TOKENS cap (AG-050). */
+const capped = (own: number): number => Math.min(own, modelMaxOutputTokens());
 
 /** Judge providers we support. Kept local so infra/ doesn't depend on agents/. */
 export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai" | "google-vertexai";
@@ -103,7 +107,7 @@ export function getJudgeModel(): BaseChatModel {
   if (!_model) {
     const { provider, model } = resolveJudgeModelId();
     if (provider === "anthropic") {
-      _model = new ChatAnthropic({ model, temperature: 0, maxTokens: 512 });
+      _model = new ChatAnthropic({ model, temperature: 0, maxTokens: capped(512) });
     } else if (provider === "openrouter") {
       _model = new ChatOpenAI({
         model,
@@ -112,7 +116,7 @@ export function getJudgeModel(): BaseChatModel {
         // reasoning models that cannot disable reasoning and spend 400-600+
         // tokens on it before the answer — at 512 the default judge model
         // silently returned empty content on every real call (2026-09-07).
-        maxTokens: 3000,
+        maxTokens: capped(3000),
         maxRetries: 2,
         apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
         configuration: { baseURL: "https://openrouter.ai/api/v1" },
@@ -121,7 +125,7 @@ export function getJudgeModel(): BaseChatModel {
       _model = new ChatGoogleGenerativeAI({
         model,
         temperature: 0,
-        maxOutputTokens: 512,
+        maxOutputTokens: capped(512),
         maxRetries: 2,
         apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
         // Gemini 3.x counts thought tokens against maxOutputTokens, so default
@@ -133,6 +137,7 @@ export function getJudgeModel(): BaseChatModel {
       _model = new ChatVertexAI({
         model,
         temperature: 0,
+        maxOutputTokens: modelMaxOutputTokens(),
         maxRetries: 2,
         authOptions: {
           keyFilename: process.env["GOOGLE_APPLICATION_CREDENTIALS"],
@@ -142,7 +147,7 @@ export function getJudgeModel(): BaseChatModel {
       });
     } else {
       // openai judges route via the standard OpenAI client.
-      _model = new ChatOpenAI({ model, temperature: 0, maxTokens: 512, maxRetries: 2 });
+      _model = new ChatOpenAI({ model, temperature: 0, maxTokens: capped(512), maxRetries: 2 });
     }
   }
   return _model;

@@ -12,7 +12,6 @@
  */
 
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
-import { jsonrepair } from "jsonrepair";
 import {
   KERNEL_SCHEMA_VERSION,
   MAX_READ_TOOL_CALLS_PER_STEP,
@@ -28,7 +27,7 @@ import {
 import { RESET } from "./state.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import { formatFailureReply } from "./supervisor.js";
-import { messageContentText } from "./message-text.js";
+import { messageContentText, tryParseJson } from "./message-text.js";
 import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -36,6 +35,7 @@ import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { recentActivityBlockFor, type RecentActivitySource } from "./recent-activity.js";
+import { inFlightBlockFor, type InFlightSource } from "./in-flight.js";
 import { stripFalsePromises } from "./promise-guard.js";
 import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
@@ -156,19 +156,6 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
   ].join("\n");
 }
 
-function tryParseJson(text: string): unknown | null {
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    try {
-      return JSON.parse(jsonrepair(cleaned));
-    } catch {
-      return null;
-    }
-  }
-}
-
 /**
  * In-band retries of a MALFORMED planner response (not of provider errors —
  * those have their own fallback chain in src/agents/model.ts).
@@ -285,6 +272,7 @@ export function makePlanNode(
   screen?: ScreenSource,
   gatedTools: ReadonlySet<string> = new Set(),
   recentActivity?: RecentActivitySource,
+  inFlight?: InFlightSource,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
@@ -326,7 +314,7 @@ export function makePlanNode(
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
-          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock())];
+          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock()), inFlightBlockFor(inFlight, config?.configurable?.["thread_id"], clock())];
           const base: BaseMessage[] = [
             new SystemMessage([systemPrompt, plannerNowLine(clock), ...(await Promise.all(dataBlocks))].filter(Boolean).join("\n\n")),
             ...historyMessages(conversation),
