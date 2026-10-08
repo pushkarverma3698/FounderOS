@@ -180,7 +180,7 @@ export const opsState = tool(
         .describe(
           "Operational scope. 'costs' = money spent on AI calls (dollar totals + per-model breakdown) — " +
             "use it for any spend/budget/cost question. 'job_runs' = job sweep throughput counts. " +
-            "'background_jobs' = what runs without being asked (PR review, coding dispatch, built-in routines): state, models, what needs attention.",
+            "'background_jobs' = what runs without being asked (PR review, coding dispatch, built-in routines): state, models, what needs attention; also `deployed`, the commit that is live.",
         ),
       status: z.string().optional().nullable().describe("Filter by status."),
       since: z.string().optional().nullable().describe("Filter timestamp >= ISO string."),
