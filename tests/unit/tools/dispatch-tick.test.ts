@@ -150,7 +150,7 @@ describe("startPromoteJob", () => {
     expect(await startPromoteJob(REPO, SHA, send)).toEqual({ status: "started" });
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("/run/fos-job.sock", `${JSON.stringify({ repo: REPO, stage: "promote", beta_sha: SHA })}\n`);
+    expect(send).toHaveBeenCalledWith("/run/fos-job.sock", `${JSON.stringify({ repo: REPO, stage: "promote", beta_sha: SHA, base: "main", deploy: "box" })}\n`);
   });
 
   it("refuses another repo or a bad sha before the socket, and reports a dead socket", async () => {

@@ -23,6 +23,15 @@
 # variable, never the value, so the token is not in `git config`, `ps`, or GIT_TRACE output.
 GH_GIT_CREDENTIAL_HELPER='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
 
+# The name every commit the bot makes carries, whoever's Linux account ran git. Without it a commit takes the user's
+# own git config (a hostname address, or none) and nothing on GitHub says "an agent wrote this". Override with
+# FOS_GIT_NAME / FOS_GIT_EMAIL in the env file's daemon (set the email to the bot account's noreply address once it has
+# its own GitHub account, so its commits link to it).
+FOS_GIT_NAME_DEFAULT="FounderOS Bot"
+FOS_GIT_EMAIL_DEFAULT="founderos-bot@users.noreply.github.com"
+fos_git_name() { printf '%s' "${FOS_GIT_NAME:-$FOS_GIT_NAME_DEFAULT}"; }
+fos_git_email() { printf '%s' "${FOS_GIT_EMAIL:-$FOS_GIT_EMAIL_DEFAULT}"; }
+
 # gh_token_value FILE -> the GITHUB_TOKEN line's value on stdout; status 1 when the file or the line is missing.
 gh_token_value() {
   [[ -n "${1:-}" && -f "$1" ]] || return 1
@@ -39,6 +48,9 @@ gh_token_load() {
   local t n
   t="$(gh_token_value "${1:-}")" || return 1
   export GH_TOKEN="$t"
+  GIT_AUTHOR_NAME="$(fos_git_name)" GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+  GIT_AUTHOR_EMAIL="$(fos_git_email)" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+  export GIT_AUTHOR_NAME GIT_COMMITTER_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL
   if [[ -z "${GH_TOKEN_GIT_HELPER:-}" ]]; then
     n="${GIT_CONFIG_COUNT:-0}"
     export "GIT_CONFIG_KEY_${n}=credential.helper" "GIT_CONFIG_VALUE_${n}="
@@ -59,6 +71,8 @@ gh_shell_prelude() {
   printf '%s\n' '  export "GIT_CONFIG_KEY_$_n=credential.helper" "GIT_CONFIG_VALUE_$_n="'
   printf '%s\n' '  export "GIT_CONFIG_KEY_$((_n + 1))=credential.helper" "GIT_CONFIG_VALUE_$((_n + 1))=$_h"'
   printf '%s\n' '  export GIT_CONFIG_COUNT=$((_n + 2))'
+  printf '  export GIT_AUTHOR_NAME=%q GIT_COMMITTER_NAME=%q GIT_AUTHOR_EMAIL=%q GIT_COMMITTER_EMAIL=%q\n' \
+    "$(fos_git_name)" "$(fos_git_name)" "$(fos_git_email)" "$(fos_git_email)"
   printf '%s\n' 'else'
   printf '%s\n' '  unset GH_TOKEN'
   printf '%s\n' 'fi'
