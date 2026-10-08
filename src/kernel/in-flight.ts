@@ -225,3 +225,10 @@ export async function inFlightBlockFor(source: InFlightSource | undefined, threa
   if (!source || typeof threadId !== "string" || threadId === "") return "";
   return buildInFlight(source, { tenantId: threadId.split(":")[0] ?? "", threadId }, now);
 }
+
+/** What the trace records for a turn: "off" (no source), "unavailable" (slow or broken read), "none" (nothing in flight) or "built". */
+export function inFlightState(block: string): "off" | "unavailable" | "none" | "built" {
+  if (block === "") return "off";
+  if (block === IN_FLIGHT_UNAVAILABLE) return "unavailable";
+  return block.startsWith("in-flight: none") ? "none" : "built";
+}
