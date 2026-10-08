@@ -68,3 +68,18 @@ export function addedMailboxDir(name: string, fs: MailboxFs = realFs): { dir: st
   if (isAddedMailbox(name, fs)) return { dir: mailboxProfileDir(name, fs) };
   return { error: `No Google account named "${name}". Known: ${listGoogleMailboxes(fs).join(", ")}. Add one with /login google add <name>.` };
 }
+
+/** A word that says "this mailbox" when it follows a mailbox name: "work inbox", "personal email". */
+const MAIL_WORD = "(?:inbox|mailbox|mails?|e-?mails?|gmail|account)";
+
+/**
+ * The one mailbox the founder's message names next to a mail word ("my work inbox" → "work"), or
+ * undefined when it names none or two different ones. read_emails puts this above the model's
+ * account argument: on 2026-10-08 "my work inbox" was read from turicks because the model chose.
+ */
+export function mailboxNamedIn(text: string, mailboxes: readonly string[]): string | undefined {
+  const named = new Set(
+    mailboxes.filter((name) => new RegExp(`(?<![\\w-])${name}\\s+${MAIL_WORD}\\b`, "i").test(text)),
+  );
+  return named.size === 1 ? [...named][0] : undefined;
+}

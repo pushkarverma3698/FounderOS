@@ -192,7 +192,8 @@ export const githubRead = tool(
         githubFailure(`read (${action})`, res.error ?? "unknown error"),
       );
     }
-    const text = JSON.stringify(res.data, null, 2);
+    // Compact, not indented: a full 30-row list_prs page then fits the 12k per-result clamp whole (J3, 2026-10-08).
+    const text = JSON.stringify(res.data);
     return capConsecutiveToolFailures(failureCounter, "github_read", res.truncated && res.note ? `${text}\n${res.note}` : text);
   },
   {
