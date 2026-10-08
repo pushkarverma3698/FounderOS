@@ -10,7 +10,7 @@
  * { invoke, bindTools? }, so a structural combinator preserves tool binding
  * by re-wrapping the BOUND models.
  *
- * Engagement rule = isModelFallbackError (5xx/429/408/transport/404 retired
+ * Engagement rule = shouldEngageFallback (5xx/429/408/transport/404 retired, credit 402
  * model). Auth failures (401/403) fail LOUD and never burn the chain — the
  * fallback shares no key with the primary, so silence would hide a misconfig
  * (audit Run B).
@@ -22,7 +22,7 @@
  */
 
 import type { KernelBindableModel, KernelChatModel, KernelTool } from "../kernel/index.js";
-import { isModelFallbackError } from "../agents/model.js";
+import { shouldEngageFallback } from "../agents/model.js";
 import { raceWithDeadline } from "./model-deadline.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -97,7 +97,7 @@ export function withModelFallbacks(
         // the case that does not need it.
         return await raceWithDeadline(primary.invoke(messages), primaryShareMs, label);
       } catch (err) {
-        if (!isModelFallbackError(err)) throw err;
+        if (!shouldEngageFallback(err)) throw err;
         log.warn(
           { label, err: err instanceof Error ? err.message : String(err) },
           "Primary model failed retriably — engaging fallback chain",
@@ -120,7 +120,7 @@ export function withModelFallbacks(
             log.info({ label, fallbackIndex: i }, "Fallback model answered");
             return reply;
           } catch (fbErr) {
-            if (!isModelFallbackError(fbErr)) throw fbErr;
+            if (!shouldEngageFallback(fbErr)) throw fbErr;
             lastErr = fbErr;
             log.warn(
               { label, fallbackIndex: i, err: fbErr instanceof Error ? fbErr.message : String(fbErr) },

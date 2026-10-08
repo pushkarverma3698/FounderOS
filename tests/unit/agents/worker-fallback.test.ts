@@ -182,6 +182,13 @@ describe("invokeWorkerWithFallbacks", () => {
     });
   });
 
+  // Prod 2026-10-08: OpenRouter credits ran out; the free fallback on the same key sat unused.
+  it("falls through to the chain on a credit 402", async () => {
+    primary.mockRejectedValue(Object.assign(new Error("402 This request would exceed your available credits"), { status: 402 }));
+    fallbackA.mockResolvedValue({ content: "from the free model" });
+    expect((await invoke()).content).toBe("from the free model");
+  });
+
   it("propagates the primary error when no fallbacks are configured", async () => {
     vi.doMock("../../../src/agents/model.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../../../src/agents/model.js")>();
@@ -192,3 +199,4 @@ describe("invokeWorkerWithFallbacks", () => {
     await expect(invoke()).rejects.toThrow(/503/);
   });
 });
+

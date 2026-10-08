@@ -161,10 +161,12 @@ export function isModelFallbackError(err: unknown): boolean {
   return httpStatusOf(err) === 404;
 }
 
+export const shouldEngageFallback = (err: unknown): boolean => isModelFallbackError(err) || isQuotaExhaustedError(err); // + credit 402: free fallback (prod 2026-10-08)
 export function isQuotaExhaustedError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
   return (
+    httpStatusOf(err) === 402 ||
     /credits?\s*(are\s*)?depleted/.test(msg) ||
     /exceeded your current quota/.test(msg) ||
     /quota.*exceeded/.test(msg) ||
