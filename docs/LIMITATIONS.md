@@ -272,7 +272,7 @@ why this is recorded here rather than patched.
 `src/eval/kernel-invoker.ts` never passed a `recursionLimit` to `kernel.invoke()`
 at all — every other call site (`src/gateway/kernel-run.ts`,
 `mission-resume.ts`, `scheduled-task-run.ts`) passes
-`recursionLimit: OFFICE_RECURSION_LIMIT` (currently 60), so the 2026-08-27 golden
+`recursionLimit: OFFICE_RECURSION_LIMIT` (currently 150), so the 2026-08-27 golden
 run silently fell back to LangGraph's built-in default of **25**, not this
 repo's configured budget. Fixed in the harness (docs/EVAL-AUDIT-2026-08-28.md
 D5) so the eval now measures the same limit production runs at.

@@ -17,6 +17,14 @@ const catalog: WorkerCatalogEntry[] = [
   { id: "personal", description: "founder files", toolNames: ["list_dir", "read_file"], gatedToolNames: [] },
 ];
 
+describe("buildPlannerPrompt — tool budget is code's job", () => {
+  it("does not ask the planner to choose a tool-call count", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).not.toContain("max_tool_calls");
+    expect(prompt).toContain('"constraints":{"hitl_required":<bool>}');
+  });
+});
+
 describe("buildPlannerPrompt — FounderOS self-knowledge routing", () => {
   it("routes questions about FounderOS itself to engineering github_read, never personal file tools", () => {
     const prompt = buildPlannerPrompt(catalog);
