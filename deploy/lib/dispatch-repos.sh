@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # dispatch-repos.sh — the repositories the loop works on: DISPATCH_REPO_ALLOWLIST, printed by the TypeScript.
 #
-# SOURCED by deploy/agent-dispatch and deploy/onboard-repo.sh. There is no copy of the list in bash. It used to be
-# DEFAULT_REPOS in deploy/agent-dispatch, held equal to the TypeScript list by a CI test; a repo added to one and not
-# the other was a /task that filed an issue nothing would claim. Now `pnpm repo:add` edits the one list, and this file
-# asks it.
+# SOURCED by deploy/agent-dispatch and deploy/onboard-repo.sh. There is no copy of the list in bash. The daemon once
+# carried its own, held equal to the TypeScript list by a CI test; a repo added to one and not the other was a /task
+# that filed an issue nothing would claim. Now `pnpm repo:add` edits the one list, and this file asks it.
 #
 #   dispatch_repos_print   one owner/repo per line, in the allowlist's order; status 1 and a reason on stderr when
 #                          the printer cannot run or prints nothing.

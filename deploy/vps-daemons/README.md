@@ -22,7 +22,7 @@ directory; only `agent-dispatch`'s documented location was wrong.
 | Daemon | Source in this repo | VPS path (deployed, live) | Crontab | What it does |
 |---|---|---|---|---|
 | `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, clears it or requests changes (the `claude` engine may also push a fix), then **merges** once cleared. The reviewer is an engine, `PR_BRAIN_ENGINE`: **`agy` by default** (see "The reviewer" below), `claude` as before. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
-| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *`; one job per /task through `fos-job.socket` (`deploy/job-run`) | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
+| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *`; one job per /task through `fos-job.socket` (`deploy/job-run`) | Sweeps every repo in `DISPATCH_REPO_ALLOWLIST` (the only list it reads, asked of `/opt/founderos` through `scripts/print-dispatch-repos.ts`), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
 | `onboard-repo.sh` | `deploy/onboard-repo.sh` | `~/bin/onboard-repo.sh` | — (run by hand, and `--check` by every agent-dispatch tick) | Puts a repo on the loop, or reports what it is missing. See "Adding a repo". |
 | helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both), `agy-failure.sh` (the failure classifier), `agy-run.sh` (one agy turn, streamed live into one Telegram message; shared by both) and `ci-state.sh` (what a PR's required CI checks say; shared by both). **A daemon refuses to start without them.** |
 
@@ -131,13 +131,13 @@ through `redact_secrets` first, and the Gemini key reaches `agy` on stdin, never
 
 ## Adding a repo
 
-A repo lives in **one** list, `DEFAULT_REPOS` in `deploy/agent-dispatch`, held equal to
-`DISPATCH_REPO_ALLOWLIST` (`src/tools/dispatch-repos.ts`) by a test. Add it with a one-line PR
-(`pnpm repo:add <owner/repo>` edits both lists and the test fixture), then on the VPS:
+A repo lives in **one** list, `DISPATCH_REPO_ALLOWLIST` (`src/tools/dispatch-repos.ts`); the daemons
+read it through `scripts/print-dispatch-repos.ts`. Add it with a one-line PR
+(`pnpm repo:add <owner/repo>` edits the list and the test fixture), then on the VPS:
 
 ```bash
 ssh founderos-vps '~/bin/onboard-repo.sh owner/repo'   # clones /opt/review + /opt/agy-workspace, creates the 6 labels
-ssh founderos-vps '~/bin/onboard-repo.sh --check'      # every repo in DEFAULT_REPOS, changes nothing
+ssh founderos-vps '~/bin/onboard-repo.sh --check'      # every repo in the allowlist, changes nothing
 ```
 
 `ISSUE_REPOS` / `ISSUE_REPO` in the crontab line are **ignored** now (the daemon logs one warning per

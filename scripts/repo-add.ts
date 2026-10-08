@@ -1,12 +1,11 @@
 /**
  * pnpm repo:add <owner/repo> [--dry-run] [--root <dir>]
  * =====================================================
- * Adds a repository to the Antigravity loop: one command instead of three hand edits and a
- * checklist. A repo is registered in three places, and forgetting the second silently stranded
- * issues at `agent:ready` for a day (tests/unit/tools/dispatch-repo-serviceability.test.ts):
+ * Adds a repository to the Antigravity loop: one command instead of hand edits and a checklist.
+ * A repo is registered in two places (the daemon reads the first through scripts/print-dispatch-repos.ts,
+ * so it no longer has a list of its own; tests/unit/tools/dispatch-repo-serviceability.test.ts):
  *
- *   deploy/agent-dispatch                    DEFAULT_REPOS            what the daemon sweeps
- *   src/tools/dispatch-repos.ts              DISPATCH_REPO_ALLOWLIST  what /task accepts
+ *   src/tools/dispatch-repos.ts              DISPATCH_REPO_ALLOWLIST  what /task accepts and the daemon sweeps
  *   tests/unit/tools/dispatch-repos.test.ts  PROVISIONED_REPOS        the reviewed pin
  *
  * Then it prints the one line only the founder can run, the VPS provisioning:
@@ -20,7 +19,7 @@
  *    any file has a shape this script cannot edit safely it throws and writes nothing.
  *  - IDEMPOTENT PER FILE. A repo already in a file (any case) is left alone, so a second run
  *    changes nothing and says so, and a run interrupted between files is finished by re-running.
- *  - ATOMIC WRITES, MODE KEPT. temp file + rename, and deploy/agent-dispatch stays executable.
+ *  - ATOMIC WRITES, MODE KEPT. temp file + rename.
  *  - TAKES A ROOT. `--root` points it at a temp copy, so tests never touch the real files.
  *
  * Exit codes: 0 done (or nothing to do) · 1 a file could not be edited · 2 bad arguments.
@@ -30,9 +29,8 @@ import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writ
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** The three files `repo:add` edits, relative to the repo root, in the order they are written. */
+/** The two files `repo:add` edits, relative to the repo root, in the order they are written. */
 export const REPO_ADD_TARGETS = {
-  daemon: "deploy/agent-dispatch",
   allowlist: "src/tools/dispatch-repos.ts",
   fixture: "tests/unit/tools/dispatch-repos.test.ts",
 } as const;
@@ -170,28 +168,6 @@ function editArrayBlock(source: string, opener: string, file: string, slug: stri
   return { present: null, text: `${source.slice(0, lineStart)}${indent}${JSON.stringify(slug)},${eol}${source.slice(lineStart)}` };
 }
 
-/** Adds `slug` to the one-line `DEFAULT_REPOS=("a" "b")` array in deploy/agent-dispatch. */
-function editDaemonList(source: string, file: string, slug: string): ListEdit {
-  const matches = [...source.matchAll(/^DEFAULT_REPOS=\((.*)\)$/gm)];
-  const where = `${file}: the \`DEFAULT_REPOS=( … )\` line`;
-  if (matches.length === 0) {
-    throw new RepoAddError(`${where} was not found. It must stay ONE line, DEFAULT_REPOS=("owner/repo" …): the daemon test and this script both read it.`);
-  }
-  if (matches.length > 1) throw new RepoAddError(`${where} appears ${matches.length} times, so it is ambiguous which to edit.`);
-
-  const match = matches[0] as RegExpMatchArray;
-  const inner = match[1] ?? "";
-  if (!/^(?:"[^"]+"(?: +"[^"]+")*)?$/.test(inner)) {
-    throw new RepoAddError(`${where} holds something other than space-separated "owner/repo" strings: ${JSON.stringify(inner)}.`);
-  }
-  const present = [...inner.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string).find((entry) => sameRepo(entry, slug)) ?? null;
-  if (present) return { present, text: source };
-
-  const start = match.index as number;
-  const replacement = `DEFAULT_REPOS=(${inner}${inner === "" ? "" : " "}${JSON.stringify(slug)})`;
-  return { present: null, text: source.slice(0, start) + replacement + source.slice(start + match[0].length) };
-}
-
 export interface FileEdit {
   readonly file: string;
   /** The list inside the file that is edited, for the report. */
@@ -209,7 +185,7 @@ export interface RepoAddPlan {
 }
 
 /**
- * Reads the three files and works out every edit in memory. Throws, having written nothing, if the
+ * Reads the two files and works out every edit in memory. Throws, having written nothing, if the
  * slug is invalid, a file is missing, or any list has a shape this script cannot edit safely.
  */
 export function planRepoAdd(root: string, rawSlug: string): RepoAddPlan {
@@ -223,18 +199,16 @@ export function planRepoAdd(root: string, rawSlug: string): RepoAddPlan {
   }
   const read = (rel: string): string => readFileSync(join(root, rel), "utf8");
 
-  const daemon = editDaemonList(read(REPO_ADD_TARGETS.daemon), REPO_ADD_TARGETS.daemon, slug);
   const allowlist = editArrayBlock(read(REPO_ADD_TARGETS.allowlist), "export const DISPATCH_REPO_ALLOWLIST = [", REPO_ADD_TARGETS.allowlist, slug);
   const fixture = editArrayBlock(read(REPO_ADD_TARGETS.fixture), "const PROVISIONED_REPOS = [", REPO_ADD_TARGETS.fixture, slug);
 
   const edits: FileEdit[] = [
-    { file: REPO_ADD_TARGETS.daemon, label: "DEFAULT_REPOS", status: daemon.present ? "present" : "added", after: daemon.text },
     { file: REPO_ADD_TARGETS.allowlist, label: "DISPATCH_REPO_ALLOWLIST", status: allowlist.present ? "present" : "added", after: allowlist.text },
     { file: REPO_ADD_TARGETS.fixture, label: "PROVISIONED_REPOS", status: fixture.present ? "present" : "added", after: fixture.text },
   ];
   return {
     slug,
-    canonical: allowlist.present ?? fixture.present ?? daemon.present ?? slug,
+    canonical: allowlist.present ?? fixture.present ?? slug,
     edits,
     changed: edits.some((edit) => edit.status === "added"),
   };
@@ -280,7 +254,7 @@ export function describePlan(plan: RepoAddPlan, opts: { readonly dryRun: boolean
   if (!plan.changed) {
     return [
       ...lines,
-      `Nothing changed: ${plan.canonical} is already registered in all three files.`,
+      `Nothing changed: ${plan.canonical} is already registered in both files.`,
       "If the VPS side is not provisioned yet (safe to re-run):",
       `  ${onboardCommand(plan.canonical)}`,
     ];
@@ -298,7 +272,7 @@ export function describePlan(plan: RepoAddPlan, opts: { readonly dryRun: boolean
 
 const USAGE = [
   "Usage: pnpm repo:add <owner/repo> [--dry-run] [--root <dir>]",
-  "  Adds the repo to DEFAULT_REPOS, DISPATCH_REPO_ALLOWLIST and the test pin, then prints the VPS command.",
+  "  Adds the repo to DISPATCH_REPO_ALLOWLIST and the test pin, then prints the VPS command.",
   "  --dry-run   show what would change and write nothing",
   "  --root      edit another checkout instead of this one (the tests use a temp copy)",
 ];

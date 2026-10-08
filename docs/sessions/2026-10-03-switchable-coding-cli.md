@@ -46,6 +46,6 @@ Decisions worth keeping:
 
 - Claude's success path on the VPS: needs the founder's token (`claude setup-token`).
 - Live Telegram run (`/claude` → card → issue → daemon → PR) on a real Oplify task.
-- `engine:agy` and `engine:claude` labels on the 4 `DEFAULT_REPOS` after merge.
+- `engine:agy` and `engine:claude` labels on the 4 dispatch repos after merge.
 - Planner prompt and `capabilities.ts` still describe dispatch as Antigravity-only.
 - `down-state` "never puts a literal secret on any command line" fails on this Mac; unchanged file and test, not run on base.

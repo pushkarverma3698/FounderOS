@@ -8,9 +8,8 @@
  * `agy`, `curl` and `timeout` stubs that record what they were given. Nothing here
  * touches the network or spends anything.
  *
- * DEFAULT_REPOS is rewritten in the installed COPY (the daemon no longer honours an
- * ISSUE_REPOS override, which is the point of the change), so a test can sweep one
- * repo without editing the real file.
+ * The repo list reaches the installed copy through DISPATCH_REPOS_NODE (a stand-in that prints `repos`), so a
+ * test can sweep one repo without editing the real file or carrying a second list.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -257,11 +256,12 @@ export class DispatchSandbox {
   }
 
   private installDaemon(): void {
-    const src = readFileSync(join(DEPLOY, "agent-dispatch"), "utf8");
-    const line = /^DEFAULT_REPOS=\(.*\)$/m;
-    if (!line.test(src)) throw new Error("deploy/agent-dispatch no longer declares DEFAULT_REPOS=( … ) on one line");
-    const list = this.repos.map((r) => `"${r}"`).join(" ");
-    writeFileSync(join(this.installDir, "agent-dispatch"), src.replace(line, `DEFAULT_REPOS=(${list})`), { mode: 0o755 });
+    // The daemon asks the allowlist for its repo list (dispatch_repos_print); the sandbox answers with this.repos
+    // through a stand-in for node, so a test can narrow the sweep without a copy of the list in the installed script.
+    copyFileSync(join(DEPLOY, "agent-dispatch"), join(this.installDir, "agent-dispatch"));
+    chmodSync(join(this.installDir, "agent-dispatch"), 0o755);
+    const printer = join(this.root, "repo-list-node");
+    writeFileSync(printer, `#!/usr/bin/env bash\nprintf '%s\\n' ${this.repos.map((r) => `'${r}'`).join(" ")}\n`, { mode: 0o755 });
     mkdirSync(join(this.installDir, "lib"), { recursive: true });
     for (const f of readdirSync(join(DEPLOY, "lib")).filter((n) => n.endsWith(".sh"))) {
       copyFileSync(join(DEPLOY, "lib", f), join(this.installDir, "lib", f));
@@ -583,6 +583,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         AGY_HOOK: opts.agyHook ?? "",
         AGY_SLEEP_AFTER: String(opts.agySleepAfter ?? 0),
         CURL_RC: String(opts.curlRc ?? 0),
+        DISPATCH_REPOS_ROOT: this.root,
+        DISPATCH_REPOS_NODE: join(this.root, "repo-list-node"),
         ...opts.env,
       },
       encoding: "utf8",
@@ -614,6 +616,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         GH_CALLS: this.ghCalls,
         SUDO_ARGV: this.sudoArgv,
         ...this.gitEnv(),
+        DISPATCH_REPOS_ROOT: this.root,
+        DISPATCH_REPOS_NODE: join(this.root, "repo-list-node"),
         ...opts.env,
       },
       encoding: "utf8",
