@@ -142,18 +142,28 @@ fi
 # workers + synthesizer on ling-3.0-flash (30x cheaper per call, same valid-args score),
 # planner primary UNCHANGED (gemini-3.6-flash is the only 36/36 model). Free models are
 # fallbacks only. Planner primary review is due about 2026-10-11 (deepseek-v4.1-flash).
-grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS)=' .env > .env.patched || true
+# 2026-10-08: the AI Studio key's prepaid credit ran out (every google-genai call
+# returns 402), and the 10-07 chat audit found 2 of 10 founder asks answered right.
+# Planner, workers and synthesizer move to Claude Sonnet 5.5 through OpenRouter
+# ($2/M in, $10/M out; founder approved the heavy model). The judge moves to
+# Gemini 3.6 Flash through OpenRouter, so it is not grading its own family. The
+# shared fallback keeps only the free Nemotron slug: the Google-direct slugs are
+# dead while the key is unfunded. Per-run caps rise to fit a 20-call read step
+# on Sonnet (about 12K tokens a call). Golden set before/after: docs/sessions/2026-10-08-heavy-model-live-run.md.
+grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS|RUN_BUDGET_USD|RUN_BUDGET_TOKENS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-3.6-flash'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free'
-  printf '%s\n' 'JUDGE_MODEL=google-genai:gemini-3.1-flash-lite'
-  printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:inclusionai/ling-3.0-flash'
+  printf '%s\n' 'AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
+  printf '%s\n' 'JUDGE_MODEL=openrouter:google/gemini-3.6-flash'
+  printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5'
   printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash'
   printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router'
+  printf '%s\n' 'RUN_BUDGET_USD=1.5'
+  printf '%s\n' 'RUN_BUDGET_TOKENS=400000'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-3.6-flash, JUDGE_MODEL=google-genai:gemini-3.1-flash-lite"
+echo "==> Patched .env: AGENT_MODEL=WORKER_AGENT_MODEL=openrouter:anthropic/claude-sonnet-5.5, JUDGE_MODEL=openrouter:google/gemini-3.6-flash"
 
 # Pin the job-sweep spend controls. Both were unset in production until
 # 2026-08-05, and both defaulted quietly rather than loudly:

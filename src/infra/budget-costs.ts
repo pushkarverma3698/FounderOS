@@ -113,11 +113,15 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   "gemini-2.5-flash-lite":            { inputPerM: 0.0375, outputPerM: 0.15 },
   "gemini-2.5-pro":                   { inputPerM: 1.25,   outputPerM: 10.0 },
   "gemini-1.5-flash":                 { inputPerM: 0.075,  outputPerM: 0.30 },
+  "gemini-3.6-flash":                 { inputPerM: 0.75,   outputPerM: 3.75 },
   // Anthropic Claude
   "claude-sonnet-4-5":                { inputPerM: 3.0,    outputPerM: 15.0 },
   "claude-sonnet-4-6":                { inputPerM: 3.0,    outputPerM: 15.0 },
   "claude-haiku-4-5":                 { inputPerM: 0.25,   outputPerM: 1.25 },
   "claude-opus-4-8":                  { inputPerM: 15.0,   outputPerM: 75.0 },
+  "claude-sonnet-5.5":                { inputPerM: 2.0,    outputPerM: 10.0 },
+  // OpenRouter paid (prices from openrouter.ai/api/v1/models, 2026-10-08)
+  "ling-3.0-flash":                   { inputPerM: 0.021,  outputPerM: 0.063 },
   // OpenRouter free-tier (approx)
   "deepseek-r1:free":                 { inputPerM: 0.0,    outputPerM: 0.0  },
   "meta-llama/llama-3.3-70b-instruct:free": { inputPerM: 0.0, outputPerM: 0.0 },
