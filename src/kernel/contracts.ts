@@ -197,6 +197,8 @@ export const TaskEnvelopeSchema = z.preprocess(
       }),
     ),
     dependencies: z.array(z.string()).optional(),
+    /** "file" only when the founder asked for a file sent to him (CSV, export, attachment). */
+    deliverable: z.enum(["none", "file"]).default("none"),
     constraints: z.object({
       max_tool_calls: z.number().int().min(1).max(MAX_READ_TOOL_CALLS_PER_STEP),
       hitl_required: z.boolean(),

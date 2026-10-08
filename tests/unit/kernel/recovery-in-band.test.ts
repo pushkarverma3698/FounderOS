@@ -46,9 +46,9 @@ describe("Phase 5 — Recovery and Objective Ownership", () => {
           schema_version: 1,
           goal: "Do multi-step task",
           steps: [
-            { step_id: "s1", worker: "research", objective: "Step 1 research", inputs: {}, expected: { kind: "data", schema_ref: "data.generic" }, constraints: dummyConstraints },
-            { step_id: "s2", worker: "admin", objective: "Step 2 admin", inputs: {}, expected: { kind: "action_receipt", schema_ref: "action.summary" }, constraints: dummyConstraints },
-            { step_id: "s3", worker: "comms", objective: "Step 3 comms", inputs: {}, expected: { kind: "draft", schema_ref: "draft.email" }, constraints: dummyConstraints },
+            { step_id: "s1", worker: "research", objective: "Step 1 research", inputs: {}, expected: { kind: "data", schema_ref: "data.generic" }, deliverable: "none" as const, constraints: dummyConstraints },
+            { step_id: "s2", worker: "admin", objective: "Step 2 admin", inputs: {}, expected: { kind: "action_receipt", schema_ref: "action.summary" }, deliverable: "none" as const, constraints: dummyConstraints },
+            { step_id: "s3", worker: "comms", objective: "Step 3 comms", inputs: {}, expected: { kind: "draft", schema_ref: "draft.email" }, deliverable: "none" as const, constraints: dummyConstraints },
           ],
         },
       },
