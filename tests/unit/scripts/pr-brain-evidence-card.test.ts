@@ -84,7 +84,7 @@ beforeEach(() => {
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(repo, { recursive: true });
-  writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\n");
+  writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\n");
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/widgets.git"], { cwd: repo });
 
@@ -162,7 +162,7 @@ describe("pr-brain + evidence card: legacy paths stay as they were", () => {
 describe("pr-brain + evidence card: the flag read from PR_BRAIN_ENV_FILE", () => {
   // Issue #956: on prod the flag lives only in /opt/founderos/.env, not in cron's env.
   it("flag only in the env file: the card path runs and the PR is not auto-merged", () => {
-    writeFileSync(f(".env"), 'TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nAGENT_PIPELINE_V2="1"\n');
+    writeFileSync(f(".env"), 'TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\nAGENT_PIPELINE_V2="1"\n');
     sweep({ ec: CARD });
     expect(read("ec-args.log")).toContain("--issue 7");
     expect(merged()).toBe(false);
@@ -170,7 +170,7 @@ describe("pr-brain + evidence card: the flag read from PR_BRAIN_ENV_FILE", () =>
   });
 
   it("the process env wins over the env file", () => {
-    writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nAGENT_PIPELINE_V2=1\n");
+    writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\nAGENT_PIPELINE_V2=1\n");
     sweep({ ec: CARD, flag: "0" });
     expect(read("ec-args.log")).toBe("");
     expect(merged()).toBe(true);

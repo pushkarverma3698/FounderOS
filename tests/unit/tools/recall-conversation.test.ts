@@ -21,6 +21,8 @@ const TZ = "Asia/Kolkata";
 const NOW = new Date("2026-10-04T10:00:00Z");
 /** Local midnight (IST) of a given date, as the UTC instant. */
 const istMidnight = (iso: string): Date => new Date(`${iso}T00:00:00+05:30`);
+/** The forms an unreadable time is refused with (src/tools/recall-conversation.ts READABLE_TIMES). */
+const READABLE_TIMES_TEXT = "just now, an hour ago, earlier today, yesterday, last week, monday, 3 days ago, past 5 days, or a date like 2026-09-30";
 
 const turn = (over: Partial<RecalledTurn> & { at: string }): RecalledTurn => ({
   turn_id: over.turn_id ?? `t-${over.at}`,
@@ -147,6 +149,49 @@ describe("resolveRecallWindow — time said the way people say it", () => {
   it("returns null for a phrase it cannot read, instead of guessing", () => {
     expect(win("sometime in the spring")).toBeNull();
     expect(win("2026-13-45")).toBeNull();
+  });
+
+  // Prod 2026-10-07: the planner passed when:"recent" and the turn ended with no answer. Loose recency words mean the past 3 days.
+  describe("loose recency words mean the past 3 days, up to now", () => {
+    it.each([
+      ["recent"],
+      ["recently"],
+      ["lately"],
+      ["the last few days"],
+      ["last few days"],
+      ["in the past few days"],
+      ["Recently."],
+    ])("%s", (phrase) => {
+      const w = win(phrase);
+      expect(w, phrase).not.toBeNull();
+      expect(w!.since, phrase).toEqual(istMidnight("2026-10-01")); // Thu 1 Oct: today (Sun 4 Oct) minus 3 days
+      expect(w!.until, phrase).toEqual(istMidnight("2026-10-05"));
+      expect(w!.label, phrase).toBe("Thu 1 Oct – now");
+    });
+
+    it("leaves the older forms where they were", () => {
+      expect(win("past 3 days")!.since).toEqual(istMidnight("2026-10-01"));
+      expect(win("a few days ago")!.since).toEqual(istMidnight("2026-09-27"));
+      expect(win("other day")!.since).toEqual(istMidnight("2026-09-27"));
+      expect(win("last 2 weeks")!.since).toEqual(istMidnight("2026-09-20"));
+    });
+
+    it("still refuses a word it does not know, with the forms it does read", async () => {
+      expect(win("soonish")).toBeNull();
+      expect(win("last several days")).toBeNull();
+      const { deps, queries } = fakeReader([], null);
+      const out = await recallConversation({ threadId: "t", when: "soonish" }, deps);
+      expect(out).toBe(`I couldn't read the time "soonish". Try ${READABLE_TIMES_TEXT}.`);
+      expect(queries).toHaveLength(0);
+    });
+
+    it("recallConversation searches the 3-day window for when:'recent' instead of refusing it", async () => {
+      const { deps, queries } = fakeReader([turn({ at: "2026-10-03T08:00:00Z", user_input: "what did we ship?" })], new Date("2026-09-01T00:00:00Z"));
+      const out = await recallConversation({ threadId: "t", when: "recent" }, deps);
+      expect(queries[0]).toMatchObject({ since: istMidnight("2026-10-01"), until: istMidnight("2026-10-05") });
+      expect(out).toContain("from recent (Thu 1 Oct – now)");
+      expect(out).not.toContain("couldn't read the time");
+    });
   });
 });
 

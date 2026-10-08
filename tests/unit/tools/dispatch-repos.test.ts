@@ -21,8 +21,8 @@ const {
 
 /**
  * The repos the loop is provisioned for, in allowlist order. `pnpm repo:add <owner/repo>`
- * (scripts/repo-add.ts) appends to this list together with DISPATCH_REPO_ALLOWLIST and
- * DEFAULT_REPOS in deploy/agent-dispatch. Pinning it here means the allowlist can only grow
+ * (scripts/repo-add.ts) appends to this list together with DISPATCH_REPO_ALLOWLIST, which the
+ * daemons read. Pinning it here means the allowlist can only grow
  * as a reviewed line in a diff, never as a side effect.
  */
 const PROVISIONED_REPOS = [

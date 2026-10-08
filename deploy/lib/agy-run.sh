@@ -70,6 +70,13 @@ if ! declare -f tg_is_quiet >/dev/null 2>&1; then
     source "$_agy_lib_dir/tg-quiet.sh"
   fi
 fi
+# gh_shell_prelude: the first thing an agy script does is read the bot's GitHub token off its stdin (AG-039).
+if ! declare -f gh_shell_prelude >/dev/null 2>&1; then
+  if [[ -f "$_agy_lib_dir/gh-token.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$_agy_lib_dir/gh-token.sh"
+  fi
+fi
 
 # ------------------------------------------------------------------ Telegram
 _agy_tg_creds() {
@@ -194,8 +201,8 @@ agy_run() {
   # --print-timeout is REQUIRED: agy's own wait-for-response timeout defaults to 5m regardless of the outer
   # `timeout`, and every real task (pnpm install + lint alone can take longer) died at 5m05s on it before this
   # was set just under the outer bound (#452, #508, #670).
-  as_antigravity 'IFS= read -r GEMINI_API_KEY; if [ -n "$GEMINI_API_KEY" ]; then export GEMINI_API_KEY; else unset GEMINI_API_KEY; fi; exec </dev/null; cd "$1" && timeout "$3" agy --new-project --model "$4" --print "$(cat "$2")" --print-timeout "$5" --dangerously-skip-permissions --output-format stream-json' \
-    "$workdir" "$prompt_file" "$timeout_sec" "$model" "$(( timeout_sec - 120 ))s" <<<"$key" >"$raw" 2>&1 &
+  as_antigravity "$(gh_shell_prelude)"$'\n''IFS= read -r GEMINI_API_KEY; if [ -n "$GEMINI_API_KEY" ]; then export GEMINI_API_KEY; else unset GEMINI_API_KEY; fi; exec </dev/null; cd "$1" && timeout "$3" agy --new-project --model "$4" --print "$(cat "$2")" --print-timeout "$5" --dangerously-skip-permissions --output-format stream-json' \
+    "$workdir" "$prompt_file" "$timeout_sec" "$model" "$(( timeout_sec - 120 ))s" <<<"${GH_TOKEN:-}"$'\n'"$key" >"$raw" 2>&1 &
   pid=$!
 
   AGY_PROGRESS_MSG_ID="$(agy_tg_send "🔧 ${label}: starting…")"

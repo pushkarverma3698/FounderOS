@@ -16,23 +16,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DispatchSandbox, FAKE_GEMINI_KEY } from "./dispatch-sandbox.js";
+import { DISPATCH_REPO_ALLOWLIST } from "../../../src/tools/dispatch-repos.js";
+import { DispatchSandbox, FAKE_GEMINI_KEY, FAKE_GITHUB_TOKEN } from "./dispatch-sandbox.js";
 
 const QUOTA_LINE =
   "error: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 57h37m44s."; // verbatim
 const AUTH_LINE = "Error: 403 PERMISSION_DENIED: The caller does not have permission"; // synthetic
 const TRANSIENT_LINE = "Error: timeout waiting for response"; // verbatim
 const DOWN = "agent-dispatch.down";
-
-/** DEFAULT_REPOS as the real script declares it (the same one-line format the serviceability test parses). */
-function defaultRepos(): string[] {
-  const src = readFileSync(fileURLToPath(new URL("../../../deploy/agent-dispatch", import.meta.url)), "utf8");
-  const line = /^DEFAULT_REPOS=\((.*)\)$/m.exec(src);
-  if (!line?.[1]) throw new Error("deploy/agent-dispatch no longer declares DEFAULT_REPOS=( … ) on one line");
-  return [...line[1].matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
-}
 
 let sb: DispatchSandbox;
 
@@ -245,7 +238,7 @@ describe("the Gemini key never reaches a command line, a log, Telegram or GitHub
 
   it("is redacted even when it has no recognisable shape (the exact configured value is masked)", () => {
     const odd = "weird-KEY_value.with.dots/and+slashes==";
-    sb.writeEnvFile(`TELEGRAM_BOT_TOKEN=x\nTELEGRAM_CHAT_ID=1\nGOOGLE_GENERATIVE_AI_API_KEY=${odd}\n`);
+    sb.writeEnvFile(`TELEGRAM_BOT_TOKEN=x\nTELEGRAM_CHAT_ID=1\nGOOGLE_GENERATIVE_AI_API_KEY=${odd}\nGITHUB_TOKEN=${FAKE_GITHUB_TOKEN}\n`);
     sb.tick({ agyOut: `Error: PERMISSION_DENIED for credential ${odd}` });
 
     const everywhere = [...sb.messages(), ...sb.commentsOf(710), sb.log(), ...sb.sudoCalls()].join("\n");
@@ -357,13 +350,13 @@ describe("transient failures are retried, and the third gives up", () => {
 });
 
 describe("a startup failure is announced ONCE, then silence until it recovers", () => {
-  it("gh logged out: one PAUSED message naming the fix, nothing on the next 4 ticks, ONE resumed message on recovery", () => {
+  it("gh rejects the token: one PAUSED message naming the fix, nothing on the next 4 ticks, ONE resumed message on recovery", () => {
     sb.patchGh({ authOk: false });
     for (let i = 0; i < 5; i++) expect(sb.tick({ agyOut: TRANSIENT_LINE }).status).toBe(0);
 
     expect(sb.messages()).toHaveLength(1);
     expect(sb.messages()[0]).toContain("PAUSED");
-    expect(sb.messages()[0]).toMatch(/gh auth login/);
+    expect(sb.messages()[0]).toMatch(/GITHUB_TOKEN/);
     expect(sb.agyRuns()).toBe(0);
     expect(sb.readState(DOWN).split("\n")[0]).toBe("gh-auth");
 
@@ -428,7 +421,7 @@ describe("a startup failure is announced ONCE, then silence until it recovers", 
   });
 });
 
-describe("the repo list: DEFAULT_REPOS is the only one the daemon reads", () => {
+describe("the repo list: the allowlist is the only one the daemon reads", () => {
   it("ignores ISSUE_REPOS from the environment and logs ONE warning per tick that names the fix", () => {
     sb.tick({ env: { ISSUE_REPOS: "attacker/elsewhere owner/founderos" }, agyOut: TRANSIENT_LINE });
     sb.tick({ env: { ISSUE_REPOS: "attacker/elsewhere owner/founderos" }, agyOut: TRANSIENT_LINE });
@@ -461,11 +454,11 @@ describe("the real file, in the repo layout (helpers in deploy/lib)", () => {
     expect(r.stdout).toMatch(/agent-dispatch/);
   });
 
-  it("--list names every repo in DEFAULT_REPOS, read from the script itself", () => {
-    const r = sb.runInPlace(["--list"]);
+  it("--list names every repo in DISPATCH_REPO_ALLOWLIST, asked of the real printer", () => {
+    const r = sb.runInPlace(["--list"], { DISPATCH_REPOS_ROOT: fileURLToPath(new URL("../../..", import.meta.url)) });
     const listed = [...r.stdout.matchAll(/agent:ready issues in (\S+):/g)].map((m) => m[1]);
-    expect(defaultRepos().length).toBeGreaterThanOrEqual(4);
-    expect(listed).toEqual(defaultRepos());
+    expect(DISPATCH_REPO_ALLOWLIST.length).toBeGreaterThanOrEqual(4);
+    expect(listed).toEqual([...DISPATCH_REPO_ALLOWLIST]);
   });
 
   it("refuses to run without its helper libraries, loudly, and names where it looked", () => {

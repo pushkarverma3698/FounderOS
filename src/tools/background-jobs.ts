@@ -3,8 +3,10 @@
  * ================================================================================
  * Read-only. What runs without the founder asking: the two VPS daemons (automatic PR review, coding dispatch), read
  * from the files they leave in ~/.claude (src/infra/daemon-settings.ts), and the bot's own built-in routines, from
- * src/infra/scheduler-registry.ts. Nothing here guesses: a daemon that has not reported says so, a file that cannot
- * be read names the file and the reason, and a switch file that cannot be read is "unknown", never "ON".
+ * src/infra/scheduler-registry.ts. It also carries `deployed`, the one line naming the commit this process booted on
+ * (src/infra/deployed-version.ts), so "what is live?" has an answer. Nothing here guesses: a daemon that has not
+ * reported says so, a file that cannot be read names the file and the reason, and a switch file that cannot be read
+ * is "unknown", never "ON".
  *
  * Shaped for a person on a phone. `summary` leads with the result, or with what needs attention. `attention` holds
  * only what is off, paused, stale or unreadable, each with the way back where there is one. The two systems he can
@@ -22,6 +24,7 @@ import {
   type DaemonName,
   type ReviewSetup,
 } from "../infra/daemon-settings.js";
+import { deployedAtBoot } from "../infra/deployed-version.js";
 import { SCHEDULED_ROUTINES, describeCron } from "../infra/scheduler-registry.js";
 import { engineDisplay, readDefaultEngine, type Engine } from "./coding-engine.js";
 
@@ -30,6 +33,8 @@ export interface BackgroundDeps {
   readonly read: (file: string) => string | null;
   readonly now: () => number;
   readonly engine: () => Engine;
+  /** The `Deployed: <sha7> "<subject>" (<date>), process started <time>` line, fixed at boot. */
+  readonly deployed: () => string;
 }
 
 export type JobState = "on" | "off" | "paused" | "unknown";
@@ -47,6 +52,8 @@ export interface BackgroundJob {
 export interface BackgroundJobsView {
   readonly summary: string;
   readonly attention: readonly string[];
+  /** Which commit this process is running; "Deployed: unknown, ..." when git could not say. Not an alarm either way. */
+  readonly deployed: string;
   readonly jobs: readonly BackgroundJob[];
 }
 
@@ -54,6 +61,7 @@ export const REAL_BACKGROUND_DEPS: BackgroundDeps = {
   read: readIfPresent,
   now: () => Date.now(),
   engine: () => readDefaultEngine(),
+  deployed: deployedAtBoot,
 };
 
 const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -185,5 +193,5 @@ export function readBackgroundJobs(deps: BackgroundDeps = REAL_BACKGROUND_DEPS):
       (r): BackgroundJob => ({ name: r.title, kind: "routine", state: "on", runs: describeCron(r.cron), detail: r.what }),
     ),
   ];
-  return { summary: summarise(attention, jobs), attention, jobs };
+  return { summary: summarise(attention, jobs), attention, deployed: deps.deployed(), jobs };
 }
