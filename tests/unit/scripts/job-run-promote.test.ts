@@ -84,6 +84,19 @@ describe("deploy/job-run: stage promote", () => {
     expect(r.calls[0]).toContain(`promote-run --repo ${REPO} --beta-sha ${SHA} --result-file`);
   });
 
+  it("forwards base and deploy mode for an Oplify promotion, and defaults to main/box otherwise", () => {
+    const oplify = run(line({ repo: "OplifyMessage/oplify-messaging-api", stage: "promote", beta_sha: SHA, base: "production", deploy: "workflow" }));
+    expect(oplify.calls[0]).toContain("--base production --deploy workflow");
+    const legacy = run(line({ repo: REPO, stage: "promote", beta_sha: SHA }));
+    expect(legacy.calls[0]).toContain("--base main --deploy box");
+  });
+
+  it("refuses a base that is not a plain branch name", () => {
+    const r = run(line({ repo: REPO, stage: "promote", beta_sha: SHA, base: "main;touch x" }));
+    expect(r.status).toBe(64);
+    expect(r.calls).toHaveLength(0);
+  });
+
   it("hands promote-run the bot's one GitHub token and the git credential helper that reads it", () => {
     const r = run(line({ repo: REPO, stage: "promote", beta_sha: SHA }));
 

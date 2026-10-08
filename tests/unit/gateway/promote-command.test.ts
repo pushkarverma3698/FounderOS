@@ -49,6 +49,46 @@ beforeEach(() => _resetPromoteClaimsForTests());
 
 const asCtx = (c: ReturnType<typeof makeCtx>): Context => c as unknown as Context;
 
+describe("promoting an Oplify repo", () => {
+  it("/promote oplify-api reads that repo, compares against production, and tags the buttons with the name", async () => {
+    const deps = makeDeps();
+    const ctx = { ...makeCtx(), match: "oplify-api" };
+    await handlePromote(ctx as unknown as Context, deps);
+
+    expect(deps.read).toHaveBeenCalledWith(expect.objectContaining({ repo: "OplifyMessage/oplify-messaging-api", base: "production" }));
+    const [text, extra] = ctx.reply.mock.calls[0]!;
+    expect(text).toContain("(oplify-api)");
+    expect(text).toContain("into production");
+    expect(extra.reply_markup.inline_keyboard[0][0].callback_data).toBe(`pm:y:oplify-api:${SHA}`);
+    expect(`pm:y:oplify-api:${SHA}`.length).toBeLessThanOrEqual(64);
+  });
+
+  it("an unknown name lists the valid ones and reads nothing", async () => {
+    const deps = makeDeps();
+    const ctx = { ...makeCtx(), match: "hulda" };
+    await handlePromote(ctx as unknown as Context, deps);
+
+    expect(deps.read).not.toHaveBeenCalled();
+    expect(ctx.reply.mock.calls[0]![0]).toContain("oplify-api");
+  });
+
+  it("the tap on an Oplify card starts the job for that repo", async () => {
+    const deps = makeDeps();
+    const ctx = makeCtx({ data: `pm:y:oplify-app:${SHA}` });
+    await handlePromoteCallback(asCtx(ctx), access, deps);
+
+    expect(deps.start).toHaveBeenCalledWith(expect.objectContaining({ repo: "OplifyMessage/oplify-messaging-app", base: "production" }), SHA);
+  });
+
+  it("a card naming a repo nobody wired is refused", async () => {
+    const deps = makeDeps();
+    const ctx = makeCtx({ data: `pm:y:evil-repo:${SHA}` });
+    await handlePromoteCallback(asCtx(ctx), access, deps);
+
+    expect(deps.start).not.toHaveBeenCalled();
+  });
+});
+
 describe("handlePromote", () => {
   it("posts the card with Promote and Cancel, and starts nothing", async () => {
     const deps = makeDeps();
@@ -103,8 +143,8 @@ describe("handlePromoteCallback", () => {
     const ctx = makeCtx({ data: `pm:y:${SHA}` });
     await handlePromoteCallback(asCtx(ctx), access, deps);
 
-    expect(deps.start).toHaveBeenCalledWith(SHA);
-    expect(deps.audit).toHaveBeenCalledWith(SHA, 9);
+    expect(deps.start).toHaveBeenCalledWith(expect.objectContaining({ repo: "pushkarverma3698/FounderOS", base: "main" }), SHA);
+    expect(deps.audit).toHaveBeenCalledWith(expect.objectContaining({ base: "main" }), SHA, 9);
     expect(ctx.editMessageText.mock.calls[0]![0]).toContain("Promoting beta ccccccc");
   });
 
