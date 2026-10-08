@@ -91,3 +91,67 @@ describe("listPullRequests", () => {
     expect(res.data).toEqual([expect.objectContaining({ number: 79, draft: true, base: "beta" })]);
   });
 });
+
+/**
+ * Regression for the 2026-10-08 live probes: "check the open PRs, is CI green?" spent the whole 20-call budget
+ * on one get_pr per PR, and "what merged to beta today?" had no merged listing, so it rebuilt merges from commits
+ * and padded the reply with "not verified" gaps. One list_prs call now answers both.
+ */
+function listOctokit(runsBySha: Record<string, Array<{ name: string; status: string; conclusion: string | null }>>) {
+  const pr = (number: number, sha: string, extra: Record<string, unknown> = {}) => ({
+    number, title: `pr ${number}`, draft: false, head: { ref: `h${number}`, sha }, base: { ref: "beta" },
+    user: { login: "bot" }, updated_at: "2026-10-08T09:00:00Z", html_url: `u${number}`, merged_at: null, merge_commit_sha: null, ...extra,
+  });
+  const list = vi.fn().mockImplementation(({ state }: { state: string }) =>
+    Promise.resolve({
+      data: state === "open"
+        ? [pr(1, "sha1"), pr(2, "sha2"), pr(3, "sha3"), pr(4, "sha4")]
+        : [
+            pr(10, "s10", { merged_at: "2026-10-08T08:27:00Z", merge_commit_sha: "b9998118aaaa" }),
+            pr(11, "s11", { merged_at: null }), // closed without merging
+            pr(12, "s12", { merged_at: "2026-10-06T10:00:00Z", merge_commit_sha: "old" }),
+          ],
+    }),
+  );
+  const listForRef = vi.fn().mockImplementation(({ ref }: { ref: string }) =>
+    ref in runsBySha ? Promise.resolve({ data: { check_runs: runsBySha[ref] } }) : Promise.reject(new Error("no checks:read")),
+  );
+  return { octokit: { rest: { pulls: { list }, checks: { listForRef } } } as unknown as Octokit, list, listForRef };
+}
+
+describe("listPullRequests — CI verdict per open PR", () => {
+  it("gives each open PR a green / red / pending verdict in one call", async () => {
+    const { octokit } = listOctokit({
+      sha1: [{ name: "gate", status: "completed", conclusion: "success" }, { name: "PR scope", status: "completed", conclusion: "cancelled" }, { name: "PR scope", status: "completed", conclusion: "success" }],
+      sha2: [{ name: "gate", status: "completed", conclusion: "success" }, { name: "Unit", status: "completed", conclusion: "failure" }],
+      sha3: [{ name: "Unit", status: "in_progress", conclusion: null }],
+    });
+    const res = await listPullRequests(octokit, "o", "r");
+    const rows = res.data as Array<{ number: number; ci: string; failing?: string[] }>;
+    expect(rows.find((r) => r.number === 1)).toMatchObject({ ci: "green" }); // a cancelled rerun next to a pass is green
+    expect(rows.find((r) => r.number === 2)).toMatchObject({ ci: "red", failing: ["Unit"] });
+    expect(rows.find((r) => r.number === 3)).toMatchObject({ ci: "pending" });
+    expect(rows.find((r) => r.number === 4)!.ci).toBe("unavailable: no checks:read");
+  });
+});
+
+describe("listPullRequests — merged", () => {
+  it("lists merged PRs with merge time and SHA, newest window only", async () => {
+    const { octokit, list } = listOctokit({});
+    const res = await listPullRequests(octokit, "o", "r", { state: "merged", since: "2026-10-07T18:30:00Z" });
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ state: "closed" }));
+    expect(res.data).toEqual([expect.objectContaining({ number: 10, base: "beta", merged_at: "2026-10-08T08:27:00Z", merge_sha: "b9998118" })]);
+  });
+});
+
+describe("github_read wrapper — list_prs state reaches the tool", () => {
+  it("passes state=merged and since through to githubTool", async () => {
+    vi.resetModules();
+    const execute = vi.fn().mockResolvedValue({ success: true, data: [] });
+    vi.doMock("../../../src/tools/github.js", () => ({ githubTool: { execute } }));
+    const { githubRead } = await import("../../../src/agents/agent-tools/engineering.js");
+    await githubRead.invoke({ action: "list_prs", owner: "o", repo: "r", state: "merged", since: "2026-10-07T18:30:00Z" }, { configurable: { thread_id: "t" } });
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ action: "list_prs", state: "merged", since: "2026-10-07T18:30:00Z" }));
+    vi.doUnmock("../../../src/tools/github.js");
+  });
+});
