@@ -36,6 +36,7 @@ import { sendCapabilityHint } from "./capability-hint.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
 import { engineFromApprovalCard, type Engine } from "../tools/coding-engine.js";
 import { withInflight } from "./inflight-turns.js";
+import { runHeldMessageAfterResume } from "./held-message.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -173,7 +174,7 @@ async function runKernelTurn(ctx: Context, text: string, profileId: string | und
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
-      if (!(await passTurnGates(ctx, chatId, threadIdFor(chatId), ack))) return;
+      if (!(await passTurnGates(ctx, chatId, threadIdFor(chatId), ack, text))) return;
 
       const kernel = await getKernel();
       budget = makeRunBudget();
@@ -278,14 +279,18 @@ async function runKernelTurn(ctx: Context, text: string, profileId: string | und
 const cardEngine = (data: string | null | undefined) => { const engine = engineFromApprovalCard(data); return engine ? { engine } : {}; };
 export function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
   // A deploy waits for an approval tap's run too, but never reports it as a dropped message (record: false).
-  return withInflight({ chatId: String(ctx.chat?.id ?? "unknown"), text: `approval ${decision}`, record: false }, () =>
-    resumeKernelTurn(ctx, decision, nonce),
-  );
+  return withInflight({ chatId: String(ctx.chat?.id ?? "unknown"), text: `approval ${decision}`, record: false }, async () => {
+    const interruptId = await resumeKernelTurn(ctx, decision, nonce);
+    // After the resume turn has replied and its chat lock is released: a message sent while the card waited (AG-047).
+    if (interruptId) await runHeldMessageAfterResume(ctx, { interruptId, threadId: threadIdFor(ctx.chat?.id ?? "unknown"), run: (c, t) => runKernelText(c, t) });
+  });
 }
 
-async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
+/** Returns the id of the card this tap resolved, or undefined when it resolved none (a stale tap). */
+async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<string | undefined> {
   const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
+  let resolvedId: string | undefined;
   await withChatTurnLock(chatId, async () => {
     const threadId = threadIdFor(chatId);
     const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: kernelPromptHash() });
@@ -303,6 +308,7 @@ async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected",
       }
       if (pending) {
         await resolveInterrupt(pending.interrupt_id, decision);
+        resolvedId = pending.interrupt_id;
       }
       const kernel = await getKernel();
       budget = makeRunBudget();
@@ -367,6 +373,7 @@ async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected",
       await replyForError(ctx, failure);
     }
   });
+  return resolvedId;
 }
 
 // ── Crash recovery ─────────────────────────────────────────────────────────────
