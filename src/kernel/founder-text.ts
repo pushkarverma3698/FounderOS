@@ -83,6 +83,11 @@ const ORPHANED_ASSIGNMENT = /=\s*["']/;
  * sentence with a dangling `=`.
  */
 export function redactInternalIdentifiers(text: string): string {
-  const clean = text.replace(SNAKE_CASE_IDENTIFIER, "").replace(/\s{2,}/g, " ").trim();
+  // "a tool" keeps the sentence whole: deleting the name left "Use to open a GitHub issue" on screen (2026-10-08).
+  const clean = text
+    .replace(new RegExp(String.raw`\b(?:the\s+)?${SNAKE_CASE_IDENTIFIER.source}(?:\s+tool\b)?`, "g"), "a tool")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (clean.replace(/\ba tool\b/g, "").trim() === "") return ""; // identifiers only: let the caller's placeholder show
   return ORPHANED_ASSIGNMENT.test(clean) ? "" : clean;
 }
