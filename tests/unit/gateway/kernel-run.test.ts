@@ -29,6 +29,8 @@ vi.mock("../../../src/db/queries.js", () => ({
   getPendingInterrupt: (...a: unknown[]) => getPendingInterrupt(...(a as [])),
   resolveInterrupt: (...a: unknown[]) => resolveInterrupt(...(a as [])),
   getTodayCostUsd: (...a: unknown[]) => getTodayCostUsd(...(a as [])),
+  holdMessageOnInterrupt: vi.fn(async () => true),
+  claimHeldMessage: vi.fn(async () => null),
   insertScheduledTask: (...a: unknown[]) => insertScheduledTask(...(a as [Record<string, unknown>])),
 }));
 
@@ -331,8 +333,8 @@ describe("runKernelText", () => {
     expect(fakeKernel.stream).not.toHaveBeenCalled();
     const all = replies.map((r) => r.text).join("\n");
     expect(all).toContain("Dispatch task to Antigravity?"); // the pending card, again
-    expect(all).toMatch(/approve or reject/i);
-    expect(all).toMatch(/send (it|your message) again/i);
+    expect(all).toContain("⏸ Holding this until you answer the card above.");
+    expect(all).not.toMatch(/send (it|your message) again/i);
   });
 
   it("an approval pending longer than the restore window is expired, not allowed to block the chat forever", async () => {
@@ -964,7 +966,7 @@ describe("runKernelText: the ack goes out before the gates", () => {
 
     expect(deletedIds).toEqual([1]);
     expect(replies[0]!.text).toBe("🤔 Working on it…");
-    expect(replies[1]!.text).toMatch(/approve or reject/i);
+    expect(replies[1]!.text).toBe("⏸ Holding this until you answer the card above.");
     expect(replies).toHaveLength(3); // ack, hold notice, the pending card again: no second ack
     expect(fakeKernel.stream).not.toHaveBeenCalled();
     expect(getTodayCostUsd).not.toHaveBeenCalled();

@@ -215,6 +215,12 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
 
     const messages: ToolMessage[] = [];
     const receipts: ToolReceipt[] = [];
+    // Scope for stateful tool guards (repeat-call breaker): one turn's one step. Step ids
+    // ("s1") repeat every turn, so the turn id is part of the key (AG-046).
+    const toolConfig: RunnableConfig = {
+      ...config,
+      configurable: { ...config?.configurable, step_scope: `${state.turn.id}:${step.step_id}` },
+    };
 
     for (const call of last.tool_calls ?? []) {
       const callId = call.id ?? `${step.step_id}-${executed}`;
@@ -263,7 +269,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
       let resultStr: string;
       let ok: boolean;
       try {
-        const raw = await tool.invoke((call.args ?? {}) as Record<string, unknown>, config);
+        const raw = await tool.invoke((call.args ?? {}) as Record<string, unknown>, toolConfig);
         resultStr = typeof raw === "string" ? raw : JSON.stringify(raw);
         ok = !isFailureResult(resultStr);
       } catch (err) {
