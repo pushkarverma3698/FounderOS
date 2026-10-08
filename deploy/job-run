@@ -132,10 +132,13 @@ REPO="$(jq -r '.repo // empty' <<<"$LINE" 2>/dev/null)" || REPO=""
 ISSUE="$(jq -r '.issue // empty | tostring' <<<"$LINE" 2>/dev/null)" || ISSUE=""
 STAGE="$(jq -r '.stage // empty' <<<"$LINE" 2>/dev/null)" || STAGE=""
 BETA_SHA="$(jq -r '.beta_sha // empty' <<<"$LINE" 2>/dev/null)" || BETA_SHA=""
+BASE="$(jq -r '.base // empty' <<<"$LINE" 2>/dev/null)" || BASE=""
+DEPLOY="$(jq -r '.deploy // empty' <<<"$LINE" 2>/dev/null)" || DEPLOY=""
 # A promotion has no issue: it carries the beta commit the founder approved instead.
 if [[ "$STAGE" == promote ]]; then ISSUE="${BETA_SHA:0:7}"; fi
 if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$STAGE" =~ ^(spec|build|promote)$ ]] \
   || [[ "$STAGE" == promote && ! "$BETA_SHA" =~ ^[0-9a-f]{40}$ ]] \
+  || [[ -n "$BASE" && ! "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ -n "$DEPLOY" && ! "$DEPLOY" =~ ^(box|workflow)$ ]] \
   || [[ "$STAGE" != promote && ! "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
   _got="$(printf '%s' "$LINE" | cut -c1-200)"
   REPO="" ISSUE="" STAGE=""
@@ -157,9 +160,10 @@ fi
 
 # ------------------------------------------------------------------ a promotion: its own script, one outcome
 if [[ "$STAGE" == promote ]]; then
-  PHASE="promote-run (beta ${BETA_SHA:0:7} to main)"
+  PHASE="promote-run (beta ${BETA_SHA:0:7} to ${BASE:-main})"
   PROMOTE_RESULT="$(mktemp "${TMPDIR:-/tmp}/promote-result.XXXXXX")"
-  run_logged "$PROMOTE_RUN" --repo "$REPO" --beta-sha "$BETA_SHA" --result-file "$PROMOTE_RESULT"
+  run_logged "$PROMOTE_RUN" --repo "$REPO" --beta-sha "$BETA_SHA" --result-file "$PROMOTE_RESULT" \
+    --base "${BASE:-main}" --deploy "${DEPLOY:-box}"
   rc=$?
   reason="$(head -c 1500 "$PROMOTE_RESULT" 2>/dev/null)"; rm -f "$PROMOTE_RESULT"
   [[ "$rc" -eq 0 ]] || fail "$rc" "${reason:-promote-run exited ${rc} without saying why}"
