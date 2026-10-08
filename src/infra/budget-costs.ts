@@ -122,6 +122,11 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   "claude-sonnet-5.5":                { inputPerM: 2.0,    outputPerM: 10.0 },
   // OpenRouter paid (prices from openrouter.ai/api/v1/models, 2026-10-08)
   "ling-3.0-flash":                   { inputPerM: 0.021,  outputPerM: 0.063 },
+  // Until AG-050 these fell to DEFAULT_COST: 10-08 ledger rows for deepseek-v4-flash were priced at $0.10/$0.50.
+  "gemini-3.1-flash-lite":            { inputPerM: 0.25,   outputPerM: 1.5  },
+  "deepseek-v4-flash":                { inputPerM: 0.0131, outputPerM: 1.28 },
+  "deepseek-v4.1-flash":              { inputPerM: 0.3,    outputPerM: 1.2  },
+  "mimo-v2.6-flash":                  { inputPerM: 0.14,   outputPerM: 0.28 },
   // OpenRouter free-tier (approx)
   "deepseek-r1:free":                 { inputPerM: 0.0,    outputPerM: 0.0  },
   "meta-llama/llama-3.3-70b-instruct:free": { inputPerM: 0.0, outputPerM: 0.0 },
@@ -182,6 +187,9 @@ export function normalizeModelId(modelId: string): string {
  * modelId is normalized before lookup so provider-prefixed strings resolve correctly.
  */
 export function estimateCost(inputTokens: number, outputTokens: number, modelId: string): number {
+  // A :free slug costs nothing, even where a paid twin shares its normalized name
+  // (nvidia/nemotron-3-super-120b-a12b is $0.085/$0.40; the :free one was ledgered at DEFAULT_COST).
+  if (modelId.trim().endsWith(":free")) return 0;
   const normalized = normalizeModelId(modelId);
   const costs = MODEL_COSTS[normalized] ?? MODEL_COSTS[modelId] ?? DEFAULT_COST;
   return (inputTokens * costs.inputPerM + outputTokens * costs.outputPerM) / 1_000_000;
