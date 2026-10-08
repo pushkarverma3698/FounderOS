@@ -1,3 +1,4 @@
+| `fos_github_read`, `fos_ops_state`, `fos_read_context`, `fos_search_knowledge`, `fos_search_memory`, `fos_search_research_cache`, `fos_read_cv`, `fos_antigravity_task_status`, `fos_get_gap_scans`, `fos_list_scheduled`, `fos_list_scheduled_posts`, `fos_list_reminders`, `fos_list_workflows`, `fos_list_pending_signals`, `fos_list_brand_assets`, `fos_list_video_brands`, `fos_video_production_status`, `fos_read_logs` | FounderOS's own read-only tools (scope `all` only), the same tool objects the Telegram bot binds |
 # Connecting to the FounderOS hub (MCP) on the Production VPS
 
 Every coding tool — Claude Code, Codex, Cursor, Antigravity, Gemini CLI — connects
@@ -9,11 +10,20 @@ production VPS against the production data:
 | `search_memory`, `get_memory`, `remember`, `save_decision`, `save_bug` | the shared brain (`brain.brain_memories`) |
 | `gmail_search`, `calendar_events` | read the founder's Google accounts (`src/core/accounts.ts`), one or all |
 | `list_connected_tools`, `call_connected_tool` | every MCP server in `/opt/founderos/mcp-bridge.json`, read-only |
+| `fos_github_read`, `fos_ops_state`, `fos_read_context`, `fos_search_knowledge`, `fos_search_memory`, `fos_search_research_cache`, `fos_read_cv`, `fos_antigravity_task_status`, `fos_get_gap_scans`, `fos_list_scheduled`, `fos_list_scheduled_posts`, `fos_list_reminders`, `fos_list_workflows`, `fos_list_pending_signals`, `fos_list_brand_assets`, `fos_list_video_brands`, `fos_video_production_status`, `fos_read_logs` | FounderOS's own read-only tools (scope `all` only), the same tool objects the Telegram bot binds |
 
 **Nothing in the hub sends or changes anything on the founder's behalf.** Sending
 mail, creating events, and any tool a connected server marks as a write stay in
 Telegram, where the founder approves them (ADR-004, ADR-013). Brain writes are the
 one exception: they record decisions and bugs, not actions.
+
+**The `fos_` tools** are not a copy of the bot's tools. `src/mcp/hub-native.ts` serves the very tool
+objects in `DEPARTMENT_TOOLS` and derives each input schema from that tool's own schema. An allowlist
+names the 18 tools; a tool is served only if the AG-035 read-only list (`isReadOnlyTool`) classes it
+read-only, so anything HITL-gated, sending, writing, dispatching or merging is refused when the hub
+builds, and `tests/unit/mcp/hub-native.test.ts` fails the build if one is added. They run with no
+conversation id, so no private chat is readable. Left out on purpose: `read_file`, `list_dir`,
+`recall_conversation`, `read_emails` and the LinkedIn account reads. Scope `brain` serves none of them.
 
 **Adding a server:** one entry in `/opt/founderos/mcp-bridge.json` on the VPS (or
 `/connect` in Telegram). The hub re-reads the file on every call, so every tool

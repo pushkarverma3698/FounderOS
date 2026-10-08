@@ -10,7 +10,7 @@ on the laptop, which runs 36 PASS/FAIL checks and spends nothing.
    on the laptop and on the VPS.
 2. **One memory.** The brain is Postgres on `founderos-vps`. Every agent reaches it through the hub.
 3. **One hub.** `src/mcp/hub.ts` is a single MCP server. It gives any agent the brain, Gmail and Calendar
-   reads, and every MCP server connected on the VPS. It reads freely and refuses writes.
+   reads, FounderOS's own read tools, and every MCP server connected on the VPS. It reads freely and refuses writes.
 4. **One loop.** A builder opens a draft PR to `beta`. Claude on the VPS reviews it. Cleared FounderOS
    work is merged into `beta`, then promoted to `main`, which deploys.
 5. **Claude runs only on demand.** Nothing on the VPS starts a Claude session unless a PR is waiting
@@ -67,11 +67,13 @@ makes GitHub API calls only.
 
 ## The hub
 
-**What it gives an agent** (9 tools):
+**What it gives an agent** (27 tools):
 - the 5 brain tools;
 - `gmail_search` and `calendar_events`, across every connected Google account;
 - `list_connected_tools` and `call_connected_tool`, for every server in `/opt/founderos/mcp-bridge.json`
   (today `deepwiki` and `slack`).
+- 18 `fos_` tools: FounderOS's own read-only tools (`fos_ops_state`, `fos_github_read`, `fos_read_logs`,
+  the `fos_list_*` family and more), the same objects the Telegram bot binds. Nothing that writes is served.
 
 **Reads only.** A tool the bridge classifies as a write is refused before the hub connects to it. Anything
 that sends or changes something goes through the Telegram bot, which asks you to approve it first.

@@ -7,7 +7,8 @@
  * and one list of connected MCP servers. Adding a server on the VPS reaches all
  * of them with no laptop edit.
  *
- *   scope "all"   brain + Gmail/Calendar reads + connected servers (the founder's tools)
+ *   scope "all"   brain + Gmail/Calendar reads + connected servers + FounderOS's own read-only
+ *                 tools as fos_<tool> (hub-native.ts)
  *   scope "brain" brain only — for an agent that must not read the founder's mail,
  *                 e.g. the VPS `antigravity` user, which runs it with its own
  *                 least-privilege database role
@@ -22,6 +23,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { BRAIN_TOOLS, callBrainTool, formatError, type McpToolResult } from "./brain-tools.js";
 import { GOOGLE_TOOLS, callGoogleTool, type GoogleDeps } from "./hub-google.js";
 import { BRIDGE_TOOLS, callBridgeTool, type BridgeDeps } from "./hub-bridge.js";
+import type { NativeHubTools } from "./hub-native.js";
 
 export const HUB_SCOPES = ["all", "brain"] as const;
 export type HubScope = (typeof HUB_SCOPES)[number];
@@ -33,8 +35,10 @@ export function parseHubScope(raw: string | undefined): HubScope {
   throw new Error(`HUB_SCOPE must be one of ${HUB_SCOPES.join(", ")}; got "${raw}".`);
 }
 
-export function hubTools(scope: HubScope) {
-  return scope === "brain" ? [...BRAIN_TOOLS] : [...BRAIN_TOOLS, ...GOOGLE_TOOLS, ...BRIDGE_TOOLS];
+/** Native tools (AG-042) are served in scope all only, and only when the caller loaded them. */
+export function hubTools(scope: HubScope, native?: NativeHubTools) {
+  if (scope === "brain") return [...BRAIN_TOOLS];
+  return [...BRAIN_TOOLS, ...GOOGLE_TOOLS, ...BRIDGE_TOOLS, ...(native?.tools ?? [])];
 }
 
 const INSTRUCTIONS: Record<HubScope, string> = {
@@ -48,18 +52,27 @@ const INSTRUCTIONS: Record<HubScope, string> = {
     "save_bug after; always pass the project tag.",
 };
 
+/** Appended to the scope-all instructions only when the native tools were loaded (AG-042). */
+const NATIVE_NOTE =
+  " The fos_* tools are FounderOS's own read-only tools, the same ones the Telegram bot uses " +
+  "(fos_ops_state, fos_github_read, fos_read_logs, fos_list_*). They never send or change anything and " +
+  "read no private chats; writes stay in Telegram, where he approves them.";
+
 export interface HubOptions {
   scope: HubScope;
   google?: GoogleDeps;
   bridge?: BridgeDeps;
+  /** FounderOS read-only tools (scope all only). Loaded by hub.ts; absent in brain scope. */
+  native?: NativeHubTools;
 }
 
 export function buildHubServer(opts: HubOptions): Server {
-  const tools = hubTools(opts.scope);
+  const native = opts.scope === "all" ? opts.native : undefined;
+  const tools = hubTools(opts.scope, native);
   const allowed = new Set(tools.map((t) => t.name));
   const server = new Server(
     { name: "founderos-hub", version: "1.0.0" },
-    { capabilities: { tools: {} }, instructions: INSTRUCTIONS[opts.scope] },
+    { capabilities: { tools: {} }, instructions: INSTRUCTIONS[opts.scope] + (native ? NATIVE_NOTE : "") },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools as never }));
@@ -71,7 +84,8 @@ export function buildHubServer(opts: HubOptions): Server {
     const result: McpToolResult | null =
       (await callBrainTool(name, args)) ??
       (await callGoogleTool(name, args, opts.google)) ??
-      (await callBridgeTool(name, args, opts.bridge));
+      (await callBridgeTool(name, args, opts.bridge)) ??
+      (native ? await native.run(name, args) : null);
     return result ?? formatError(`Unknown tool: ${name}`);
   });
 

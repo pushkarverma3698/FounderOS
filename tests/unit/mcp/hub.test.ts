@@ -358,8 +358,8 @@ describe("hub — stdio entry points", () => {
     }
   }
 
-  it("hub.ts serves everything by default and the brain in HUB_SCOPE=brain", async () => {
-    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(9);
+  it("hub.ts serves everything (brain, Google, bridge and 18 fos_ read tools) by default and the brain in HUB_SCOPE=brain", async () => {
+    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(27);
     expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(5);
   }, 60_000);
 
