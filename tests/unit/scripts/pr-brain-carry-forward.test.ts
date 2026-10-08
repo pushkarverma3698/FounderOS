@@ -60,6 +60,7 @@ function sweep(head: string, gatedAt: string, extraEnv: Record<string, string> =
       PATH: `${bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
       HOME: home,
       PR_BRAIN_OWNER: "owner",
+      PR_BRAIN_ENV_FILE: join(root, ".env"),
     // These pin the Claude engine; the default engine is agy (pr-brain-agy.test.ts).
     PR_BRAIN_ENGINE: "claude",
       QA_APP_ROOT: join(root, "no-founderos"),
@@ -89,6 +90,7 @@ beforeEach(() => {
   ghCalls = join(root, "gh-calls.log");
   claudeCalls = join(root, "claude-calls.log");
   mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(join(root, ".env"), "GITHUB_TOKEN=test-github-token\n"); // the one token pr-brain requires (AG-039)
   mkdirSync(bin, { recursive: true });
   mkdirSync(repo, { recursive: true });
   // An explicit repo list, so the stand-in remote need not be github.com.

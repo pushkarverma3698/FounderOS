@@ -8,9 +8,8 @@
  * `agy`, `curl` and `timeout` stubs that record what they were given. Nothing here
  * touches the network or spends anything.
  *
- * DEFAULT_REPOS is rewritten in the installed COPY (the daemon no longer honours an
- * ISSUE_REPOS override, which is the point of the change), so a test can sweep one
- * repo without editing the real file.
+ * The repo list reaches the installed copy through DISPATCH_REPOS_NODE (a stand-in that prints `repos`), so a
+ * test can sweep one repo without editing the real file or carrying a second list.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -67,6 +66,8 @@ export const ENGINE_LABELS = ["engine:agy", "engine:claude"] as const;
 
 /** Synthetic credentials, assembled at run time so no scanner sees a contiguous key in the source. */
 export const FAKE_GEMINI_KEY = "AI" + "za" + "Sy" + "k".repeat(33);
+/** The bot's GitHub token, assembled at run time like the others. Every daemon must pass it on as GH_TOKEN (AG-039). */
+export const FAKE_GITHUB_TOKEN = "gh" + "p_" + "G".repeat(36);
 export const FAKE_TELEGRAM_TOKEN = "987654321" + ":" + "T".repeat(35);
 /** A Claude Code OAuth token as `claude setup-token` prints it, assembled so no scanner sees a contiguous one. */
 export const FAKE_CLAUDE_TOKEN = "sk-ant-" + "oat01-" + "C".repeat(40);
@@ -182,6 +183,7 @@ export class DispatchSandbox {
 
   private readonly ghState: string;
   private readonly ghCalls: string;
+  private readonly ghEnvLog: string;
   private readonly agyCalls: string;
   private readonly agyEnvLog: string;
   private readonly agyPromptLog: string;
@@ -205,6 +207,7 @@ export class DispatchSandbox {
     this.envFile = join(this.root, "founderos.env");
     this.ghState = join(this.root, "gh-state.json");
     this.ghCalls = join(this.root, "gh-calls.log");
+    this.ghEnvLog = join(this.root, "gh-env.log");
     this.agyCalls = join(this.root, "agy-calls.log");
     this.agyEnvLog = join(this.root, "agy-env.log");
     this.agyPromptLog = join(this.root, "agy-prompts.log");
@@ -223,7 +226,7 @@ export class DispatchSandbox {
     this.installTools();
     writeFileSync(
       this.envFile,
-      `TELEGRAM_BOT_TOKEN=${FAKE_TELEGRAM_TOKEN}\nTELEGRAM_CHAT_ID=1\nGOOGLE_GENERATIVE_AI_API_KEY=${FAKE_GEMINI_KEY}\n`,
+      `TELEGRAM_BOT_TOKEN=${FAKE_TELEGRAM_TOKEN}\nTELEGRAM_CHAT_ID=1\nGOOGLE_GENERATIVE_AI_API_KEY=${FAKE_GEMINI_KEY}\nGITHUB_TOKEN=${FAKE_GITHUB_TOKEN}\n`,
     );
 
     this.touchEnvFile(Math.floor(Date.now() / 1000) - 3600);
@@ -253,11 +256,12 @@ export class DispatchSandbox {
   }
 
   private installDaemon(): void {
-    const src = readFileSync(join(DEPLOY, "agent-dispatch"), "utf8");
-    const line = /^DEFAULT_REPOS=\(.*\)$/m;
-    if (!line.test(src)) throw new Error("deploy/agent-dispatch no longer declares DEFAULT_REPOS=( … ) on one line");
-    const list = this.repos.map((r) => `"${r}"`).join(" ");
-    writeFileSync(join(this.installDir, "agent-dispatch"), src.replace(line, `DEFAULT_REPOS=(${list})`), { mode: 0o755 });
+    // The daemon asks the allowlist for its repo list (dispatch_repos_print); the sandbox answers with this.repos
+    // through a stand-in for node, so a test can narrow the sweep without a copy of the list in the installed script.
+    copyFileSync(join(DEPLOY, "agent-dispatch"), join(this.installDir, "agent-dispatch"));
+    chmodSync(join(this.installDir, "agent-dispatch"), 0o755);
+    const printer = join(this.root, "repo-list-node");
+    writeFileSync(printer, `#!/usr/bin/env bash\nprintf '%s\\n' ${this.repos.map((r) => `'${r}'`).join(" ")}\n`, { mode: 0o755 });
     mkdirSync(join(this.installDir, "lib"), { recursive: true });
     for (const f of readdirSync(join(DEPLOY, "lib")).filter((n) => n.endsWith(".sh"))) {
       copyFileSync(join(DEPLOY, "lib", f), join(this.installDir, "lib", f));
@@ -285,7 +289,8 @@ export class DispatchSandbox {
 
   private installStubs(): void {
     // gh: the stateful fake, addressed by absolute path so PATH does not matter.
-    this.stub("gh", `exec bash "${FAKE_GH}" "$@"`);
+    // It records the GH_TOKEN every call was made with (AG-039: one token, read from the env file).
+    this.stub("gh", `printf '%s\\n' "\${GH_TOKEN-<unset>}" >>"${this.ghEnvLog}"\nexec bash "${FAKE_GH}" "$@"`);
     // sudo -u antigravity -- bash -lc SCRIPT _ args  ->  run it as ourselves, keeping stdin.
     this.stub("sudo", `printf '%s\\n' "$*" >>"$SUDO_ARGV"\nwhile [ "$1" != "--" ]; do shift; done; shift; exec "$@"`);
     this.stub("timeout", `shift; exec "$@"`);
@@ -293,6 +298,8 @@ export class DispatchSandbox {
       "agy",
       `${this.hookPath()}echo run >>"$AGY_CALLS"
 printf '%s\\n' "\${GEMINI_API_KEY-<unset>}" >>"$AGY_ENV_LOG"
+printf '%s\\n' "\${GH_TOKEN-<unset>}" >>"$AGY_ENV_LOG.gh"
+env | grep '^GIT_CONFIG_VALUE_' >>"$AGY_ENV_LOG.git" || true
 model=""
 while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; --model) model="$2"; shift 2 ;; *) shift ;; esac; done
 printf '%s\\n' "$model" >>"$AGY_CALLS.models"
@@ -311,6 +318,7 @@ exit "\${AGY_RC:-1}"`,
       "claude",
       `${this.hookPath()}echo run >>"$CLAUDE_CALLS"
 printf '%s\\n' "\${CLAUDE_CODE_OAUTH_TOKEN-<unset>}" >>"$CLAUDE_ENV_LOG"
+printf '%s\\n' "\${GH_TOKEN-<unset>}" >>"$CLAUDE_ENV_LOG.gh"
 printf '%s\\n' "$*" >>"$CLAUDE_ARGV_LOG"
 while [ $# -gt 0 ]; do case "$1" in -p) printf '%s\\n----\\n' "$2" >>"$CLAUDE_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
 [ -n "\${CLAUDE_HOOK:-}" ] && bash -c "$CLAUDE_HOOK"
@@ -575,6 +583,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         AGY_HOOK: opts.agyHook ?? "",
         AGY_SLEEP_AFTER: String(opts.agySleepAfter ?? 0),
         CURL_RC: String(opts.curlRc ?? 0),
+        DISPATCH_REPOS_ROOT: this.root,
+        DISPATCH_REPOS_NODE: join(this.root, "repo-list-node"),
         ...opts.env,
       },
       encoding: "utf8",
@@ -606,6 +616,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         GH_CALLS: this.ghCalls,
         SUDO_ARGV: this.sudoArgv,
         ...this.gitEnv(),
+        DISPATCH_REPOS_ROOT: this.root,
+        DISPATCH_REPOS_NODE: join(this.root, "repo-list-node"),
         ...opts.env,
       },
       encoding: "utf8",
@@ -615,7 +627,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   }
 
   /** The real deploy/agent-dispatch, in the repo layout (helpers in deploy/lib), with the same stubs. */
-  runInPlace(args: readonly string[]): TickResult {
+  runInPlace(args: readonly string[], env: Record<string, string> = {}): TickResult {
     const r = spawnSync("bash", [join(DEPLOY, "agent-dispatch"), ...args], {
       env: {
         TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
@@ -630,6 +642,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         SENDS: this.sends,
         AGY_CALLS: this.agyCalls,
         AGY_ENV_LOG: this.agyEnvLog,
+        ...env,
       },
       encoding: "utf8",
       timeout: 60_000,
@@ -687,6 +700,23 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   agyKeysSeen(): string[] {
     return existsSync(this.agyEnvLog) ? readFileSync(this.agyEnvLog, "utf8").split("\n").filter(Boolean) : [];
   }
+  /** The GH_TOKEN each fake gh call, fake agy run and fake claude run saw in its ENVIRONMENT. */
+  ghTokensSeen(): string[] {
+    return this.lines(this.ghEnvLog);
+  }
+  agyGhTokensSeen(): string[] {
+    return this.lines(`${this.agyEnvLog}.gh`);
+  }
+  claudeGhTokensSeen(): string[] {
+    return this.lines(`${this.claudeEnvLog}.gh`);
+  }
+  /** Every GIT_CONFIG_VALUE_n a fake agy run saw: the credential helper must be among them, the token must not. */
+  agyGitConfigSeen(): string[] {
+    return this.lines(`${this.agyEnvLog}.git`);
+  }
+  private lines(file: string): string[] {
+    return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+  }
   claudeRuns(): number {
     return existsSync(this.claudeCalls) ? readFileSync(this.claudeCalls, "utf8").split("\n").filter(Boolean).length : 0;
   }
@@ -735,7 +765,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     return join(this.wsBase, DispatchSandbox.dirName(slug));
   }
   clearCallLogs(): void {
-    for (const f of [this.ghCalls, this.sudoArgv, this.sends]) rmSync(f, { force: true });
+    for (const f of [this.ghCalls, this.ghEnvLog, this.sudoArgv, this.sends]) rmSync(f, { force: true });
   }
   statePath(name: string): string {
     return join(this.home, ".claude", name);
