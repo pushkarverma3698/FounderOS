@@ -49,6 +49,8 @@ interface Setup {
   noDeploy?: boolean;
   appAtMerge?: boolean;
   service?: string;
+  /** Oplify shape: beta goes into `production`, judged by the repo's deploy workflows. */
+  workflow?: { runs: unknown[]; noRequired?: boolean };
 }
 
 beforeEach(() => {
@@ -67,6 +69,7 @@ function run(o: Setup = {}): { status: number; result: string; calls: string[]; 
   git(seed, "checkout", "-q", "-b", "beta");
   if (!o.nothingNew) commit(seed, o.conflict ? "a.txt" : "b.txt", "beta change\n", "feat: the thing (#12)");
   git(seed, "checkout", "-q", "main");
+  if (o.workflow) git(seed, "branch", "production", "main");
   if (o.conflict) commit(seed, "a.txt", "main change\n", "fix: main side (#13)");
   git(dir, "clone", "-q", "--bare", seed, origin);
   betaSha = git(seed, "rev-parse", "beta");
@@ -89,7 +92,7 @@ function run(o: Setup = {}): { status: number; result: string; calls: string[]; 
   writeFileSync(
     join(dir, "runs.json"),
     JSON.stringify(
-      o.noDeploy ? [] : [{ headSha: mergeSha, status: "completed", conclusion: o.deployConclusion ?? "success", url: "https://gh/run/9" }],
+      o.workflow ? o.workflow.runs.map((r) => ({ headSha: mergeSha, url: "https://gh/run/5", ...(r as object) })) : o.noDeploy ? [] : [{ headSha: mergeSha, status: "completed", conclusion: o.deployConclusion ?? "success", url: "https://gh/run/9" }],
     ),
   );
   sh(
@@ -98,6 +101,7 @@ function run(o: Setup = {}): { status: number; result: string; calls: string[]; 
       `case "$*" in\n` +
       `  "api repos/"*) cat '${join(dir, "beta-now")}' ;;\n` +
       `  "pr create"*) printf '%s\\n' "$@" >'${join(dir, "create-args")}'; echo "https://github.com/${REPO}/pull/77" ;;\n` +
+      `  "pr checks"*"--required"*) ${o.workflow?.noRequired ? "echo '[]'" : `cat '${join(dir, "checks.json")}'`} ;;\n` +
       `  "pr checks"*) cat '${join(dir, "checks.json")}' ;;\n` +
       `  "pr merge"*) exit ${o.mergeRc ?? 0} ;;\n` +
       `  "pr view"*) cat '${join(dir, "merge-sha")}' ;;\n` +
@@ -108,7 +112,8 @@ function run(o: Setup = {}): { status: number; result: string; calls: string[]; 
 
   const resultFile = join(dir, "result");
   const lock = join(dir, "promote.lock");
-  const r = spawnSync("bash", [PROMOTE_RUN, "--repo", REPO, "--beta-sha", betaSha, "--result-file", resultFile], {
+  const extra = o.workflow ? ["--base", "production", "--deploy", "workflow"] : [];
+  const r = spawnSync("bash", [PROMOTE_RUN, "--repo", REPO, "--beta-sha", betaSha, "--result-file", resultFile, ...extra], {
     encoding: "utf8",
     env: {
       PATH: `${join(dir, "bin")}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
@@ -118,6 +123,7 @@ function run(o: Setup = {}): { status: number; result: string; calls: string[]; 
       PROMOTE_RUN_POLL: "0",
       PROMOTE_RUN_CHECKS_TIMEOUT: "1",
       PROMOTE_RUN_DEPLOY_TIMEOUT: "1",
+      PROMOTE_RUN_WORKFLOW_START: "1",
       PROMOTE_RUN_APP_DIR: app,
       PROMOTE_RUN_LOCK: lock,
       GIT_CONFIG_GLOBAL: "/dev/null",
@@ -255,6 +261,44 @@ describe("deploy/promote-run", () => {
 
     expect(r.status).toBe(1);
     expect(r.result).toMatch(/founderos is failed/);
+  });
+
+  describe("Oplify shape: --base production --deploy workflow", () => {
+    const green = { name: "Deploy API", status: "completed", conclusion: "success" };
+
+    it("opens the PR into production, merges, and reports the green workflows without a box check", () => {
+      const r = run({ workflow: { runs: [green] } });
+
+      expect(r.status, r.out).toBe(0);
+      expect(r.calls.find((c) => c.startsWith("gh pr create"))).toContain("--base production");
+      expect(r.createArgs).toContain("Promotes beta");
+      expect(r.createArgs).toContain("to production");
+      expect(r.result).toContain(`On prod: production ${mergeSha.slice(0, 7)}`);
+      expect(r.result).toContain("Deploy API");
+      expect(r.result).toContain("no box of ours");
+      expect(r.calls.find((c) => c.startsWith("gh run list"))).toContain("--branch production");
+    });
+
+    it("a repo with no required checks is judged on all its checks", () => {
+      const r = run({ workflow: { runs: [green], noRequired: true } });
+
+      expect(r.status, r.out).toBe(0);
+      expect(r.calls.some((c) => c.startsWith("gh pr checks") && !c.includes("--required"))).toBe(true);
+    });
+
+    it("no deploy workflow starting is a failure, never success", () => {
+      const r = run({ workflow: { runs: [] } });
+
+      expect(r.status).toBe(1);
+      expect(r.result).toMatch(/no workflow run started on production/);
+    });
+
+    it("a failed deploy workflow is named", () => {
+      const r = run({ workflow: { runs: [green, { name: "Deploy Worker", status: "completed", conclusion: "failure" }] } });
+
+      expect(r.status).toBe(1);
+      expect(r.result).toMatch(/Deploy Worker failure/);
+    });
   });
 
   it("a second run while the first is alive says since when and does nothing", () => {

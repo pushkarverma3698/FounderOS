@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { PROMOTE_REPO, planFromCompare, promoteCardText, promoteRequestLine, validatePromoteRequest } from "../../../src/tools/promote-plan.js";
+import { PROMOTE_TARGETS, promoteTargetByKey, PROMOTE_REPO, planFromCompare, promoteCardText, promoteRequestLine, validatePromoteRequest } from "../../../src/tools/promote-plan.js";
 
 const SHA = "a".repeat(40);
 
@@ -86,7 +86,25 @@ describe("promote request", () => {
   it("is one JSON line with the stage, the repo and the commit the founder saw", () => {
     const line = promoteRequestLine(` ${PROMOTE_REPO} `, SHA);
     expect(line.endsWith("\n")).toBe(true);
-    expect(JSON.parse(line)).toEqual({ repo: PROMOTE_REPO, stage: "promote", beta_sha: SHA });
+    expect(JSON.parse(line)).toEqual({ repo: PROMOTE_REPO, stage: "promote", beta_sha: SHA, base: "main", deploy: "box" });
+  });
+
+  it("Oplify repos promote beta into production and are checked by their deploy workflow", () => {
+    const api = PROMOTE_TARGETS["oplify-api"];
+    expect(JSON.parse(promoteRequestLine(api.repo, SHA))).toEqual({ repo: api.repo, stage: "promote", beta_sha: SHA, base: "production", deploy: "workflow" });
+    expect(validatePromoteRequest(PROMOTE_TARGETS["oplify-app"].repo, SHA)).toBeNull();
+  });
+
+  it("names resolve case-insensitively, empty means FounderOS, unknown is null", () => {
+    expect(promoteTargetByKey("")?.key).toBe("founderos");
+    expect(promoteTargetByKey(" Oplify-API ")?.target.base).toBe("production");
+    expect(promoteTargetByKey("hulda")).toBeNull();
+  });
+
+  it("the card names the branch it promotes into", () => {
+    const plan = planFromCompare(compare([merge(3, "Add carousel")]), SHA, "production");
+    expect(promoteCardText(plan!, "(oplify-api)")).toContain("Promote 1 PR (oplify-api) to prod?");
+    expect(promoteCardText(plan!)).toContain(`beta ${SHA.slice(0, 7)} into production`);
   });
 
   it("refuses another repo, a malformed repo and a sha that is not 40 hex", () => {

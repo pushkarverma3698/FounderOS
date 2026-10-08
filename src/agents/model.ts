@@ -15,6 +15,7 @@ import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
 import { geminiThinkingConfig } from "../core/gemini-thinking.js";
+import { modelMaxOutputTokens } from "../core/model-output-cap.js"; // AG-050: every model gets an output cap
 import { missingCredentialReason, noteWorkerModelChoice } from "./model-truth.js";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
@@ -318,7 +319,7 @@ function buildModel(
     return new ChatVertexAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxOutputTokens: modelMaxOutputTokens(),
       authOptions: { keyFilename: credsPath, projectId: project },
       location: process.env["GOOGLE_CLOUD_LOCATION"]?.trim() || "us-central1",
     });
@@ -334,9 +335,8 @@ function buildModel(
       apiKey,
       model: parsed.model,
       temperature,
-      maxRetries: 2,
-      // LOW unless GEMINI_THINKING_LEVEL says otherwise — see core/gemini-thinking.ts.
-      thinkingConfig: geminiThinkingConfig(),
+      maxRetries: 2, maxOutputTokens: modelMaxOutputTokens(),
+      thinkingConfig: geminiThinkingConfig(), // LOW unless GEMINI_THINKING_LEVEL says otherwise
     });
   }
 
@@ -348,7 +348,7 @@ function buildModel(
     return new ChatAnthropic({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       apiKey: process.env["ANTHROPIC_API_KEY"],
     });
   }
@@ -361,7 +361,7 @@ function buildModel(
     return new ChatOpenAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       apiKey: apiKey || "missing-openrouter-key",
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
     });
@@ -376,7 +376,7 @@ function buildModel(
     return new ChatOpenAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       // A local proxy authenticates by being local; the SDK still demands a value.
       apiKey: process.env["OMNIROUTER_API_KEY"] || "omnirouter-local",
       configuration: { baseURL: process.env["OMNIROUTER_BASE_URL"] || "http://127.0.0.1:20128/v1" },
@@ -387,7 +387,7 @@ function buildModel(
   return new ChatOpenAI({
     model: parsed.model,
     temperature,
-    maxRetries: 2,
+    maxRetries: 2, maxTokens: modelMaxOutputTokens(),
     ...(process.env["OPENAI_API_KEY"] ? { apiKey: process.env["OPENAI_API_KEY"] } : {}),
   });
 }

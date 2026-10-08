@@ -16,7 +16,10 @@
 # Any failure stops the run and names the step and the evidence. Nothing is retried and nothing is forced.
 # One promotion at a time: a second one finds the lock and says since when the first has run.
 #
-# Usage: promote-run --repo owner/name --beta-sha <40 hex> --result-file <path>
+# Usage: promote-run --repo owner/name --beta-sha <40 hex> --result-file <path> [--base main] [--deploy box|workflow]
+#   --base    the branch beta goes into (default main; the Oplify repos use production)
+#   --deploy  box (default): the Deploy workflow, then this box's checkout and service. workflow: the repo's own deploy
+#             workflow run on the merge commit, if one starts; no box of ours to check.
 # The result file holds the one thing job-run tells the founder: the "on prod" message on exit 0, the reason on
 # any other exit.
 #
@@ -28,22 +31,25 @@ set -uo pipefail
 
 case "${1:-}" in
   -h|--help)
-    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
 esac
 
-REPO="" BETA_SHA="" RESULT_FILE=""
+REPO="" BETA_SHA="" RESULT_FILE="" BASE=main DEPLOY=box
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO="${2:-}"; shift 2 ;;
     --beta-sha) BETA_SHA="${2:-}"; shift 2 ;;
     --result-file) RESULT_FILE="${2:-}"; shift 2 ;;
+    --base) BASE="${2:-}"; shift 2 ;;
+    --deploy) DEPLOY="${2:-}"; shift 2 ;;
     *) echo "promote-run: unknown argument: $1" >&2; exit 64 ;;
   esac
 done
-[[ "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ && "$BETA_SHA" =~ ^[0-9a-f]{40}$ && -n "$RESULT_FILE" ]] \
-  || { echo "promote-run: needs --repo owner/name --beta-sha <40 hex> --result-file <path>" >&2; exit 64; }
+[[ "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ && "$BETA_SHA" =~ ^[0-9a-f]{40}$ && -n "$RESULT_FILE" \
+  && "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$DEPLOY" =~ ^(box|workflow)$ ]] \
+  || { echo "promote-run: needs --repo owner/name --beta-sha <40 hex> --result-file <path> [--base branch] [--deploy box|workflow]" >&2; exit 64; }
 
 POLL="${PROMOTE_RUN_POLL:-20}"
 CHECKS_TIMEOUT="${PROMOTE_RUN_CHECKS_TIMEOUT:-1800}"
@@ -90,17 +96,17 @@ git clone --quiet --no-tags "$CLONE_URL" "$WORK/repo" >"$WORK/clone.log" 2>&1 \
 cd "$WORK/repo" || stop 1 "The clone vanished."
 git config user.name "founderos-promote"
 git config user.email "founderos-promote@users.noreply.github.com"
-git fetch --quiet origin main "$BETA_SHA" >"$WORK/fetch.log" 2>&1 \
-  || stop 1 "Could not fetch main and beta ${SHORT}: $(tail -n 2 "$WORK/fetch.log" | tr '\n' ' ')"
-git checkout --quiet -B "$BRANCH" origin/main || stop 1 "Could not branch from origin/main."
-if ! git merge --no-edit -m "chore: promote beta ${SHORT} to main" "$BETA_SHA" >"$WORK/merge.log" 2>&1; then
+git fetch --quiet origin "$BASE" "$BETA_SHA" >"$WORK/fetch.log" 2>&1 \
+  || stop 1 "Could not fetch ${BASE} and beta ${SHORT}: $(tail -n 2 "$WORK/fetch.log" | tr '\n' ' ')"
+git checkout --quiet -B "$BRANCH" "origin/${BASE}" || stop 1 "Could not branch from origin/${BASE}."
+if ! git merge --no-edit -m "chore: promote beta ${SHORT} to ${BASE}" "$BETA_SHA" >"$WORK/merge.log" 2>&1; then
   files="$(git diff --name-only --diff-filter=U | head -n 12 | tr '\n' ' ')"
-  stop 1 "Beta ${SHORT} does not merge into main. Conflicts in: ${files:-unknown}. Nothing was promoted; this needs a person to resolve."
+  stop 1 "Beta ${SHORT} does not merge into ${BASE}. Conflicts in: ${files:-unknown}. Nothing was promoted; this needs a person to resolve."
 fi
-if [[ -z "$(git diff --name-only origin/main HEAD)" ]]; then
-  stop 1 "Nothing to promote: beta ${SHORT} changes no file that main lacks."
+if [[ -z "$(git diff --name-only "origin/${BASE}" HEAD)" ]]; then
+  stop 1 "Nothing to promote: beta ${SHORT} changes no file that ${BASE} lacks."
 fi
-PRS="$(git log --format=%s origin/main..HEAD | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')"
+PRS="$(git log --format=%s "origin/${BASE}"..HEAD | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')"
 say "branch ${BRANCH} is ready; carrying: ${PRS:-no PR numbers}"
 
 # ------------------------------------------------------------------ 3. the PR, the checks, the merge
@@ -108,8 +114,8 @@ git push --quiet origin "$BRANCH" >"$WORK/push.log" 2>&1 \
   || stop 1 "Could not push ${BRANCH}: $(tail -n 2 "$WORK/push.log" | tr '\n' ' ')"
 HEAD_SHA="$(git rev-parse HEAD)"
 BODY="## What changed
-Promotes beta ${SHORT} to main. PRs carried: ${PRS:-none named}.
-Built by /promote as origin/main plus a merge of beta, so it cannot go BEHIND.
+Promotes beta ${SHORT} to ${BASE}. PRs carried: ${PRS:-none named}.
+Built by /promote as origin/${BASE} plus a merge of beta, so it cannot go BEHIND.
 
 ## How it was verified
 Each PR passed its own gate on beta. This PR runs the required checks on the merge result; the deploy and the box are checked after the merge.
@@ -120,7 +126,7 @@ Nothing beyond the above.
 Moves: A
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-PR_URL="$(gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "chore: promote beta ${SHORT} to main" --body "$BODY" 2>"$WORK/pr.log")"
+PR_URL="$(gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" --title "chore: promote beta ${SHORT} to ${BASE}" --body "$BODY" 2>"$WORK/pr.log")"
 PR="${PR_URL##*/}"
 [[ "$PR" =~ ^[0-9]+$ ]] || stop 1 "Could not open the promotion PR: $(tail -n 2 "$WORK/pr.log" | tr '\n' ' ')"
 say "opened PR #${PR}"
@@ -128,6 +134,10 @@ say "opened PR #${PR}"
 deadline=$(( $(date +%s) + CHECKS_TIMEOUT ))
 while :; do
   checks="$(gh pr checks "$PR" --repo "$REPO" --required --json name,bucket 2>/dev/null)"
+  # A repo whose production branch has no required checks (the Oplify repos) is judged on every check the PR has.
+  if [[ "$DEPLOY" == workflow && "$(jq 'length' <<<"$checks" 2>/dev/null)" != [1-9]* ]]; then
+    checks="$(gh pr checks "$PR" --repo "$REPO" --json name,bucket 2>/dev/null)"
+  fi
   failed="$(jq -r '[.[]? | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' <<<"$checks" 2>/dev/null)"
   [[ -z "$failed" ]] || stop 1 "Promotion PR #${PR} is red: ${failed}. Not merged; beta is untouched. ${PR_URL}"
   if jq -e 'length > 0 and all(.[]; .bucket == "pass")' <<<"$checks" >/dev/null 2>&1; then break; fi
@@ -143,9 +153,38 @@ MERGE_SHA="$(gh pr view "$PR" --repo "$REPO" --json mergeCommit --jq .mergeCommi
 say "merged #${PR} as ${MERGE_SHA:0:7}"
 
 # ------------------------------------------------------------------ 4. the deploy, then the box
+if [[ "$DEPLOY" == workflow ]]; then
+  # No box of ours to check: whatever deploy workflows the merge started are the evidence. None starting is not success.
+  WAIT_START="${PROMOTE_RUN_WORKFLOW_START:-240}"
+  start_deadline=$(( $(date +%s) + WAIT_START ))
+  deadline=$(( $(date +%s) + DEPLOY_TIMEOUT ))
+  while :; do
+    runs="$(gh run list --repo "$REPO" --branch "$BASE" --limit 20 --json name,headSha,status,conclusion,url 2>/dev/null \
+      | jq -c --arg s "$MERGE_SHA" '[.[]? | select(.headSha == $s)]' 2>/dev/null)"
+    n="$(jq 'length' <<<"$runs" 2>/dev/null)"; n="${n:-0}"
+    if [[ "$n" -gt 0 ]]; then
+      pending="$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")"
+      if [[ "$pending" -eq 0 ]]; then break; fi
+      [[ "$(date +%s)" -lt "$deadline" ]] \
+        || stop 1 "Merged to ${BASE} (${MERGE_SHA:0:7}) but ${pending} deploy workflow run(s) did not finish in $((DEPLOY_TIMEOUT / 60)) min. Prod may still run the old commit. ${PR_URL}"
+    else
+      [[ "$(date +%s)" -lt "$start_deadline" ]] \
+        || stop 1 "Merged to ${BASE} (${MERGE_SHA:0:7}) but no workflow run started on ${BASE} within $((WAIT_START / 60)) min. Nothing confirms a deploy: check it by hand. ${PR_URL}"
+    fi
+    sleep "$POLL"
+  done
+  bad="$(jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped") | "\(.name) \(.conclusion)"] | join(", ")' <<<"$runs")"
+  [[ -z "$bad" ]] || stop 1 "Merged to ${BASE} (${MERGE_SHA:0:7}) but a deploy workflow failed: ${bad}. Prod may still run the old commit. ${PR_URL}"
+  names="$(jq -r '[.[].name] | join(", ")' <<<"$runs")"
+  printf 'On prod: %s %s, workflows green (%s). Not checked: the running service (no box of ours).\nCarried: %s\n%s\n' \
+    "$BASE" "${MERGE_SHA:0:7}" "$names" "${PRS:-no PR numbers}" "$PR_URL" >"$RESULT_FILE"
+  say "done"
+  exit 0
+fi
+
 deadline=$(( $(date +%s) + DEPLOY_TIMEOUT ))
 while :; do
-  run="$(gh run list --repo "$REPO" --workflow Deploy --branch main --limit 10 --json headSha,status,conclusion,url 2>/dev/null \
+  run="$(gh run list --repo "$REPO" --workflow Deploy --branch "$BASE" --limit 10 --json headSha,status,conclusion,url 2>/dev/null \
     | jq -c --arg s "$MERGE_SHA" '[.[]? | select(.headSha == $s)] | first // empty' 2>/dev/null)"
   status="$(jq -r '.status // empty' <<<"$run" 2>/dev/null)"
   if [[ "$status" == completed ]]; then
