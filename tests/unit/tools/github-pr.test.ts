@@ -155,3 +155,22 @@ describe("github_read wrapper — list_prs state reaches the tool", () => {
     vi.doUnmock("../../../src/tools/github.js");
   });
 });
+
+/**
+ * Regression for the 2026-10-08 after-deploy probes. "What merged to beta today?" fell back to a gated shell
+ * `git log` because the contract said ref was for get_file only, and "is CI green on the open PRs?" still
+ * re-read every PR with get_pr because get_pr gave raw check runs and no verdict to agree with list_prs.
+ */
+describe("github_read contract — branch commits and one CI verdict", () => {
+  it("tells the model list_commits takes a branch ref", async () => {
+    vi.resetModules();
+    const { githubRead } = await import("../../../src/agents/agent-tools/engineering.js");
+    expect(githubRead.description).toMatch(/list_commits \([^)]*ref=/);
+  });
+
+  it("get_pr carries the same ci verdict list_prs gives", async () => {
+    const { octokit } = fakeOctokit();
+    const res = await getPullRequest(octokit, "o", "r", 79);
+    expect(res.data).toMatchObject({ ci: "green" });
+  });
+});

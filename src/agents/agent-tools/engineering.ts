@@ -199,8 +199,8 @@ export const githubRead = tool(
     name: "github_read",
     description:
       "Read from GitHub (no approval needed). Actions: list_repos (optional owner), get_readme (owner+repo), get_stats, " +
-      "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo, optional since=ISO date → commits after it; a full page says more exist), " +
-      "list_prs (owner+repo → open PRs, each with ci green/red/pending and failing check names; state='merged' + since=ISO → PRs merged after it with merged_at and merge_sha; " +
+      "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo, optional ref=branch e.g. 'beta' (default: the repo's default branch), since=ISO date → commits after it; a full page says more exist), " +
+      "list_prs (owner+repo → open PRs, each with ci green/red/pending and failing check names, the final verdict: do not re-check CI with get_pr; state='merged' + since=ISO → PRs merged after it with merged_at and merge_sha; " +
       "use it for 'what merged/shipped' and 'is CI green on the open PRs'), get_pr (owner+repo+number → state, draft, CI checks, diff, reviews, latest comments " +
       "including pr-brain's GATE verdicts; use it for any 'review / is PR N ready' question). " +
       "get_file (path, optional ref; defaults to FounderOS; first 400 lines numbered, with a truncated marker), search_code (query; up to 20 path:line hits in FounderOS). " +
@@ -213,7 +213,7 @@ export const githubRead = tool(
       since: z.string().optional().nullable().describe("ISO date, for list_commits and list_prs state=merged: only items after it"),
       state: z.enum(["open", "merged"]).optional().nullable().describe("For list_prs: open (default, each with a CI verdict) or merged"),
       path: z.string().optional().nullable().describe("File path, for get_file"),
-      ref: z.string().optional().nullable().describe("Branch, tag or commit, for get_file"),
+      ref: z.string().optional().nullable().describe("Branch, tag or commit, for get_file and list_commits"),
       query: z.string().optional().nullable().describe("Search terms, for search_code"),
     }),
   },
