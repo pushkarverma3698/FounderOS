@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { buildWelcomeMessage, buildRestartMessage } from "../../../src/gateway/capability-message.js";
 
 /** Files that call `bot.command(...)`: the transport, and the feature modules whose registration it delegates to. */
-const COMMAND_SOURCES = ["telegram.ts", "goal-commands.ts", "now-command.ts"];
+const COMMAND_SOURCES = ["telegram.ts", "goal-commands.ts", "now-command.ts", "promote-command.ts"];
 
 /** The commands actually wired to a handler, read from those files themselves. */
 function registeredCommands(): Set<string> {

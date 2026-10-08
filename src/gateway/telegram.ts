@@ -10,7 +10,6 @@
  * Thread id = `turicks:{chatId}` — stable per chat so approvals resume
  * the exact paused mission.
  */
-
 import { Bot, type Context } from "grammy";
 import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
@@ -34,6 +33,7 @@ import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
 import { registerGoalCommands } from "./goal-commands.js";
+import { registerPromoteCommand } from "./promote-command.js";
 import { handleTask, handleRepoChoice, handleRepoReply, lookupQueuedDuplicate } from "./task-command.js";
 import { handleEngine } from "./engine-command.js";
 import { handleReview } from "./review-command.js";
@@ -249,7 +249,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("gaps", (ctx: Context) => handleGaps(ctx));
   bot.command("wife_gaps", (ctx: Context) => handleGaps(withForcedProfileToken(ctx, "wife")));
   bot.command("wife_commands", (ctx: Context) => handleWifeCommands(ctx)); // the wife_ aliases are out of the ☰ menu
-  registerGoalCommands(bot, access); // /goal, /goals and their buttons: owner-only; before the catch-all handlers below
+  registerGoalCommands(bot, access); registerPromoteCommand(bot, access); // /goal, /goals, /promote and their buttons: owner-only; before the catch-all handlers below
 
   bot.on("message:text", async (ctx: Context) => {
     // First, before anything logs or interprets the text: a pending /login is waiting for a pasted code or token.

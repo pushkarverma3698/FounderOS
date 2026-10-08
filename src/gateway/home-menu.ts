@@ -117,6 +117,7 @@ function buildText(): string {
     `🔹 <code>/review</code> — step 6 on or off, and which models review and write; <code>/review off</code> pauses it\n\n` +
     `<b>The other two:</b>\n` +
     `🔹 <code>/tasks</code> — what the loop is doing right now, and what needs you\n` +
+    `🔹 <code>/promote</code> — put beta on prod: I list what goes, you tap once, I merge, wait for the deploy and check it\n` +
     `🔹 <code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
     `<b>Repos it can work in:</b>\n` +
     DISPATCH_REPO_ALLOWLIST.map((slug) => `· ${labelForRepo(slug)}`).join("\n") +
