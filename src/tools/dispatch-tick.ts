@@ -36,6 +36,7 @@
 
 import { connect } from "node:net";
 import { childLogger } from "../infra/logger.js";
+import { promoteRequestLine, validatePromoteRequest } from "./promote-plan.js";
 
 const log = childLogger({ module: "tool:dispatch-tick" });
 
@@ -119,6 +120,29 @@ export async function startDispatchJob(
   } catch (err) {
     const reason = (err as Error).message;
     log.warn({ socketPath, issueNumber, repo: repoSlug, stage, err: reason }, "could not start the job");
+    return { status: "failed", reason };
+  }
+}
+
+/**
+ * Start a promotion (beta -> main -> prod) now: the same socket, `stage: promote`, no issue. The line carries the beta
+ * commit the founder approved so the job refuses to promote a head he never saw. Never throws; inert off the VPS.
+ */
+export async function startPromoteJob(repo: string, betaSha: string, send: JobSender = socketSender): Promise<StartJobResult> {
+  if (!process.env["AGENT_DISPATCH_BIN"]?.trim()) return { status: "inert" };
+  const problem = validatePromoteRequest(repo, betaSha);
+  if (problem) {
+    log.warn({ repo, problem }, "refusing to start a promotion");
+    return { status: "failed", reason: problem };
+  }
+  const socketPath = jobSocketPath();
+  try {
+    await send(socketPath, promoteRequestLine(repo, betaSha));
+    log.info({ socketPath, repo: repo.trim(), betaSha }, "handed the promotion to fos-job");
+    return { status: "started" };
+  } catch (err) {
+    const reason = (err as Error).message;
+    log.warn({ socketPath, repo: repo.trim(), err: reason }, "could not start the promotion");
     return { status: "failed", reason };
   }
 }

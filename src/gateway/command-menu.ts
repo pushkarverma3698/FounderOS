@@ -252,6 +252,7 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     description: "Which coding CLI /task uses by default. engine claude or engine agy switches it",
     group: "engineering",
   },
+  { command: "promote", description: "Put beta on prod: lists what is going, one tap, then I merge, wait for the deploy and check it", group: "engineering" },
   { command: "review", description: "Automatic PR review on or off, and which models review and write. review off pauses it", group: "engineering" },
   {
     command: "login",

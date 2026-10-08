@@ -34,11 +34,12 @@ import { fileURLToPath } from "node:url";
 
 const DEPLOY = fileURLToPath(new URL("../../../deploy/", import.meta.url));
 const SYNC = join(DEPLOY, "sync-daemons.sh");
-const EXECUTABLES = ["agent-dispatch", "job-run", "pr-brain", "onboard-repo.sh"] as const;
+const EXECUTABLES = ["agent-dispatch", "job-run", "promote-run", "pr-brain", "onboard-repo.sh"] as const;
 /** Where each executable lives in the repo, relative to deploy/. */
 const SOURCE_OF: Record<(typeof EXECUTABLES)[number], string> = {
   "agent-dispatch": "agent-dispatch",
   "job-run": "job-run",
+  "promote-run": "promote-run",
   "pr-brain": "vps-daemons/pr-brain",
   "onboard-repo.sh": "onboard-repo.sh",
 };

@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# promote-run — put beta on prod: the promotion PR, green CI, the merge, the deploy, the check.
+#
+# deploy/job-run starts it for a {"stage":"promote","beta_sha":"<40 hex>"} request that the founder approved from
+# the /promote card in Telegram. It does what the founder did by hand every time (docs/antigravity BRANCHING-STRATEGY,
+# "promotion"):
+#
+#   1. refuse unless beta's head is exactly the commit on the card the founder tapped
+#   2. build chore/promote-beta-<sha7> as origin/main + a merge of that commit (beta cannot take main under its
+#      protection rules, so a direct beta -> main PR goes BEHIND whenever main has a merge commit beta lacks)
+#   3. open the PR to main, wait for its required checks, merge it with --merge (never --squash: a squash strands
+#      the main -> beta sync)
+#   4. wait for the Deploy workflow on the merge commit, then check the box: the app checkout is at that commit and
+#      the service is active
+#
+# Any failure stops the run and names the step and the evidence. Nothing is retried and nothing is forced.
+# One promotion at a time: a second one finds the lock and says since when the first has run.
+#
+# Usage: promote-run --repo owner/name --beta-sha <40 hex> --result-file <path>
+# The result file holds the one thing job-run tells the founder: the "on prod" message on exit 0, the reason on
+# any other exit.
+#
+# Env (tests): PROMOTE_RUN_CLONE_URL (default https://github.com/<repo>.git), PROMOTE_RUN_POLL (seconds between polls,
+#   default 20), PROMOTE_RUN_CHECKS_TIMEOUT (default 1800), PROMOTE_RUN_DEPLOY_TIMEOUT (default 1500),
+#   PROMOTE_RUN_APP_DIR (default /opt/founderos), PROMOTE_RUN_SERVICE (default founderos), PROMOTE_RUN_LOCK.
+
+set -uo pipefail
+
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+REPO="" BETA_SHA="" RESULT_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) REPO="${2:-}"; shift 2 ;;
+    --beta-sha) BETA_SHA="${2:-}"; shift 2 ;;
+    --result-file) RESULT_FILE="${2:-}"; shift 2 ;;
+    *) echo "promote-run: unknown argument: $1" >&2; exit 64 ;;
+  esac
+done
+[[ "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ && "$BETA_SHA" =~ ^[0-9a-f]{40}$ && -n "$RESULT_FILE" ]] \
+  || { echo "promote-run: needs --repo owner/name --beta-sha <40 hex> --result-file <path>" >&2; exit 64; }
+
+POLL="${PROMOTE_RUN_POLL:-20}"
+CHECKS_TIMEOUT="${PROMOTE_RUN_CHECKS_TIMEOUT:-1800}"
+DEPLOY_TIMEOUT="${PROMOTE_RUN_DEPLOY_TIMEOUT:-1500}"
+APP_DIR="${PROMOTE_RUN_APP_DIR:-/opt/founderos}"
+SERVICE="${PROMOTE_RUN_SERVICE:-founderos}"
+CLONE_URL="${PROMOTE_RUN_CLONE_URL:-https://github.com/${REPO}.git}"
+SHORT="${BETA_SHA:0:7}"
+BRANCH="chore/promote-beta-${SHORT}"
+
+say() { printf '%s promote-run: %s\n' "$(date +%H:%M:%S)" "$*"; }
+# stop N REASON: the reason is the founder's message, so it carries its own evidence.
+stop() { say "STOPPED: $2"; printf '%s\n' "$2" >"$RESULT_FILE"; exit "$1"; }
+
+# ------------------------------------------------------------------ one promotion at a time
+# A lock directory, not flock: macOS has none, and the owner's pid tells a live run from a dead one.
+LOCK="${PROMOTE_RUN_LOCK:-$HOME/.claude/promote.lock}"
+mkdir -p "$(dirname "$LOCK")" 2>/dev/null
+if ! mkdir "$LOCK" 2>/dev/null; then
+  owner="$(cat "$LOCK/pid" 2>/dev/null)"
+  if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+    stop 75 "Already promoting since $(cat "$LOCK/since" 2>/dev/null || echo 'a few minutes ago'). Wait for that one to report."
+  fi
+  rm -rf "$LOCK"   # its owner died without cleaning up
+  mkdir "$LOCK" 2>/dev/null || stop 75 "Could not take the promotion lock at ${LOCK}."
+fi
+printf '%s\n' "$$" >"$LOCK/pid"
+date -u +%H:%MZ >"$LOCK/since"
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/promote-run.XXXXXX")"
+trap 'rm -rf "$WORK" "$LOCK"' EXIT
+
+# ------------------------------------------------------------------ 1. beta is the commit the founder saw
+live_beta="$(gh api "repos/${REPO}/git/ref/heads/beta" --jq .object.sha 2>/dev/null)"
+[[ "$live_beta" =~ ^[0-9a-f]{40}$ ]] || stop 1 "Could not read beta's head from GitHub (got: ${live_beta:-nothing}). Nothing was promoted."
+if [[ "$live_beta" != "$BETA_SHA" ]]; then
+  stop 1 "Beta moved: you approved ${SHORT}, beta is now ${live_beta:0:7}. Nothing was promoted. Send /promote again to see what changed."
+fi
+
+# ------------------------------------------------------------------ 2. main + beta, as a merge commit
+say "cloning ${REPO}"
+git clone --quiet --no-tags "$CLONE_URL" "$WORK/repo" >"$WORK/clone.log" 2>&1 \
+  || stop 1 "Could not clone ${REPO}: $(tail -n 2 "$WORK/clone.log" | tr '\n' ' ')"
+cd "$WORK/repo" || stop 1 "The clone vanished."
+git config user.name "founderos-promote"
+git config user.email "founderos-promote@users.noreply.github.com"
+git fetch --quiet origin main "$BETA_SHA" >"$WORK/fetch.log" 2>&1 \
+  || stop 1 "Could not fetch main and beta ${SHORT}: $(tail -n 2 "$WORK/fetch.log" | tr '\n' ' ')"
+git checkout --quiet -B "$BRANCH" origin/main || stop 1 "Could not branch from origin/main."
+if ! git merge --no-edit -m "chore: promote beta ${SHORT} to main" "$BETA_SHA" >"$WORK/merge.log" 2>&1; then
+  files="$(git diff --name-only --diff-filter=U | head -n 12 | tr '\n' ' ')"
+  stop 1 "Beta ${SHORT} does not merge into main. Conflicts in: ${files:-unknown}. Nothing was promoted; this needs a person to resolve."
+fi
+if [[ -z "$(git diff --name-only origin/main HEAD)" ]]; then
+  stop 1 "Nothing to promote: beta ${SHORT} changes no file that main lacks."
+fi
+PRS="$(git log --format=%s origin/main..HEAD | grep -oE '#[0-9]+' | sort -u | tr '\n' ' ')"
+say "branch ${BRANCH} is ready; carrying: ${PRS:-no PR numbers}"
+
+# ------------------------------------------------------------------ 3. the PR, the checks, the merge
+git push --quiet origin "$BRANCH" >"$WORK/push.log" 2>&1 \
+  || stop 1 "Could not push ${BRANCH}: $(tail -n 2 "$WORK/push.log" | tr '\n' ' ')"
+HEAD_SHA="$(git rev-parse HEAD)"
+BODY="## What changed
+Promotes beta ${SHORT} to main. PRs carried: ${PRS:-none named}.
+Built by /promote as origin/main plus a merge of beta, so it cannot go BEHIND.
+
+## How it was verified
+Each PR passed its own gate on beta. This PR runs the required checks on the merge result; the deploy and the box are checked after the merge.
+
+## NOT VERIFIED
+Nothing beyond the above.
+
+Moves: A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+PR_URL="$(gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "chore: promote beta ${SHORT} to main" --body "$BODY" 2>"$WORK/pr.log")"
+PR="${PR_URL##*/}"
+[[ "$PR" =~ ^[0-9]+$ ]] || stop 1 "Could not open the promotion PR: $(tail -n 2 "$WORK/pr.log" | tr '\n' ' ')"
+say "opened PR #${PR}"
+
+deadline=$(( $(date +%s) + CHECKS_TIMEOUT ))
+while :; do
+  checks="$(gh pr checks "$PR" --repo "$REPO" --required --json name,bucket 2>/dev/null)"
+  failed="$(jq -r '[.[]? | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' <<<"$checks" 2>/dev/null)"
+  [[ -z "$failed" ]] || stop 1 "Promotion PR #${PR} is red: ${failed}. Not merged; beta is untouched. ${PR_URL}"
+  if jq -e 'length > 0 and all(.[]; .bucket == "pass")' <<<"$checks" >/dev/null 2>&1; then break; fi
+  [[ "$(date +%s)" -lt "$deadline" ]] || stop 1 "Promotion PR #${PR}: required checks did not finish in $((CHECKS_TIMEOUT / 60)) min. Not merged. ${PR_URL}"
+  sleep "$POLL"
+done
+say "required checks green on #${PR}"
+
+gh pr merge "$PR" --repo "$REPO" --merge --match-head-commit "$HEAD_SHA" >"$WORK/merge-pr.log" 2>&1 \
+  || stop 1 "GitHub refused to merge #${PR}: $(tail -n 2 "$WORK/merge-pr.log" | tr '\n' ' ') ${PR_URL}"
+MERGE_SHA="$(gh pr view "$PR" --repo "$REPO" --json mergeCommit --jq .mergeCommit.oid 2>/dev/null)"
+[[ "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]] || stop 1 "Merged #${PR} but could not read the merge commit. Check the Deploy run by hand."
+say "merged #${PR} as ${MERGE_SHA:0:7}"
+
+# ------------------------------------------------------------------ 4. the deploy, then the box
+deadline=$(( $(date +%s) + DEPLOY_TIMEOUT ))
+while :; do
+  run="$(gh run list --repo "$REPO" --workflow Deploy --branch main --limit 10 --json headSha,status,conclusion,url 2>/dev/null \
+    | jq -c --arg s "$MERGE_SHA" '[.[]? | select(.headSha == $s)] | first // empty' 2>/dev/null)"
+  status="$(jq -r '.status // empty' <<<"$run" 2>/dev/null)"
+  if [[ "$status" == completed ]]; then
+    conclusion="$(jq -r '.conclusion // empty' <<<"$run")"
+    [[ "$conclusion" == success ]] \
+      || stop 1 "Merged to main (${MERGE_SHA:0:7}) but the Deploy workflow ended ${conclusion}: $(jq -r '.url' <<<"$run"). Prod may still run the old commit."
+    break
+  fi
+  [[ "$(date +%s)" -lt "$deadline" ]] \
+    || stop 1 "Merged to main (${MERGE_SHA:0:7}) but the Deploy workflow did not finish in $((DEPLOY_TIMEOUT / 60)) min (status: ${status:-not started}). Prod may still run the old commit."
+  sleep "$POLL"
+done
+
+box_sha="$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null)"
+active="$(systemctl is-active "$SERVICE" 2>/dev/null)"
+if [[ "$box_sha" != "$MERGE_SHA" || "$active" != active ]]; then
+  stop 1 "Deploy succeeded but the box disagrees: ${APP_DIR} is at ${box_sha:0:7} (want ${MERGE_SHA:0:7}), ${SERVICE} is ${active:-unknown}."
+fi
+
+printf 'On prod: main %s, deploy green, %s active.\nCarried: %s\n%s\n' \
+  "${MERGE_SHA:0:7}" "$SERVICE" "${PRS:-no PR numbers}" "$PR_URL" >"$RESULT_FILE"
+say "done"
+exit 0
