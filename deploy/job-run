@@ -56,10 +56,10 @@ find "$HOME/.claude/jobs" -name 'job-*.log' -mtime +14 -delete 2>/dev/null
 
 # redact_secrets: everything that leaves the box passes through it (the log tail can hold a rejected key).
 for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
-  [[ -f "$_lib_dir/down-state.sh" ]] && { . "$_lib_dir/down-state.sh"; [[ -f "$_lib_dir/tg-quiet.sh" ]] && . "$_lib_dir/tg-quiet.sh"; break; }
+  [[ -f "$_lib_dir/down-state.sh" ]] && { . "$_lib_dir/down-state.sh"; [[ -f "$_lib_dir/tg-quiet.sh" ]] && . "$_lib_dir/tg-quiet.sh"; [[ -f "$_lib_dir/gh-token.sh" ]] && . "$_lib_dir/gh-token.sh"; break; }
 done
-if ! declare -F redact_secrets >/dev/null; then
-  echo "job-run: FATAL: lib/down-state.sh not found next to $SELF_PATH; deploy/sync-daemons.sh ships it" >&2
+if ! declare -F redact_secrets >/dev/null || ! declare -F gh_token_load >/dev/null; then
+  echo "job-run: FATAL: lib/down-state.sh or lib/gh-token.sh not found next to $SELF_PATH; deploy/sync-daemons.sh ships them" >&2
   exit 1
 fi
 
@@ -181,6 +181,15 @@ cron_env pr-brain   # PR_BRAIN_MODELS, PR_BRAIN_ROOT, PR_BRAIN_MERGE live on its
 # a missing PR_BRAIN_MERGE must never mean "merge".
 export PR_BRAIN_MERGE="${PR_BRAIN_MERGE:-0}"
 export AGENT_DISPATCH_ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-$ENV_FILE}" PR_BRAIN_ENV_FILE="${PR_BRAIN_ENV_FILE:-$ENV_FILE}"
+
+# The bot's one GitHub token (AG-039), for this script's own gh calls and, inherited, for both daemons. A job with no
+# token fails here, out loud, instead of every daemon discovering it separately.
+if gh_token_load "$AGENT_DISPATCH_ENV_FILE"; then
+  REDACT_LITERALS+=("$GH_TOKEN")
+else
+  unset GH_TOKEN
+  fail 1 "GITHUB_TOKEN is not set in ${AGENT_DISPATCH_ENV_FILE}: add GITHUB_TOKEN=<the bot's token> to that file"
+fi
 
 # ------------------------------------------------------------------ the run
 PHASE="agent-dispatch (${STAGE})"

@@ -10,7 +10,7 @@
  *
  * These run the real script against the shared dispatch sandbox (a stateful `gh`
  * and stub sudo/agy/curl). The sandbox installs the daemon in the deployed layout
- * with DEFAULT_REPOS narrowed to one repo: the daemon reads no other list now.
+ * with the repo list narrowed to one repo (DISPATCH_REPOS_NODE): the daemon reads no other list.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";

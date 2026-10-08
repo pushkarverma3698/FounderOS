@@ -39,6 +39,7 @@ import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.j
 import { prepareDispatchBrief, type PreparedBrief } from "./dispatch-brief-repair.js";
 import { checkDispatchBrief, type ContentsClient } from "./dispatch-brief-check.js";
 import { filedBody, filedLabels } from "./dispatch-spec-intake.js";
+import { checkRepoReach } from "./repo-reach.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
@@ -308,9 +309,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
     // Refused, not defaulted: a word that is not an engine must not send work to a CLI nobody picked.
     const named = args["engine"];
     const engine = named === undefined || named === null || named === "" ? readDefaultEngine() : parseEngine(named);
-    if (!engine) {
-      return { success: false, error: `engine "${String(named)}" is not one I can run. Use ${ENGINES.join(" or ")}.` };
-    }
+    if (!engine) return { success: false, error: `engine "${String(named)}" is not one I can run. Use ${ENGINES.join(" or ")}.` };
 
     let owner: string;
     let repo: string;
@@ -326,6 +325,8 @@ export const dispatchAntigravityTool: UnifiedTool = {
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
+    const reach = await checkRepoReach({ owner, repo }, octokit); // AG-039: refused in words before issues.create
+    if (!reach.ok) return { success: false, error: reach.message };
 
     // Exactly one engine label: an issue carrying both is ambiguous to the daemon, which then falls back to the default.
     const labels = filedLabels([AGENT_READY_LABEL, ANTIGRAVITY_LABEL, engineLabel(engine)]);

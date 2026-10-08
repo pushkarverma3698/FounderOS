@@ -41,9 +41,13 @@
 #                                   # issue runs no sweep of other issues (release_stale_claims, redispatch_unresolved_reviews)
 #                                   # and no quiet-hours skip: the founder asked for it now.
 #
-# Repos: DEFAULT_REPOS below is the ONLY list this daemon reads. ISSUE_REPOS / ISSUE_REPO in the
-# environment are ignored, with one warning per tick: a list living in the crontab is invisible to CI.
+# Repos: DISPATCH_REPO_ALLOWLIST in src/tools/dispatch-repos.ts is the ONLY list, and this daemon asks it
+# (lib/dispatch-repos.sh runs scripts/print-dispatch-repos.ts in the deployed checkout). ISSUE_REPOS / ISSUE_REPO in
+# the environment are ignored, with one warning per tick: a list living in the crontab is invisible to CI.
 # Add a repo with `pnpm repo:add <owner/repo>` locally, then `~/bin/onboard-repo.sh <owner/repo>` here.
+#
+# GitHub: ONE token, GITHUB_TOKEN in the env file below, exported as GH_TOKEN for every gh and git call and passed to the
+# antigravity shell on stdin (lib/gh-token.sh). There is no per-user `gh auth login` behind it.
 #
 # Config (env):
 #   AGENT_DISPATCH_WORKSPACE    default: /opt/agy-workspace/founderos (antigravity-owned)
@@ -104,23 +108,16 @@ AGENT_BRIEF_HEADINGS=(
   "Acceptance criteria"
 )
 
-# MUST stay in sync with DISPATCH_REPO_ALLOWLIST in src/tools/dispatch-repos.ts.
-# A repo the founder can dispatch TO but this daemon never sweeps is a silent dead
-# end: /task files the issue, the approval card says it worked, and nothing ever
-# claims it. That was live for House-of-Hulda-Website-frontend — allowlisted,
-# advertised in /task's own usage text, and absent from this list, so every issue
-# filed against it would have sat at agent:ready forever. Enforced now by
-# tests/unit/tools/dispatch-repo-serviceability.test.ts, which reads this array.
-# Keep it on ONE line in this format: `pnpm repo:add` edits it and that test parses it.
-DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend" "pushkarverma3698/fos-journey-sandbox")
-# This is the ONLY list the daemon reads. ISSUE_REPOS / ISSUE_REPO used to override it from the
-# crontab line, a registry CI cannot see: the crontab kept sweeping the repos it named after the
-# script had moved on. They are ignored now, with one warning per tick (see below).
-DISPATCH_REPOS=("${DEFAULT_REPOS[@]}")
+# The repo list is DISPATCH_REPO_ALLOWLIST (src/tools/dispatch-repos.ts), read at startup by dispatch_repos_print
+# (deploy/lib/dispatch-repos.sh). There is no copy here. It used to be one: a repo added to the TypeScript list and not
+# to the bash one was a /task that filed an issue nothing would ever claim.
+# ISSUE_REPOS / ISSUE_REPO used to override it from the crontab line, a registry CI cannot see: the crontab kept
+# sweeping the repos it named after the script had moved on. They are ignored now, with one warning per tick (see below).
+DISPATCH_REPOS=()
 LEGACY_REPO_VARS=""
 [[ -n "${ISSUE_REPOS:-}" ]] && LEGACY_REPO_VARS="ISSUE_REPOS"
 [[ -n "${ISSUE_REPO:-}" ]] && LEGACY_REPO_VARS="${LEGACY_REPO_VARS:+$LEGACY_REPO_VARS and }ISSUE_REPO"
-REPO="${DISPATCH_REPOS[0]}"
+REPO=""
 WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
@@ -248,10 +245,12 @@ notify_long() {
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 #   pass-p.sh       pass_p_run: AGENT_PIPELINE_V2 only, writes the spec + locked test for a new coding ask (a no-op otherwise)
 #   executor-prompt.sh  exec_lookup / exec_build: AGENT_PIPELINE_V2 only, the executor of an approved spec gets a contract prompt
+#   gh-token.sh     the bot's GITHUB_TOKEN as GH_TOKEN + a git credential helper; as_antigravity_gh passes it on stdin
+#   dispatch-repos.sh  dispatch_repos_print: the repo list, asked of the TypeScript allowlist
 #   pr-moves.sh     ensure_moves_line: an agent PR with no `Moves:` line gets `Moves: A` for the PR scope check
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh; do
+for _lib in tg-quiet.sh down-state.sh gh-token.sh dispatch-repos.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -270,6 +269,14 @@ AGY_MODEL="$AGY_EXECUTOR_MODEL"
 REDACT_LITERALS+=("$GEMINI_API_KEY")
 if [[ -f "$ENV_FILE" ]]; then
   REDACT_LITERALS+=("$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')")
+fi
+# The bot's GitHub token: GH_TOKEN for every gh and git call from here on. Absent = the startup check below pauses the loop.
+GH_TOKEN_LOADED=0
+if gh_token_load "$ENV_FILE"; then
+  GH_TOKEN_LOADED=1
+  REDACT_LITERALS+=("$GH_TOKEN")
+else
+  unset GH_TOKEN # never fall back to a stored per-user login: that is the second token this removes
 fi
 # Claude Code's token, when there is one: it reaches the run on stdin and must never come back out in a log or a message.
 _claude_token_now="$(claude_token 2>/dev/null || true)"
@@ -461,7 +468,7 @@ fi
 
 if [[ -n "$LEGACY_REPO_VARS" ]]; then
   _verb="is"; [[ "$LEGACY_REPO_VARS" == *" and "* ]] && _verb="are"
-  log "WARNING: ${LEGACY_REPO_VARS} ${_verb} set in this environment and IGNORED: agent-dispatch sweeps DEFAULT_REPOS only (a list in the crontab is invisible to CI). Fix: ssh founderos-vps 'crontab -e' and delete the ${LEGACY_REPO_VARS%% *}=\"…\" part of the agent-dispatch line."
+  log "WARNING: ${LEGACY_REPO_VARS} ${_verb} set in this environment and IGNORED: agent-dispatch sweeps DISPATCH_REPO_ALLOWLIST only (a list in the crontab is invisible to CI). Fix: ssh founderos-vps 'crontab -e' and delete the ${LEGACY_REPO_VARS%% *}=\"…\" part of the agent-dispatch line."
 fi
 
 if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 && -z "$FORCE_ISSUE" && -z "$FORCE_REPO" ]]; then
@@ -494,8 +501,17 @@ for dep in gh git sudo curl jq; do
   command -v "$dep" >/dev/null 2>&1 \
     || startup_fail missing-dep "'${dep}' is not installed on PATH" "ssh founderos-vps, then: sudo apt-get install -y ${dep}"
 done
+if [[ "$GH_TOKEN_LOADED" -ne 1 ]]; then
+  startup_fail gh-auth "GITHUB_TOKEN is not set in ${ENV_FILE}" "ssh founderos-vps, then add GITHUB_TOKEN=<the bot's token> to ${ENV_FILE}"
+fi
 gh auth status >/dev/null 2>&1 \
-  || startup_fail gh-auth "the GitHub CLI is not logged in (gh auth status fails)" "ssh founderos-vps, then run: gh auth login   (gh auth status shows why)"
+  || startup_fail gh-auth "GitHub rejects the GITHUB_TOKEN in ${ENV_FILE} (gh auth status fails)" "ssh founderos-vps, then put a valid GITHUB_TOKEN in ${ENV_FILE}   (gh auth status shows why)"
+_repos_out="$(dispatch_repos_print 2>&1)" \
+  || startup_fail repo-list "${_repos_out}" "ssh founderos-vps, then check that ${DISPATCH_REPOS_ROOT:-/opt/founderos} is the deployed checkout (it has scripts/print-dispatch-repos.ts) and that node runs there"
+while IFS= read -r _repo_line; do
+  [[ -n "$_repo_line" ]] && DISPATCH_REPOS+=("$_repo_line")
+done <<<"$_repos_out"
+REPO="${DISPATCH_REPOS[0]}"
 if ! as_antigravity 'command -v agy' >/dev/null 2>&1; then
   startup_fail agy-missing "the Antigravity CLI (agy) is not on the PATH of user ${AG_USER}" "ssh founderos-vps, then: sudo -u ${AG_USER} -i, reinstall agy and check that 'command -v agy' prints a path"
 fi
@@ -503,7 +519,7 @@ fi
 # it can only be proven fixed by a real run or by the key file changing, see below.)
 if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
   case "$(down_class)" in
-    gh-auth|missing-dep|agy-missing)
+    gh-auth|missing-dep|agy-missing|repo-list)
       _since="$(down_since)"
       log "startup checks pass again (was paused for $(down_class) since ${_since})"
       down_leave "✅ agent-dispatch resumed on ${HOST} — its startup checks pass again (paused since ${_since}). Issues are being claimed again."
@@ -795,7 +811,7 @@ handle_claude_wall() {
 # back, because it did nothing wrong. The key file's mtime at the START of this run is recorded, so a
 # key pasted in while the run was still failing on the old one resumes the loop on the next tick.
 auth_fix() {
-  printf "put a valid GOOGLE_GENERATIVE_AI_API_KEY into %s (ssh founderos-vps): agent-dispatch resumes by itself when that file changes; if the line above is about GitHub, run: ssh -t founderos-vps 'sudo -u %s -i gh auth login'. To retry without changing anything: rm ~/.claude/agent-dispatch.down" "$ENV_FILE" "$AG_USER"
+  printf "put a valid GOOGLE_GENERATIVE_AI_API_KEY into %s (ssh founderos-vps): agent-dispatch resumes by itself when that file changes; if the line above is about GitHub, put a valid GITHUB_TOKEN in the same file. To retry without changing anything: rm ~/.claude/agent-dispatch.down" "$ENV_FILE"
 }
 
 pause_for_auth() { # pause_for_auth LINE
@@ -1026,7 +1042,7 @@ EOF
     count_base="$pipeline_spec"
     checkout_script+=' && git merge-base --is-ancestor "$4" HEAD'
   fi
-  if ! as_antigravity "$checkout_script" "$WORKSPACE" "$branch" "$checkout_from" ${pipeline_spec:+"$pipeline_spec"} >>"$LOG" 2>&1 \
+  if ! as_antigravity_gh "$checkout_script" "$WORKSPACE" "$branch" "$checkout_from" ${pipeline_spec:+"$pipeline_spec"} >>"$LOG" 2>&1 \
       || { [[ -n "$pipeline_spec" ]] && ! exec_prompt_into "$issue" "$branch" "$target_branch" "$prompt_file" >>"$LOG" 2>&1; }; then
     log "#${issue} FAILED to prepare branch ${branch} — releasing claim"
     finish_issue "$issue" agent:failed
@@ -1412,7 +1428,7 @@ redispatch_unresolved_reviews() {
     # Same self-heal as the Pass A checkout: this workspace can be dirty from any
     # prior invocation, and this branch (an existing PR branch, not a fresh -B off
     # origin/main) would fail identically to the Pass A bug otherwise.
-    if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet && git clean -fdq && git checkout "$2"' "$WORKSPACE" "$branch" >>"$LOG" 2>&1; then
+    if ! as_antigravity_gh 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet && git clean -fdq && git checkout "$2"' "$WORKSPACE" "$branch" >>"$LOG" 2>&1; then
       log "PR #${pr} could not check out ${branch} for re-dispatch"
       # Unlike claim_and_implement's sibling failure, this one never increments
       # `attempts` (that only happens after a successful run_agy_with_progress

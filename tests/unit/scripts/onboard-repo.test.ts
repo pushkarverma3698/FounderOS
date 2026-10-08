@@ -20,6 +20,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISPATCH_REPO_ALLOWLIST } from "../../../src/tools/dispatch-repos.js";
 import { AGENT_LABELS, ENGINE_LABELS, DispatchSandbox } from "./dispatch-sandbox.js";
 
 const REPO = "owner/widgets";
@@ -282,14 +283,13 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
     }
   });
 
-  it("with no arguments it checks the repos in the agent-dispatch next to it (the daemon's own list)", () => {
+  it("with no arguments it checks the repo list the daemon sweeps (dispatch_repos_print)", () => {
     const listed = rows(sb.onboard(["--check", "--porcelain"]).stdout);
     expect([...new Set(listed.map((x) => x.repo))]).toEqual([REPO]);
   });
 
-  it("the real script, run beside the real deploy/agent-dispatch, checks exactly that file's DEFAULT_REPOS", () => {
-    const declared = /^DEFAULT_REPOS=\((.*)\)$/m.exec(readFileSync(DAEMON, "utf8"))?.[1] ?? "";
-    const expected = [...declared.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  it("the real script, run in deploy/, checks exactly DISPATCH_REPO_ALLOWLIST (asked of the real printer)", () => {
+    const expected = [...DISPATCH_REPO_ALLOWLIST];
     expect(expected.length).toBeGreaterThanOrEqual(4);
 
     const r = spawnSync("bash", [SCRIPT, "--check", "--porcelain"], {
@@ -303,6 +303,7 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
         GH_STATE: join(sb.root, "gh-state.json"),
         GH_CALLS: join(sb.root, "gh-calls.log"),
         SUDO_ARGV: join(sb.root, "sudo-argv.log"),
+        DISPATCH_REPOS_ROOT: fileURLToPath(new URL("../../..", import.meta.url)),
       },
       encoding: "utf8",
     });
