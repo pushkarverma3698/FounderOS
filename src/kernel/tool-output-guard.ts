@@ -10,7 +10,7 @@
  *     ground truth is unchanged — only what the model re-reads is bounded.
  *  2. pruneScratchForModel — a read-time projection of a step's scratch for
  *     the NEXT model call: when the accumulated scratch exceeds its budget,
- *     the OLDEST tool results are collapsed to a stub (newest kept intact).
+ *     the LARGEST older tool results are collapsed to a stub (newest kept intact).
  *     The checkpointed scratch itself is never rewritten (append-only rule).
  *
  * Both keep the leading "❌"/failure markers intact so isFailureResult() and
@@ -85,7 +85,11 @@ export function pruneScratchForModel(
   const toolIndexes = scratch
     .map((m, i) => (isToolMessage(m) ? i : -1))
     .filter((i) => i !== -1);
-  const prunable = toolIndexes.slice(0, Math.max(0, toolIndexes.length - SCRATCH_KEEP_RECENT_TOOL_RESULTS));
+  // Largest first (oldest first among equals): a small list the model read first survives the big reads it
+  // fanned out to after it. Oldest-first stubbed list_prs behind ten get_pr dumps on 2026-10-08 (journey J3).
+  const prunable = toolIndexes
+    .slice(0, Math.max(0, toolIndexes.length - SCRATCH_KEEP_RECENT_TOOL_RESULTS))
+    .sort((a, b) => contentChars(scratch[b]!) - contentChars(scratch[a]!) || a - b);
 
   const out = [...scratch];
   for (const idx of prunable) {

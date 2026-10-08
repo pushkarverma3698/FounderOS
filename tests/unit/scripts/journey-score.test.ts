@@ -88,6 +88,14 @@ describe("scorePrs (J3)", () => {
   it("does not read 'required' as a red verdict", () => {
     expect(scorePrs("• #1036 CI green\n• #1002 required checks", "#1002", prs).ok).toBe(false);
   });
+  it("reads a markdown table row with a bare PR number (2026-10-08: `| 1018 |` was missed)", () => {
+    const table = "| # | Title | CI |\n|---|---|---|\n| 1036 | daily journeys | Green |\n| 1002 | probe fix | Failing (lint) |";
+    expect(scorePrs(table, "The oldest is **#1002**.", prs).ok).toBe(true);
+  });
+  it("does not read a bare number inside another number or a date as a PR", () => {
+    expect(scorePrs("Updated 2026-10-02 ...\n10360 rows | Green", "", prs).ok).toBe(false);
+    expect(scorePrs("| 11036 | green |\n| 1002 | red |", "#1002", prs).detail).toContain("#1036 not named");
+  });
   it("passes when there are no open PRs and the bot says so", () => {
     expect(scorePrs("There are no open PRs on FounderOS.", "", []).ok).toBe(true);
   });
