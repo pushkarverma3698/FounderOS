@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGoogleAdapter, type GoogleLoginDeps } from "../../../../src/gateway/login/adapters/google.js";
+import { mkdtempSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createGoogleAdapter, defaultGoogleDeps, type GoogleLoginDeps } from "../../../../src/gateway/login/adapters/google.js";
 import { parseClientSecret } from "../../../../src/gateway/login/google-oauth.js";
 
 const client = parseClientSecret(JSON.stringify({ installed: { client_id: "cid", client_secret: "csec", redirect_uris: ["http://localhost"] } }));
@@ -101,5 +104,20 @@ describe("google login adapter", () => {
     expect(r.ok).toBe(true);
     expect(d.forget).toHaveBeenCalledWith("wife");
     expect(a.targets).not.toContain("wife");
+  });
+});
+
+/**
+ * Regression for 2026-10-08 prod: gws keeps its access token in the config dir, not keyed by the
+ * credentials file. A fresh login that kept the old token_cache.json would be "verified" against the
+ * account that used to sit in that slot.
+ */
+describe("defaultGoogleDeps.writeCredentials — a new login drops the old cached token", () => {
+  it("removes token_cache.json next to the credentials it writes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gws-login-"));
+    writeFileSync(join(dir, "token_cache.json"), "old-account-token");
+    await defaultGoogleDeps.writeCredentials(join(dir, "credentials.json"), "{\"type\":\"authorized_user\"}");
+    expect(readFileSync(join(dir, "credentials.json"), "utf8")).toContain("authorized_user");
+    expect(existsSync(join(dir, "token_cache.json"))).toBe(false);
   });
 });
