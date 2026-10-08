@@ -12,6 +12,7 @@
 #   deploy/vps-daemons/pr-brain     -> ~/bin/pr-brain
 #   deploy/onboard-repo.sh          -> ~/bin/onboard-repo.sh
 #   deploy/job-run                  -> ~/bin/job-run       one /task = one process (started by fos-job.socket)
+#   deploy/promote-run              -> ~/bin/promote-run   beta -> main -> prod for /promote (started by job-run)
 #   deploy/systemd/agy-login.*     -> /etc/systemd/system  (sudo -n; the socket the bot uses to sign agy in from Telegram)
 #   deploy/systemd/fos-job.socket, fos-job@.service
 #                                   -> /etc/systemd/system  (sudo -n; the socket the bot hands each coding job to)
@@ -67,6 +68,7 @@ LIB_COUNT="${#PAIRS[@]}"
 PAIRS+=(
   "$SRC/agent-dispatch|$DEST/agent-dispatch|0755"
   "$SRC/job-run|$DEST/job-run|0755"
+  "$SRC/promote-run|$DEST/promote-run|0755"
   "$SRC/vps-daemons/pr-brain|$DEST/pr-brain|0755"
   "$SRC/onboard-repo.sh|$DEST/onboard-repo.sh|0755"
 )
@@ -109,7 +111,7 @@ done
 # 4. Each daemon must START from where it now lives: --help exits before any work, and only
 # after the daemon has found (or failed to find) the helpers it sources. PR_BRAIN_OWNER stops
 # pr-brain asking GitHub who it is.
-for name in agent-dispatch job-run pr-brain onboard-repo.sh; do
+for name in agent-dispatch job-run promote-run pr-brain onboard-repo.sh; do
   out="$(PR_BRAIN_OWNER=sync-daemons-smoke "$DEST/$name" --help 2>&1 </dev/null)" \
     || fail "$DEST/$name --help exited non-zero, so it cannot start (a missing helper?): $(printf '%s' "$out" | tail -n1 | cut -c1-200)"
 done

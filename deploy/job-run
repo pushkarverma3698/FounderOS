@@ -4,6 +4,7 @@
 # fos-job.socket (deploy/systemd) starts one of these per connection. The bot writes ONE JSON line to the socket:
 #
 #   {"repo":"owner/name","issue":41,"stage":"spec"|"build"}
+#   {"repo":"owner/name","stage":"promote","beta_sha":"<40 hex>"}   put beta on prod (deploy/promote-run), see below
 #
 # and this script owns the job from there to its end:
 #
@@ -44,6 +45,7 @@ SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
 DISPATCH="${JOB_RUN_DISPATCH:-$SELF_DIR/agent-dispatch}"
 PR_BRAIN="${JOB_RUN_PR_BRAIN:-$SELF_DIR/pr-brain}"
+PROMOTE_RUN="${JOB_RUN_PROMOTE:-$SELF_DIR/promote-run}"
 ENV_FILE="${JOB_RUN_ENV_FILE:-/opt/founderos/.env}"
 WAIT_LOCK_SEC=3600
 
@@ -104,6 +106,7 @@ on_exit() {
   [[ "$OUTCOME_POSTED" -eq 1 ]] && exit "$rc"
   [[ "$rc" -eq 0 ]] && rc=1
   local what="${REPO:-unknown repo}#${ISSUE:-?}" tail_lines msg
+  [[ "$STAGE" == promote ]] && what="promote ${REPO} (beta ${ISSUE})"
   tail_lines="$(tail -n 15 "$JOB_LOG" 2>/dev/null | redact_secrets)"
   msg="⚠️ Job failed: ${what} · stage ${STAGE:-unknown} · exit ${rc}
 ${FAIL_REASON:-ended without a result while ${PHASE}}
@@ -128,12 +131,30 @@ fi
 REPO="$(jq -r '.repo // empty' <<<"$LINE" 2>/dev/null)" || REPO=""
 ISSUE="$(jq -r '.issue // empty | tostring' <<<"$LINE" 2>/dev/null)" || ISSUE=""
 STAGE="$(jq -r '.stage // empty' <<<"$LINE" 2>/dev/null)" || STAGE=""
-if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$ISSUE" =~ ^[1-9][0-9]*$ || ! "$STAGE" =~ ^(spec|build)$ ]]; then
+BETA_SHA="$(jq -r '.beta_sha // empty' <<<"$LINE" 2>/dev/null)" || BETA_SHA=""
+# A promotion has no issue: it carries the beta commit the founder approved instead.
+if [[ "$STAGE" == promote ]]; then ISSUE="${BETA_SHA:0:7}"; fi
+if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$STAGE" =~ ^(spec|build|promote)$ ]] \
+  || [[ "$STAGE" == promote && ! "$BETA_SHA" =~ ^[0-9a-f]{40}$ ]] \
+  || [[ "$STAGE" != promote && ! "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
   _got="$(printf '%s' "$LINE" | cut -c1-200)"
   REPO="" ISSUE="" STAGE=""
-  fail 64 "not a valid job request (needs {repo: owner/name, issue: positive integer, stage: spec|build}): ${_got}"
+  fail 64 "not a valid job request (needs {repo: owner/name, issue: positive integer, stage: spec|build} or {repo, stage: promote, beta_sha: 40 hex}): ${_got}"
 fi
 jlog "job: ${REPO}#${ISSUE} stage ${STAGE}"
+
+# ------------------------------------------------------------------ a promotion: its own script, one outcome
+if [[ "$STAGE" == promote ]]; then
+  PHASE="promote-run (beta ${BETA_SHA:0:7} to main)"
+  PROMOTE_RESULT="$(mktemp "${TMPDIR:-/tmp}/promote-result.XXXXXX")"
+  run_logged "$PROMOTE_RUN" --repo "$REPO" --beta-sha "$BETA_SHA" --result-file "$PROMOTE_RESULT"
+  rc=$?
+  reason="$(head -c 1500 "$PROMOTE_RESULT" 2>/dev/null)"; rm -f "$PROMOTE_RESULT"
+  [[ "$rc" -eq 0 ]] || fail "$rc" "${reason:-promote-run exited ${rc} without saying why}"
+  [[ -n "$reason" ]] || fail 1 "promote-run exited 0 without a result: nothing says prod moved"
+  send_telegram "✅ ${reason}" && OUTCOME_POSTED=1 || fail 1 "promoted, but the message could not be sent: ${reason}"
+  exit 0
+fi
 
 # ------------------------------------------------------------------ the environment cron would have given us
 CRON_ASSIGN_RE='^([A-Za-z_][A-Za-z0-9_]*=([^[:space:]"'"'"'`$\\;&|<>()]*|"[^"`$\\]*"|'"'"'[^'"'"']*'"'"')[[:space:]]+)*$'
