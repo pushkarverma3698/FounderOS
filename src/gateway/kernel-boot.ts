@@ -38,6 +38,7 @@ import {
 import { recordConversationTurn } from "../db/conversation-turns.js";
 import { readScreen } from "../infra/screen-log.js";
 import { readRecentBrainActivity } from "../db/recent-activity.js";
+import { buildWorkingMemorySource } from "./working-memory-source.js";
 import { chatIdFromThreadId } from "../infra/telegram-send.js";
 import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
@@ -358,6 +359,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     turnLog: buildTurnLog(),
     screen: buildScreenSource(),
     ...(env.RECENT_ACTIVITY_ENABLED === "true" ? { recentActivity: buildRecentActivitySource() } : {}),
+    ...(env.WORKING_MEMORY_ENABLED === "true" ? { workingMemory: buildWorkingMemorySource() } : {}),
   });
 }
 

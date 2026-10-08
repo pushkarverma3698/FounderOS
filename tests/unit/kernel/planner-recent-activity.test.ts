@@ -44,7 +44,7 @@ const founderOnly: RecentActivitySource = { appliesTo: (t) => t === "turicks:111
 
 async function planOn(thread: string, source: RecentActivitySource) {
   const { model, calls } = capturingModel();
-  const plan = makePlanNode(model, catalog, () => frozen, [], undefined, undefined, new Set(), source);
+  const plan = makePlanNode(model, catalog, () => frozen, [], undefined, undefined, new Set(), { recentActivity: source });
   await plan(freshState("continue where we left off"), { configurable: { thread_id: thread } });
   return systemText(calls[0]!);
 }

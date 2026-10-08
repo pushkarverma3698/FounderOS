@@ -74,6 +74,7 @@ export {
 export { recordTurnSafely, type TurnLog } from "./turn-log.js";
 export { renderScreenBlock, screenBlockFor, type ScreenSource } from "./screen.js";
 export { AGENT_ORIGINS, RECENT_ACTIVITY_WINDOW_HOURS, recentActivityBlockFor, type ActivityRow, type RecentActivitySource } from "./recent-activity.js";
+export { WORKING_MEMORY_HEADER, WORKING_MEMORY_MAX_CHARS, founderContextBlockFor, workingMemoryBlockFor, type FounderContext, type WorkingMemorySource } from "./working-memory.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

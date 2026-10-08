@@ -26,6 +26,7 @@ import type { Clock } from "../core/time.js";
 import type { TurnLog } from "./turn-log.js";
 import type { ScreenSource } from "./screen.js";
 import type { RecentActivitySource } from "./recent-activity.js";
+import type { WorkingMemorySource } from "./working-memory.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -52,6 +53,8 @@ export interface KernelConfig {
   screen?: ScreenSource;
   /** Other agents' recent work for the founder DM (brain rows in prod, absent in tests; AG-029). */
   recentActivity?: RecentActivitySource;
+  /** Founder working memory for the DM and the family group (people, goals, in flight, last session; AG-032). */
+  workingMemory?: WorkingMemorySource;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -66,7 +69,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen, config.gatedTools, config.recentActivity))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog, config.screen, config.gatedTools, { recentActivity: config.recentActivity, workingMemory: config.workingMemory }))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))

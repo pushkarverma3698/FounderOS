@@ -49,7 +49,7 @@ export interface RecentActivitySource {
 
 const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 
-function stamp(at: Date): string {
+export function stamp(at: Date): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: LINE_TIME_ZONE, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
   }).formatToParts(at);

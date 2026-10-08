@@ -35,7 +35,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
-import { recentActivityBlockFor, type RecentActivitySource } from "./recent-activity.js";
+import { founderContextBlockFor, type FounderContext } from "./working-memory.js";
 import { stripFalsePromises } from "./promise-guard.js";
 import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
@@ -284,7 +284,7 @@ export function makePlanNode(
   turnLog?: TurnLog,
   screen?: ScreenSource,
   gatedTools: ReadonlySet<string> = new Set(),
-  recentActivity?: RecentActivitySource,
+  founderContext?: FounderContext,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
@@ -326,7 +326,7 @@ export function makePlanNode(
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
-          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock())];
+          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), founderContextBlockFor(founderContext, config?.configurable?.["thread_id"], clock())];
           const base: BaseMessage[] = [
             new SystemMessage([systemPrompt, plannerNowLine(clock), ...(await Promise.all(dataBlocks))].filter(Boolean).join("\n\n")),
             ...historyMessages(conversation),
