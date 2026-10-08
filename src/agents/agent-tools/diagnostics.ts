@@ -12,11 +12,10 @@
  */
 
 import { tool } from "@langchain/core/tools";
-import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
 import { readLogsTool } from "../../tools/read-logs.js";
 import { toolFailure } from "../tool-result.js";
-import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
+import { makeRepeatGuard, makeThreadScopedRegistry, repeatGuardScope } from "./repeat-guard.js";
 
 /**
  * Same loop breaker github_read carries, for the same reason: a weak model
@@ -26,25 +25,23 @@ import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
  * re-feeds a 200-line journal window to the planner, so the thrash is expensive
  * in exactly the turns that are already close to the watchdog.
  *
- * Per-thread, never module-scope: the graph is compiled once and tools are bound
- * at that time, so a shared guard would let one chat block another (rule #20).
+ * Per-step (the worker's `step_scope`, falling back to the thread), never
+ * module-scope: the graph is compiled once and tools are bound at that time, so a
+ * shared guard would let one chat block another (rule #20) and a thread-wide one
+ * would block a later turn that has never seen the earlier result (AG-046).
  */
 const _readLogsRepeatGuards = makeThreadScopedRegistry(() => makeRepeatGuard());
-
-function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
-  return config?.configurable?.["thread_id"] as string | undefined;
-}
 
 export const readLogs = tool(
   async ({ since, until, level, grep, limit, unit }, config) => {
     if (
       _readLogsRepeatGuards
-        .get(threadIdFrom(config))
+        .get(repeatGuardScope(config))
         .shouldBlock("read_logs", { since, until, level, grep, limit, unit })
     ) {
       return (
         `You have already called read_logs with these exact arguments and the log lines are ` +
-        `in the conversation above. Do NOT call read_logs again with the same window — either ` +
+        `in your tool messages for this step. Do NOT call read_logs again with the same window — either ` +
         `answer the founder now from what you read, or change the window (different 'since', ` +
         `'level' or 'grep') if you genuinely need different evidence.`
       );

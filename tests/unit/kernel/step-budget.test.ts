@@ -1,24 +1,21 @@
 /**
- * AG-035: per-step tool budget. Read-only steps may use 15 calls; anything that can write stays at 6.
+ * Per-step tool budget (AG-035, reworked): code sets it by step class, the planner's number is ignored.
+ * Read-only steps get 20 calls; anything that can write or needs approval gets 10.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
-import { TaskEnvelopeSchema, type TaskEnvelope, type StepResult } from "../../../src/kernel/contracts.js";
+import { TaskEnvelopeSchema, MAX_TOOL_CALLS_PER_STEP, type TaskEnvelope, type StepResult } from "../../../src/kernel/contracts.js";
 import {
-  READ_ONLY_TOOLS,
   clampStep,
   clampStepCalls,
-  isReadOnlyTool,
-  stepTools,
   capReachedNote,
   MAX_READ_TOOL_CALLS_PER_STEP,
 } from "../../../src/kernel/step-budget.js";
-import { dispatch } from "../../../src/kernel/supervisor.js";
+import { MAX_ATTEMPTS_PER_STEP, dispatch } from "../../../src/kernel/supervisor.js";
+import { OFFICE_RECURSION_LIMIT_DEFAULT } from "../../../src/core/config.js";
 import { collect } from "../../../src/kernel/worker.js";
 import { budgetNotesBlock } from "../../../src/kernel/synthesizer.js";
-import { HITL_GATED_TOOLS } from "../../../src/infra/hitl.js";
 import type { KernelStateType } from "../../../src/kernel/state.js";
 
 const envelope = (max: number, over: Record<string, unknown> = {}, constraints: Record<string, unknown> = {}): TaskEnvelope =>
@@ -32,77 +29,67 @@ const envelope = (max: number, over: Record<string, unknown> = {}, constraints: 
     ...over,
   });
 
+const action = { expected: { kind: "action_receipt", schema_ref: "action.summary" } };
+
 describe("envelope contract", () => {
-  it("accepts 15 calls and rejects 16", () => {
-    expect(MAX_READ_TOOL_CALLS_PER_STEP).toBe(15);
-    expect(() => envelope(15)).not.toThrow();
-    expect(() => envelope(16)).toThrow();
+  it("fixes the caps at 10 for write steps and 20 for read steps", () => {
+    expect(MAX_TOOL_CALLS_PER_STEP).toBe(10);
+    expect(MAX_READ_TOOL_CALLS_PER_STEP).toBe(20);
+  });
+
+  it("still parses whatever number the planner wrote, because code overrides it", () => {
+    expect(() => envelope(1)).not.toThrow();
+    expect(() => envelope(99)).not.toThrow();
+  });
+
+  it("parses a step whose planner left max_tool_calls out", () => {
+    const step = TaskEnvelopeSchema.parse({
+      step_id: "s1",
+      worker: "engineering",
+      objective: "Close the stale issues",
+      expected: { kind: "data", schema_ref: "text.summary" },
+      constraints: { hitl_required: false },
+    });
+    expect(clampStep(step).constraints.max_tool_calls).toBe(MAX_READ_TOOL_CALLS_PER_STEP);
   });
 });
 
-describe("clampStep", () => {
-  it("keeps 15 for a read-only step", () => {
-    expect(clampStepCalls(envelope(15))).toBe(15);
-    expect(clampStep(envelope(15)).constraints.max_tool_calls).toBe(15);
+describe("recursion limit covers the caps", () => {
+  it("fits MAX_ATTEMPTS_PER_STEP attempts of the largest step (dispatch + agent/tools hops + final turn + collect)", () => {
+    const worst = Math.max(MAX_READ_TOOL_CALLS_PER_STEP, MAX_TOOL_CALLS_PER_STEP);
+    const perAttempt = 1 + 2 * worst + 2;
+    expect(OFFICE_RECURSION_LIMIT_DEFAULT).toBeGreaterThanOrEqual(MAX_ATTEMPTS_PER_STEP * perAttempt + 4);
+  });
+});
+
+describe("clampStep: the budget comes from the step class, not from the planner", () => {
+  it("gives a read-only step the read cap when the planner asked for 3", () => {
+    expect(clampStepCalls(envelope(3))).toBe(MAX_READ_TOOL_CALLS_PER_STEP);
+    expect(clampStep(envelope(3)).constraints.max_tool_calls).toBe(20);
   });
 
-  it("clamps a HITL-required step to 6", () => {
-    expect(clampStep(envelope(15, {}, { hitl_required: true })).constraints.max_tool_calls).toBe(6);
+  it("gives a HITL-required step the write cap when the planner asked for 3", () => {
+    expect(clampStep(envelope(3, {}, { hitl_required: true })).constraints.max_tool_calls).toBe(10);
   });
 
-  it("clamps an action_receipt step to 6", () => {
-    const step = envelope(15, { expected: { kind: "action_receipt", schema_ref: "action.summary" } });
-    expect(clampStep(step).constraints.max_tool_calls).toBe(6);
+  it("gives an action_receipt step the write cap when the planner asked for 3", () => {
+    expect(clampStep(envelope(3, action)).constraints.max_tool_calls).toBe(10);
   });
 
-  it("leaves 6 or fewer untouched and returns the same object", () => {
-    const step = envelope(4);
+  it("never lets a write step exceed the write cap, whatever the planner asked", () => {
+    for (const asked of [1, 10, 20, 99]) {
+      expect(clampStepCalls(envelope(asked, {}, { hitl_required: true }))).toBe(10);
+      expect(clampStepCalls(envelope(asked, action))).toBe(10);
+    }
+  });
+
+  it("never lets a read step exceed the read cap", () => {
+    expect(clampStepCalls(envelope(99))).toBe(20);
+  });
+
+  it("returns the same object when the cap already matches", () => {
+    const step = envelope(20);
     expect(clampStep(step)).toBe(step);
-  });
-});
-
-describe("stepTools", () => {
-  const tools = [{ name: "github_read" }, { name: "github_write" }, { name: "set_reminder" }];
-
-  it("narrows a long read step to read-only tools", () => {
-    expect(stepTools(envelope(15), tools).map((t) => t.name)).toEqual(["github_read"]);
-  });
-
-  it("does not narrow a step at the normal cap", () => {
-    expect(stepTools(envelope(6), tools)).toHaveLength(3);
-  });
-});
-
-describe("READ_ONLY_TOOLS never includes a tool that can ask for approval", () => {
-  it("is disjoint from HITL_GATED_TOOLS", () => {
-    for (const name of READ_ONLY_TOOLS) {
-      expect(HITL_GATED_TOOLS.has(name), name + " is HITL-gated").toBe(false);
-      expect(isReadOnlyTool(name)).toBe(true);
-    }
-  });
-
-  it("lists no tool whose definition calls hitlGate()", () => {
-    const files = readdirSync("src/agents/agent-tools")
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => "src/agents/agent-tools/" + f)
-      .concat("src/tools/skill-synthesizer.ts");
-    const offenders: string[] = [];
-    for (const file of files) {
-      const src = readFileSync(file, "utf8");
-      let prev = 0;
-      for (const m of src.matchAll(/name:\s*"([a-z_]+)"/g)) {
-        const segment = src.slice(prev, m.index);
-        prev = m.index ?? prev;
-        if (READ_ONLY_TOOLS.has(m[1]!) && segment.includes("hitlGate(")) offenders.push(file + ":" + m[1]);
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  it("every read-only name exists as a tool definition", () => {
-    const files = ["src/agents/agent-tools", "src/tools"].flatMap((d) => readdirSync(d).filter((f) => f.endsWith(".ts")).map((f) => readFileSync(d + "/" + f, "utf8")));
-    const all = files.join("\n");
-    for (const name of READ_ONLY_TOOLS) expect(all, name).toContain('name: "' + name + '"');
   });
 });
 
@@ -123,11 +110,10 @@ const budgetOf = (u: ReturnType<typeof dispatch>): number | undefined => {
 };
 
 describe("dispatch", () => {
-  it("clamps a write step the planner asked 15 for, and keeps a read step at 15", () => {
-    const write = dispatch(stateFor(envelope(15, {}, { hitl_required: true })));
-    expect(budgetOf(write)).toBe(6);
-    const read = dispatch(stateFor(envelope(15)));
-    expect(budgetOf(read)).toBe(15);
+  it("sets the budget by class whatever the planner asked", () => {
+    expect(budgetOf(dispatch(stateFor(envelope(3, {}, { hitl_required: true }))))).toBe(10);
+    expect(budgetOf(dispatch(stateFor(envelope(15, {}, { hitl_required: true }))))).toBe(10);
+    expect(budgetOf(dispatch(stateFor(envelope(3))))).toBe(20);
   });
 });
 

@@ -175,8 +175,9 @@ export function repairWrappedOutput(parsed: unknown, ref: string): unknown {
 
 // ── Task envelope (the ONLY thing a worker sees) ──────────────────────────────
 
-export const MAX_TOOL_CALLS_PER_STEP = 6;
-export const MAX_READ_TOOL_CALLS_PER_STEP = 15; // read-only steps only: see step-budget.ts
+// Set by code per step class, never by the planner: see step-budget.ts.
+export const MAX_TOOL_CALLS_PER_STEP = 10; // steps that can write or need approval
+export const MAX_READ_TOOL_CALLS_PER_STEP = 20; // read-intent steps
 export const MAX_PLAN_STEPS = 8;
 
 export const TaskEnvelopeSchema = z.preprocess(
@@ -197,8 +198,11 @@ export const TaskEnvelopeSchema = z.preprocess(
       }),
     ),
     dependencies: z.array(z.string()).optional(),
+    /** "file" only when the founder asked for a file sent to him (CSV, export, attachment). */
+    deliverable: z.enum(["none", "file"]).default("none"),
     constraints: z.object({
-      max_tool_calls: z.number().int().min(1).max(MAX_READ_TOOL_CALLS_PER_STEP),
+      /** Kept for compatibility. The supervisor overwrites it with the class cap, so any positive number parses. */
+      max_tool_calls: z.number().int().min(1),
       hitl_required: z.boolean(),
     }),
   }),

@@ -18,7 +18,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
+import { makeRepeatGuard, makeThreadScopedRegistry, repeatGuardScope } from "./repeat-guard.js";
 import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit, recordWorkflowRun } from "../../db/queries.js";
 import { slugifyWorkflow, workflowSignature } from "../../tools/workflow-catalog.js";
@@ -155,8 +155,8 @@ export function capConsecutiveToolFailures(
 const _githubFailureCounters = makeThreadScopedRegistry(makeToolFailureCounter);
 
 // Repeat-call breaker (T04): bounds identical github_read calls even when they
-// SUCCEED — the failure cap above only fires on errors. Time-windowed so it
-// self-scopes to a turn; a legitimate repeat minutes later is never blocked.
+// SUCCEED — the failure cap above only fires on errors. Keyed by the worker's
+// `step_scope` (turn + step), so a repeat on a later turn is never blocked (AG-046).
 const _githubRepeatGuards = makeThreadScopedRegistry(() => makeRepeatGuard());
 
 function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
@@ -167,19 +167,18 @@ function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
 
 export const githubRead = tool(
   async ({ action, owner, repo, number, since, path, ref, query }, config) => {
-    const threadId = threadIdFrom(config);
-    const repeatGuard = _githubRepeatGuards.get(threadId);
-    const failureCounter = _githubFailureCounters.get(threadId);
+    const repeatGuard = _githubRepeatGuards.get(repeatGuardScope(config));
+    const failureCounter = _githubFailureCounters.get(threadIdFrom(config));
 
     // Loop breaker: if the model has already called github_read with this exact
-    // input twice, stop hitting the API and force it to answer with what it has.
+    // input three times in this step, stop hitting the API and force it to answer with what it has.
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
     if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number, since, path, ref, query })) {
       return (
         `You have already called github_read (action="${action}") with these exact ` +
-        `arguments and the result is in the conversation above. Do NOT call github_read ` +
-        `again — answer the founder now using the data you already retrieved.`
+        `arguments earlier in this step and the result is in your tool messages for this step. ` +
+        `Do NOT call github_read again — answer the founder now using the data you already retrieved.`
       );
     }
     const codeAction = action === "get_file" || action === "search_code";
