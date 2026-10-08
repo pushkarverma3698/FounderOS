@@ -220,8 +220,9 @@ export const githubTool: UnifiedTool = {
       query: { type: "string", description: "For search_code: search terms (max 20 hits, each as path:line)." },
       since: {
         type: "string",
-        description: "For list_commits: only commits after this ISO date (e.g. 2026-10-05). Use it for 'what shipped in the last N days'.",
+        description: "For list_commits: only commits after this ISO date (e.g. 2026-10-05). Use it for 'what shipped in the last N days'. For list_prs state=merged: only PRs merged after it.",
       },
+      state: { type: "string", enum: ["open", "merged"], description: "For list_prs: open (default, each with a CI verdict) or merged." },
       labels: {
         type: "string",
         description: "For create_issue: comma-separated label names (e.g. 'bug,enhancement').",
@@ -331,7 +332,8 @@ export const githubTool: UnifiedTool = {
           const owner = args["owner"] as string;
           const repo = args["repo"] as string;
           if (!owner || !repo) return { success: false, error: "list_prs requires owner and repo" };
-          return await listPullRequests(octokit, owner, repo);
+          const since = typeof args["since"] === "string" ? args["since"] : undefined;
+          return await listPullRequests(octokit, owner, repo, { state: args["state"] === "merged" ? "merged" : "open", ...(since ? { since } : {}) });
         }
 
         case "get_pr": {

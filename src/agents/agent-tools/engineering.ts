@@ -166,7 +166,7 @@ function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
-  async ({ action, owner, repo, number, since, path, ref, query }, config) => {
+  async ({ action, owner, repo, number, since, state, path, ref, query }, config) => {
     const repeatGuard = _githubRepeatGuards.get(repeatGuardScope(config));
     const failureCounter = _githubFailureCounters.get(threadIdFrom(config));
 
@@ -174,7 +174,7 @@ export const githubRead = tool(
     // input three times in this step, stop hitting the API and force it to answer with what it has.
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
-    if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number, since, path, ref, query })) {
+    if (repeatGuard.shouldBlock("github_read", { action, owner, repo, number, since, state, path, ref, query })) {
       return (
         `You have already called github_read (action="${action}") with these exact ` +
         `arguments earlier in this step and the result is in your tool messages for this step. ` +
@@ -184,7 +184,7 @@ export const githubRead = tool(
     const codeAction = action === "get_file" || action === "search_code";
     const o = owner || (codeAction ? "pushkarverma3698" : undefined);
     const r = repo || (codeAction ? "FounderOS" : undefined);
-    const res = await githubTool.execute({ action, ...(o ? { owner: o } : {}), ...(r ? { repo: r } : {}), ...(number ? { number } : {}), ...(since ? { since } : {}), ...(path ? { path } : {}), ...(ref ? { ref } : {}), ...(query ? { query } : {}) });
+    const res = await githubTool.execute({ action, ...(o ? { owner: o } : {}), ...(r ? { repo: r } : {}), ...(number ? { number } : {}), ...(since ? { since } : {}), ...(state ? { state } : {}), ...(path ? { path } : {}), ...(ref ? { ref } : {}), ...(query ? { query } : {}) });
     if (!res.success) {
       return capConsecutiveToolFailures(
         failureCounter,
@@ -200,7 +200,8 @@ export const githubRead = tool(
     description:
       "Read from GitHub (no approval needed). Actions: list_repos (optional owner), get_readme (owner+repo), get_stats, " +
       "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo, optional since=ISO date → commits after it; a full page says more exist), " +
-      "list_prs (owner+repo → open PRs), get_pr (owner+repo+number → state, draft, CI checks, diff, reviews, latest comments " +
+      "list_prs (owner+repo → open PRs, each with ci green/red/pending and failing check names; state='merged' + since=ISO → PRs merged after it with merged_at and merge_sha; " +
+      "use it for 'what merged/shipped' and 'is CI green on the open PRs'), get_pr (owner+repo+number → state, draft, CI checks, diff, reviews, latest comments " +
       "including pr-brain's GATE verdicts; use it for any 'review / is PR N ready' question). " +
       "get_file (path, optional ref; defaults to FounderOS; first 400 lines numbered, with a truncated marker), search_code (query; up to 20 path:line hits in FounderOS). " +
       "For FounderOS queries use owner='pushkarverma3698' repo='FounderOS'.",
@@ -209,7 +210,8 @@ export const githubRead = tool(
       owner: z.string().optional().nullable(),
       repo: z.string().optional().nullable(),
       number: z.number().int().optional().nullable().describe("PR number, for get_pr"),
-      since: z.string().optional().nullable().describe("ISO date, for list_commits: only commits after it"),
+      since: z.string().optional().nullable().describe("ISO date, for list_commits and list_prs state=merged: only items after it"),
+      state: z.enum(["open", "merged"]).optional().nullable().describe("For list_prs: open (default, each with a CI verdict) or merged"),
       path: z.string().optional().nullable().describe("File path, for get_file"),
       ref: z.string().optional().nullable().describe("Branch, tag or commit, for get_file"),
       query: z.string().optional().nullable().describe("Search terms, for search_code"),
