@@ -33,6 +33,8 @@ vi.mock("../../../src/db/queries.js", () => ({
   listRegisteredDispatchRepos: async () => [],
 }));
 
+// AG-039: the reach check calls the network; these tests are about the card, not the network.
+vi.mock("../../../src/tools/repo-reach.js", () => ({ checkRepoReach: async () => ({ ok: true }) }));
 vi.mock("../../../src/tools/dispatch-antigravity.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {

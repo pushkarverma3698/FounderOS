@@ -14,6 +14,7 @@ import { assertDailyBudgetAllowsRun } from "../infra/daily-budget.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { logger } from "../infra/logger.js";
 import type { TurnAck } from "./kernel-progress.js";
+import { holdMessage, dropHeldMessage } from "./held-message.js";
 
 const log = logger.child({ module: "turn-gates" });
 
@@ -28,23 +29,26 @@ export async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, 
 /**
  * A text turn must not start while an approval card is waiting on the same thread:
  * the new run would share the old checkpoint and pending row, so one tap would
- * resume (or silently drop) the wrong request. Re-send the card and say so. A card
- * older than the restore window is abandoned, so expire it instead of blocking forever.
+ * resume (or silently drop) the wrong request. Keep the text on the card's row (it runs after the tap is
+ * answered, held-message.ts), re-send the card and say so. A card older than the restore window is
+ * abandoned, so expire it instead of blocking forever.
  * Returns true when the turn was held.
  */
-async function holdForPendingApproval(ctx: Context, threadId: string, ack: TurnAck): Promise<boolean> {
+async function holdForPendingApproval(ctx: Context, threadId: string, ack: TurnAck, text: string): Promise<boolean> {
   const pending = await getPendingInterrupt(threadId);
   if (!pending) return false;
   const age = Date.now() - new Date(pending.created_at ?? 0).getTime();
   if (age > HITL_RESTORE_MAX_AGE_MS) {
     await resolveInterrupt(pending.interrupt_id, "expired");
+    await dropHeldMessage(ctx, pending.interrupt_id, "its approval card expired before you answered");
     return false;
   }
   const payload = JSON.parse(pending.callback_data ?? "{}") as Omit<ApprovalRequest, "kind">;
   await ack.remove();
-  await ctx.reply(
-    "⏸ Not started: an approval is still waiting. Approve or reject the card below, then send your message again.",
-  );
+  if (!(await holdMessage(ctx, pending, text))) {
+    await ctx.reply("⏸ Not started: the approval was answered just now. Send your message again.");
+    return true;
+  }
   await sendApprovalCard(ctx, { kind: "approval", ...payload }, pending.interrupt_id.substring(0, 8));
   return true;
 }
@@ -54,14 +58,14 @@ async function holdForPendingApproval(ctx: Context, threadId: string, ack: TurnA
  * returns false, with the ack already removed. An exhausted daily budget THROWS (DailyBudgetExceededError)
  * and the caller's error path removes the ack and replies; the kernel has not been touched in any of the three.
  */
-export async function passTurnGates(ctx: Context, chatId: string | number, threadId: string, ack: TurnAck): Promise<boolean> {
+export async function passTurnGates(ctx: Context, chatId: string | number, threadId: string, ack: TurnAck, text: string): Promise<boolean> {
   const halt = await readHalt();
   if (halt) {
     await ack.remove();
     await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
     return false;
   }
-  if (await holdForPendingApproval(ctx, threadId, ack)) return false;
+  if (await holdForPendingApproval(ctx, threadId, ack, text)) return false;
   await assertDailyBudgetAllowsRun(
     () => getTodayCostUsd(TENANT),
     DAILY_BUDGET_USD,

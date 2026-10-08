@@ -15,9 +15,6 @@ export interface StepVerifier {
 
 const TEMPLATE_PLACEHOLDER_REGEX = /\{\{[\w\s_-]+\}\}|\[\s*[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s*\]/;
 
-/** Keywords in an objective that signal the founder expects a file deliverable. */
-const FILE_DELIVERY_KEYWORDS = /\b(csv|spreadsheet|export|file|attachment|download)\b/i;
-
 /** No artifact at all — nothing was written and nothing was sent. */
 const NO_ARTIFACT_ERROR =
   "Objective requested a file deliverable (CSV/export/spreadsheet) but no artifact was " +
@@ -33,7 +30,7 @@ const NOT_DELIVERED_ERROR =
 
 /**
  * Phase 4 deliverable-aware verification.
- * If the step objective mentions a file/csv/export, the tool_receipts must prove it.
+ * If the planner typed the step `deliverable: "file"`, the tool_receipts must prove it.
  * Prevents the agent from pasting raw data inline and claiming "Mission complete".
  *
  * `requireDelivery` (jobhunt) demands a deliver_artifact receipt: a founder asking for
@@ -46,7 +43,7 @@ function verifyDeliverableIfRequested(
   result?: StepResult,
   requireDelivery = false,
 ): { ok: boolean; error?: string } {
-  if (!FILE_DELIVERY_KEYWORDS.test(envelope.objective)) return { ok: true };
+  if (envelope.deliverable !== "file") return { ok: true };
 
   // Receipts are ground truth — recorded BY CODE at the call site (kernel/worker.ts),
   // so the model cannot write one. Whenever the receipts channel exists (always, on the

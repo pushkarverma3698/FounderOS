@@ -23,7 +23,8 @@
 #      status now reflects only whether PRODUCTION came up healthy.
 set -euo pipefail
 
-APP_DIR="/opt/founderos"
+# Override APP_DIR to deploy a checkout somewhere else (deploy/install.sh does, on a self-hosted box).
+APP_DIR="${APP_DIR:-/opt/founderos}"
 # main IS production (single-tenant — ADR-021). Override with DEPLOY_BRANCH if needed.
 BRANCH="${DEPLOY_BRANCH:-main}"
 
@@ -204,7 +205,11 @@ else
 fi
 
 echo "==> Seeding founder context defaults (fill-only: never overwrites a stored key) — best-effort, 120s cap"
-if timeout 120 node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
+# The seed is the founder's own identity and business context. A self-hosted box (deploy/install.sh)
+# sets FOUNDEROS_SKIP_FOUNDER_SEED=1 (env or .env) so it does not write someone else's profile into your database.
+if [ "${FOUNDEROS_SKIP_FOUNDER_SEED:-}" = "1" ] || grep -qx '^FOUNDEROS_SKIP_FOUNDER_SEED=1$' .env 2>/dev/null; then
+  echo "    FOUNDEROS_SKIP_FOUNDER_SEED=1 - skipping the founder-context seed"
+elif timeout 120 node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else
   echo "    WARNING: seed-founder-context failed or timed out — founder context may be stale. Bot still deploys." >&2

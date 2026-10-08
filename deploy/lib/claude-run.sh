@@ -161,8 +161,8 @@ claude_run() {
 
   # Positional arguments only: $1 workdir, $2 prompt file, $3 timeout, $4 model. The outer `timeout` wraps the real
   # `claude` executable inside the sudo'd script: it cannot wrap a shell function.
-  as_antigravity 'IFS= read -r CLAUDE_CODE_OAUTH_TOKEN; if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN; else unset CLAUDE_CODE_OAUTH_TOKEN; fi; unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN; exec </dev/null; cd "$1" && timeout "$3" claude -p "$(cat "$2")" --model "$4" --dangerously-skip-permissions --output-format stream-json --verbose' \
-    "$workdir" "$prompt_file" "$timeout_sec" "$model" <<<"$token" >"$raw" 2>&1 &
+  as_antigravity "$(gh_shell_prelude)"$'\n''IFS= read -r CLAUDE_CODE_OAUTH_TOKEN; if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN; else unset CLAUDE_CODE_OAUTH_TOKEN; fi; unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN; exec </dev/null; cd "$1" && timeout "$3" claude -p "$(cat "$2")" --model "$4" --dangerously-skip-permissions --output-format stream-json --verbose' \
+    "$workdir" "$prompt_file" "$timeout_sec" "$model" <<<"${GH_TOKEN:-}"$'\n'"$token" >"$raw" 2>&1 &
   pid=$!
 
   AGY_PROGRESS_MSG_ID="$(agy_tg_send "🔧 ${label}: starting…")"
