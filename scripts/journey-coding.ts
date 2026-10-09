@@ -4,11 +4,13 @@
  * agent-dispatch loop (agy → draft PR) and reads the PR's checks. Then closes the PR and the issue.
  * $0 of FounderOS model spend; it does use one agy run. Red → one line to the founder DM, exit 1.
  * It starts at the issue: the Telegram `/task` card in front of it is not exercised.
- * Run every 3 nights from the founderos crontab on the VPS:
+ * Runs daily at 01:30 UTC from the founderos crontab on the VPS (installed by deploy/sync-daemons.sh), so the
+ * 02:30 morning run scores a result under an hour old. Each result line starts with its own time (#1058):
  *
  *   node --import tsx/esm --env-file=.env scripts/journey-coding.ts
  */
 import { judgeCoding, sandboxBrief, type JourneyAVerdict } from "./lib/journey-coding.js";
+import { formatJourneyAResult } from "./lib/journey-score.js";
 import { appendScreenEntry } from "../src/infra/screen-log.js";
 
 const REPO = process.env["JOURNEY_CODING_REPO"] ?? "pushkarverma3698/fos-journey-sandbox";
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
   } finally {
     await cleanup(issue.number).catch((e: unknown) => console.error(`cleanup of #${issue.number} failed: ${String(e)}`));
   }
-  console.log(`${verdict.ok ? "GREEN" : "RED"} journey A (${REPO}): ${verdict.detail}`);
+  console.log(formatJourneyAResult(verdict.ok, REPO, verdict.detail, Date.now()));
   if (!verdict.ok) {
     await notifyFounder(`🔴 Golden journey A is red: ${verdict.detail}. Fixing it is tomorrow's only work.`);
     process.exitCode = 1;
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
 
 main().catch(async (err: unknown) => {
   const reason = err instanceof Error ? err.message : String(err);
-  console.error(`RED journey A: ${reason}`);
+  console.error(formatJourneyAResult(false, undefined, reason, Date.now()));
   await notifyFounder(`🔴 Golden journey A could not run: ${reason}`);
   process.exit(1);
 });
