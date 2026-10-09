@@ -5,13 +5,14 @@ import { safeHtml } from "./approval-card.js";
 import { BudgetExceededError } from "../infra/budget.js";
 import { DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { logger } from "../infra/logger.js";
-import { isModelFallbackError } from "../agents/model.js";
+import { isModelFallbackError, isQuotaExhaustedError } from "../agents/model.js";
 import { isKeyLimitError, keyLimitLine, ProviderKeyLimitError } from "../agents/provider-key-limit.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { retryKeyboard } from "./retry-button.js";
 import { modelErrorLine } from "./model-error-line.js";
 
 const log = logger.child({ module: "error-reply" });
+const OPENROUTER_CREDITS_URL = "https://openrouter.ai/settings/credits";
 
 /** Strip file paths, stack frames, and SQL from error messages shown to the founder. */
 function sanitizeErrorForFounder(msg: string): string {
@@ -103,6 +104,17 @@ export async function replyForError(
       `🤖 <b>The AI provider is overloaded or rate-limited right now</b> — nothing is broken on our side. ` +
         `Wait a minute, then ${button ? "tap 🔁 Retry or " : ""}send "try again"; I remember what you asked.`,
       { parse_mode: "HTML", ...withButton },
+    );
+    return;
+  }
+  if (isQuotaExhaustedError(err)) {
+    // A 402 that survived the free fallback chain (issue #1064): a retry cannot
+    // work until someone tops up, so no button and no auto-retry.
+    log.error({ err: err instanceof Error ? err.message : String(err) }, "Model credits used up");
+    await ctx.reply(
+      `💳 <b>Model credits are used up</b>, and the free fallback models failed too. ` +
+        `Top up at ${OPENROUTER_CREDITS_URL}, then send "try again"; I remember what you asked.`,
+      { parse_mode: "HTML" },
     );
     return;
   }
