@@ -34,14 +34,32 @@ describe("agent-dispatch: executor model candidates", () => {
     expect(sb.log()).toMatch(/old-model is not a model agy knows/);
   });
 
-  it("warns once, naming the retired model and the fix, and not again on the next tick", () => {
+  it("announces every fallback on Telegram: the run, the skipped model, the model that takes over and the fix", () => {
+    const env = { AGENT_DISPATCH_MODELS: "old-model new-model", AGY_UNKNOWN_MODELS: "old-model" };
+    sb.tick({ agyOut: "Error: something else broke", env });
+
+    const warns = sb.messages().filter((t) => t.includes("old-model") && /AGENT_DISPATCH_MODELS/.test(t));
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("#810");
+    expect(warns[0]).toContain("Falling back to new-model");
+  });
+
+  it("announces again on the next run: a downgrade is never silent, even a repeated one", () => {
     const env = { AGENT_DISPATCH_MODELS: "old-model new-model", AGY_UNKNOWN_MODELS: "old-model" };
     sb.tick({ agyOut: "Error: something else broke", env });
     sb.addIssue({ number: 811, title: "test(docs): second visible test comment" });
     sb.tick({ agyOut: "Error: something else broke", env });
 
-    const warns = sb.messages().filter((t) => t.includes("old-model") && /AGENT_DISPATCH_MODELS/.test(t));
-    expect(warns).toHaveLength(1);
+    const warns = sb.messages().filter((t) => t.includes("Falling back to new-model"));
+    expect(warns).toHaveLength(2);
+    expect(warns.some((t) => t.includes("#811"))).toBe(true);
+  });
+
+  it("says plainly when no candidate is left", () => {
+    sb.tick({ env: { AGENT_DISPATCH_MODELS: "old-a old-b", AGY_UNKNOWN_MODELS: "old-a old-b" } });
+
+    const last = sb.messages().filter((t) => t.includes("old-b") && t.includes("no candidate is left"));
+    expect(last).toHaveLength(1);
   });
 
   it("accepts commas as well as spaces", () => {

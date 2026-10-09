@@ -77,6 +77,9 @@ export function openPrWaitReason(facts: TaskFacts): string | null {
 
 const plural = (n: number): string => `${n} blocker${n === 1 ? "" : "s"}`;
 
+/** One decision per head: the chat tool and the Fix now button on pr-brain's card share it, so the two never both start a fix. */
+export const fixBlockedPrKey = (slug: string, issue: number, head: string): string => idemKey("fix_blocked_pr", slug.toLowerCase(), String(issue), head.toLowerCase());
+
 export interface FixRequest {
   readonly slug: string;
   readonly issueNumber: number;
@@ -94,7 +97,7 @@ export async function fixBlockedPr(fix: BlockedPrFix, req: FixRequest, facts: Ta
   const short = pr.headSha.slice(0, 7);
 
   // Bound to the head the founder saw: a new commit is a new decision, and a replayed approval starts nothing twice.
-  const key = idemKey("fix_blocked_pr", req.slug, String(n), pr.headSha.toLowerCase());
+  const key = fixBlockedPrKey(req.slug, n, pr.headSha);
   if (await hasBeenAudited(key)) {
     return `${NO_ACTION_PREFIX} The fix for ${req.slug}#${n} at ${short} was already started from an earlier approval.\n\n${status}`;
   }
