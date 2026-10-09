@@ -13,7 +13,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { startDispatchJob, startPromoteJob, jobSocketPath, jobRequestLine, startFailureNote } = await import("../../../src/tools/dispatch-tick.js");
+const { startDispatchJob, startFixJob, startPromoteJob, jobSocketPath, jobRequestLine, startFailureNote } = await import("../../../src/tools/dispatch-tick.js");
 
 const ORIGINAL_BIN = process.env["AGENT_DISPATCH_BIN"];
 const ORIGINAL_SOCK = process.env["FOS_JOB_SOCKET"];
@@ -131,6 +131,42 @@ describe("startDispatchJob", () => {
     const source = readFileSync(new URL("../../../src/tools/dispatch-tick.ts", import.meta.url), "utf8");
     const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/child_process|spawn\(|exec\(|execFile/);
+  });
+});
+
+describe("startFixJob", () => {
+  const HEAD = "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff";
+
+  it("is inert off the VPS and never touches the socket", async () => {
+    const send = vi.fn();
+    expect(await startFixJob(115, REPO, HEAD, send)).toEqual({ status: "inert" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("writes one {repo, issue, stage: fix, head} line: the head is the commit the founder was shown", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn().mockResolvedValue(undefined);
+
+    expect(await startFixJob(115, REPO, HEAD, send)).toEqual({ status: "started" });
+
+    expect(send).toHaveBeenCalledWith("/run/fos-job.sock", `${JSON.stringify({ repo: REPO, issue: 115, stage: "fix", head: HEAD })}\n`);
+  });
+
+  it("refuses a head that is not a commit sha, a bad issue or a bad repo before the socket", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const send = vi.fn();
+    for (const head of ["", "main", "abc", "xyz".repeat(5), `${HEAD}0`, "5c0ffee; rm -rf /"]) {
+      expect((await startFixJob(115, REPO, head, send)).status).toBe("failed");
+    }
+    expect((await startFixJob(0, REPO, HEAD, send)).status).toBe("failed");
+    expect((await startFixJob(115, "no-slash", HEAD, send)).status).toBe("failed");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("reports a dead socket instead of throwing", async () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/x";
+    const dead = vi.fn().mockRejectedValue(new Error("connect ENOENT /run/fos-job.sock"));
+    expect(await startFixJob(115, REPO, HEAD, dead)).toEqual({ status: "failed", reason: "connect ENOENT /run/fos-job.sock" });
   });
 });
 

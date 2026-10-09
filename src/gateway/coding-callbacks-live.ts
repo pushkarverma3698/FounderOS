@@ -8,7 +8,8 @@ import { Octokit } from "octokit";
 import { TENANT } from "../core/config.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import { contractsDir, type StoreFs } from "../tools/contract-store.js";
-import { startDispatchJob } from "../tools/dispatch-tick.js";
+import { startDispatchJob, startFixJob } from "../tools/dispatch-tick.js";
+import type { BlockedActions } from "./blocked-callbacks.js";
 import type { CodingDeps } from "./coding-callbacks.js";
 
 export const realFs: StoreFs = {
@@ -89,6 +90,19 @@ export function liveCodingDeps(env: Record<string, string | undefined> = process
         payload: row.payload,
       });
       return written;
+    },
+  };
+}
+
+/** Fix now hands the fix to the job socket; Close PR leaves the reason on the PR, then closes it. */
+export function liveBlockedActions(): BlockedActions {
+  return {
+    startFix: (slug, issue, head) => startFixJob(issue, slug, head),
+    async closePr(slug, pr, note) {
+      const octokit = client();
+      const { owner, repo } = split(slug);
+      await octokit.rest.issues.createComment({ owner, repo, issue_number: pr, body: note });
+      await octokit.rest.pulls.update({ owner, repo, pull_number: pr, state: "closed" });
     },
   };
 }

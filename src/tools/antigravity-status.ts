@@ -122,13 +122,14 @@ function prLines(pr: TaskPr, now: Date, stage: PrStage, quotaUntil: Date | null 
     } else if (stage === "review") {
       lines.push(`Fix rounds used: ${pr.attempts} of ${MAX_ATTEMPTS}.`);
       if (pr.attempts >= MAX_ATTEMPTS) {
-        lines.push("Nothing more happens automatically.");
+        lines.push("Nothing more happens automatically. Say “fix it” to start another fix round now (one tap).");
       } else if (quotaUntil && quotaUntil > now) {
         lines.push(`Next: the fix round starts after Antigravity's quota lifts at ${utc(quotaUntil)}.`);
       } else {
         lines.push(
           `Next: agent-dispatch sends Antigravity back to fix ${blockers.length === 1 ? "it" : "these"} at its next run, ` +
             `${hhmm(nextDispatcherRun(now))} (fix round ${pr.attempts + 1} of ${MAX_ATTEMPTS}); ${REVIEWER} then re-reviews the new commit within about 20 min.`,
+          "Say “fix it” to start that fix now instead (one tap).",
         );
       }
     } else {
@@ -177,7 +178,7 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
   if (labels.has("agent:blocked")) {
     return [
       head,
-      `🛑 Stopped after ${MAX_ATTEMPTS} review→fix rounds — it needs your decision. Nothing more happens automatically.`,
+      `🛑 Stopped after ${MAX_ATTEMPTS} review→fix rounds — it needs your decision. Nothing more happens automatically; say “fix it” to start another fix round on the same branch.`,
       ...(pr ? prLines(pr, now, "blocked") : [issue.url]),
     ].join("\n");
   }
