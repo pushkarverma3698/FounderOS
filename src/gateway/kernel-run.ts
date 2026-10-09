@@ -186,6 +186,8 @@ async function runKernelTurn(ctx: Context, text: string, profileId: string | und
           thread_id: threadIdFor(chatId),
           ...(profileId ? { profile_id: profileId } : {}),
           ...(engine ? { engine } : {}),
+          // The founder's own words, for tools that let them outrank a model argument (read_emails' mailbox).
+          founder_text: text,
           // Fine-grained keep-alive for a single long tool call (claude_code,
           // own budget 15min) that yields no new LangGraph state for its whole
           // run — src/agents/agent-tools/engineering.ts reads this.

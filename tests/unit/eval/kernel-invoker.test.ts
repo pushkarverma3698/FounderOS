@@ -240,3 +240,51 @@ describe("makeKernelInvoker — negative cases (no false positives)", () => {
     expect(obs.toolCalls).toContainEqual({ tool: "search_web", ok: true });
   });
 });
+
+// Issue #1061: a gated tool pauses the eval thread and nothing ever answers it, so its hitl_approvals row stayed
+// `pending` and the founder's /status counted it ("4 pending" on 10-09, all eval:* threads).
+describe("makeKernelInvoker — releases the case's thread when the case ends", () => {
+  it("calls releaseThread with the eval thread after a case that paused on a gate", async () => {
+    const step = {
+      step_id: "s1",
+      worker: "comms",
+      objective: "Email the client",
+      inputs: {},
+      expected: { kind: "action_receipt", schema_ref: "action.summary" },
+      constraints: { max_tool_calls: 2, hitl_required: true },
+    };
+    const k = buildKernel({
+      plannerModel: new ScriptedModel([ai(planJson([step]))]),
+      workerModel: new ScriptedModel([aiTool("send_email", { to: "a@b.c", subject: "s", body: "b" })]),
+      synthesizerModel: new ScriptedModel([]),
+      workers: [{ id: "comms", description: "d", prompt: "p", tools: [makeGatedTool("send_email")] }],
+      checkpointer: new MemorySaver(),
+    });
+    const releaseThread = vi.fn(async (_threadId: string) => undefined);
+
+    const obs = await makeKernelInvoker(k, { releaseThread })(task);
+
+    expect(obs.hadInterrupt).toBe(true);
+    expect(releaseThread).toHaveBeenCalledTimes(1);
+    expect(releaseThread.mock.calls[0]![0]).toMatch(/^eval:/);
+  });
+
+  it("still releases the thread when the case throws, and a failed release does not fail the case", async () => {
+    const k = buildKernel({
+      plannerModel: new ScriptedModel([]),
+      workerModel: new ScriptedModel([]),
+      synthesizerModel: new ScriptedModel([]),
+      workers: [{ id: "comms", description: "d", prompt: "p", tools: [] }],
+      checkpointer: new MemorySaver(),
+    });
+    vi.spyOn(k, "invoke").mockRejectedValueOnce(new Error("model down"));
+    const releaseThread = vi.fn(async (_threadId: string) => {
+      throw new Error("db down");
+    });
+
+    const obs = await makeKernelInvoker(k, { releaseThread })(task);
+
+    expect(obs.error).toBe("model down");
+    expect(releaseThread).toHaveBeenCalledTimes(1);
+  });
+});
