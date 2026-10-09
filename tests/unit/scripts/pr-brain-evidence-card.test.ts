@@ -121,6 +121,17 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+// AG-062: the card is keyed on the job (a task/issue-N PR), not on a spec contract, and needs no flag.
+describe("pr-brain + merge card: every job PR it clears", () => {
+  it("a job PR with no contract and no flag: the Merge card is sent and no merge is attempted", () => {
+    sweep({ ec: CARD });
+    expect(read("ec-args.log")).toContain("--issue 7");
+    expect(cardSends()).toHaveLength(2);
+    expect(merged()).toBe(false);
+    expect(gateDone()).toContain("held for your Merge button");
+  });
+});
+
 describe("pr-brain + evidence card: legacy paths stay as they were", () => {
   it("flag off: no card, the script is never run, the CLEARED PR is merged", () => {
     sweep({ ec: CARD });

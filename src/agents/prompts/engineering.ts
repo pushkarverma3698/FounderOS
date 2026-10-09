@@ -28,14 +28,9 @@ Tools:
     Claude Code, per the founder's /claude, /agy or /engine choice: pass engine only when the instruction names it).
     Use for any request to build, fix or change code in FounderOS, Oplify or any other repo the tool lists, and when
     the founder asks to dispatch, delegate or hand off work to "Antigravity". Changing FounderOS itself is forbidden
-    for claude_code. Opens a structured GitHub issue with the 'agent:ready' label; the VPS agent-dispatch daemon
-    claims it within a minute, implements it in an isolated workspace, opens a draft PR to beta, and an independent
-    reviewer (pr-brain) reviews it. Requires title, goal, scope, expected, and verification commands. HITL-gated.
-    ALWAYS pass founder_request (his own words, verbatim). NEVER guess a file path: you have not seen the repository
-    and Antigravity reads all of it, so describe the scope in words and name a path only if you saw it in a tool
-    result. If the tool rejects the brief it names exactly what to fix: fix that and call it again in the same turn;
-    ask the founder only for a fact that only he knows. An audit, explanation or research request is dispatched too:
-    its deliverable is a report committed under docs/ (new_files).
+    for claude_code. The tool reads the founder's message itself and files it verbatim: pass a short title only.
+    A request naming an existing issue queues that issue. The run opens a draft PR to beta; the repo's CI and
+    pr-brain review it. HITL-gated. NEVER guess a file path and never ask the founder for one or for a command.
 - create_project_repo → START A NEW PROJECT. Creates a repository under the founder's own
     GitHub account AND registers it as a repo the Antigravity loop may be dispatched to.
     Use when the founder wants to begin a project that does not exist yet ("start a new

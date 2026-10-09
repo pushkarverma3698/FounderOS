@@ -448,3 +448,49 @@ describe("requeue_antigravity_task on an issue whose PR pr-brain blocked", () =>
     expect(res).not.toMatch(/already in progress|second run/i);
   });
 });
+
+// ── AG-062, Oplify #117/#119, 2026-10-09 ─────────────────────────────────────────────────────────────────────────────
+// The worker wrote founder_request itself ("Pick the first open issue found in s1…"), agy built an "s1 dispatcher
+// module", and "Fix issue #115" in goal filed duplicates. The founder's words come from the gateway, never the model.
+describe("the founder's words come from the gateway's founder_text, and every field is read for #N", () => {
+  const FOUNDER_TEXT = "work on oplify-messaging-api issue 115";
+  const PLANNER_TEXT = "Pick the first open issue found in s1 and dispatch it";
+  const asCfg = (founderText?: string): { configurable: Record<string, unknown> } => ({
+    configurable: founderText === undefined ? {} : { founder_text: founderText },
+  });
+  const words = (): string => {
+    const c = gh.createComment.mock.calls[0] as unknown as [{ body: string }] | undefined;
+    const m = /<!-- founder-words: ([A-Za-z0-9+/=]+) -->/.exec(c?.[0].body ?? "");
+    return m ? Buffer.from(m[1]!, "base64").toString("utf8") : "";
+  };
+
+  it("founder_text wins over a model-written founder_request: #115 is queued with his words", async () => {
+    issue = issue41({ number: 115, title: "fix: account enumeration", labels: [] });
+
+    await dispatchAntigravityTask.invoke(
+      { title: "Dispatch s1 work", founder_request: PLANNER_TEXT, repo: API },
+      asCfg(FOUNDER_TEXT),
+    );
+
+    expect(gh.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 115 }));
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(gh.addLabels).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 115 }));
+    expect(words()).toBe(FOUNDER_TEXT);
+    expect(JSON.stringify(gh.createComment.mock.calls)).not.toContain(PLANNER_TEXT);
+    expect(kick).toHaveBeenCalledWith(115, API, "build");
+  });
+
+  it("goal 'Fix issue #115' with a title and words naming no number: queues #115 and files nothing", async () => {
+    issue = issue41({ number: 115, title: "fix: account enumeration", labels: [] });
+
+    await dispatchAntigravityTask.invoke(
+      { title: "fix: account enumeration", goal: "Fix issue #115", repo: API },
+      asCfg("the login leaks which accounts exist, fix it"),
+    );
+
+    expect(gh.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 115 }));
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(gh.addLabels).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 115 }));
+    expect(kick).toHaveBeenCalledWith(115, API, "build");
+  });
+});

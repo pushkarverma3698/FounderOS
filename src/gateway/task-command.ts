@@ -188,22 +188,9 @@ export function buildTaskInstruction(args: TaskArgs): string {
     `The founder's request, verbatim:`,
     args.text,
     ``,
-    `Expand it into a complete, self-contained brief conforming to the agent-task template:`,
-    `a title with a conventional-commit prefix, what "done" means to an executor with no`,
-    `prior context, the subsystem in scope, the expected behaviour, and verification`,
-    `commands that are real for THAT repository.`,
-    ``,
-    `You have not seen this repository, and Antigravity reads all of it: describe the scope in`,
-    `plain words and name a file path ONLY if you saw it in a tool result. A guessed path is`,
-    `worse than none. Pass the founder's request above, unchanged, as founder_request: it is`,
-    `filed as the evidence, so a request with no log or error attached is still a complete brief.`,
-    `If you are unsure of the goal, expected or verification, leave them out: the tool fills any of`,
-    `goal, expected or verification you omit from founder_request, and shows the founder what it filled.`,
-    `Never ask the founder for a file path or a command: he sent one sentence on purpose.`,
-    `If he asked for an audit, an explanation or research, the deliverable is a report committed`,
-    `under docs/ (list it in new_files), not code.`,
-    ``,
-    `If the tool rejects the brief, fix exactly what it names and call it again in this turn.`,
+    `Give it a short title with a conventional-commit prefix. The tool reads the founder's message itself and files`,
+    `it verbatim, so do not rewrite it into a brief, and never ask him for a file path or a command.`,
+    `If he names an existing issue, the tool queues that issue instead of filing a new one.`,
     `Do not implement the work yourself and do not edit any files — your only job here is`,
     `to file the dispatch issue. Pass repo exactly as "${args.repo}".`,
     // Only when he named a CLI: omitting it is how a plain /task gets the default.
@@ -213,7 +200,7 @@ export function buildTaskInstruction(args: TaskArgs): string {
 
 export interface TaskCommandDeps {
   /** The normal kernel turn — same path a typed message takes. */
-  readonly runKernelText: (ctx: Context, text: string, profileId?: string, engine?: Engine) => Promise<void>;
+  readonly runKernelText: (ctx: Context, text: string, profileId?: string, engine?: Engine, founderText?: string) => Promise<void>;
   /**
    * Project repos this instance created, which are dispatchable without a code
    * change. Optional so every existing caller and test keeps the hardcoded-only
@@ -240,7 +227,7 @@ async function registeredRepos(deps: TaskCommandDeps): Promise<readonly string[]
 async function dispatchUnlessQueued(ctx: Context, deps: TaskCommandDeps, args: TaskArgs): Promise<void> {
   const already = await queuedReply(deps.findQueuedDuplicate, args.repo, args.text);
   if (already) await ctx.reply(already);
-  else await deps.runKernelText(ctx, buildTaskInstruction(args), undefined, args.engine);
+  else await deps.runKernelText(ctx, buildTaskInstruction(args), undefined, args.engine, args.text);
 }
 
 /** The repo buttons, as a grammy `reply_markup`. */

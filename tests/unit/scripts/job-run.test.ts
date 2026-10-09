@@ -123,7 +123,7 @@ describe("deploy/job-run: the request line", () => {
     ["a repo with no owner", JSON.stringify({ repo: "justname", issue: 1, stage: "build" }) + "\n"],
     ["issue 0", JSON.stringify({ repo: REPO, issue: 0, stage: "build" }) + "\n"],
     ["a non-numeric issue", JSON.stringify({ repo: REPO, issue: "1;x", stage: "build" }) + "\n"],
-    ["a stage that is neither spec nor build", JSON.stringify({ repo: REPO, issue: 1, stage: "deploy" }) + "\n"],
+    ["a stage that is not build, fix or promote", JSON.stringify({ repo: REPO, issue: 1, stage: "deploy" }) + "\n"],
   ])("rejects %s: runs nothing and tells the founder once", (_name, stdin) => {
     const r = run({ stdin });
 
@@ -208,25 +208,16 @@ describe("deploy/job-run: a build", () => {
   });
 });
 
-describe("deploy/job-run: a spec", () => {
-  it("runs stage spec and does not run pr-brain; agent:spec-review is the card", () => {
-    const r = run({
-      stdin: JSON.stringify({ repo: REPO, issue: 41, stage: "spec" }) + "\n",
-      dispatchLabels: ["agent:spec-review"],
-    });
-
-    expect(r.status).toBe(0);
-    expect(r.calls.find((c) => c.startsWith("agent-dispatch"))).toMatch(/--stage spec/);
-    expect(r.calls.filter((c) => c.startsWith("pr-brain"))).toEqual([]);
-    expect(r.sent).toEqual([]);
-  });
-
-  it("an issue still at agent:spec means nothing happened: one failure message", () => {
-    const r = run({ stdin: JSON.stringify({ repo: REPO, issue: 41, stage: "spec" }) + "\n", dispatchLabels: ["agent:spec"] });
+// AG-062: the spec stage is gone. A leftover {"stage":"spec"} (an old bot, a hand-sent line) is refused, once.
+describe("deploy/job-run: a spec request", () => {
+  it("is refused with one message and runs nothing", () => {
+    const r = run({ stdin: JSON.stringify({ repo: REPO, issue: 41, stage: "spec" }) + "\n", dispatchLabels: ["agent:spec-review"] });
 
     expect(r.status).not.toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("agent-dispatch") || c.startsWith("pr-brain"))).toEqual([]);
     expect(r.sent).toHaveLength(1);
-    expect(r.sent[0]).toMatch(/stage spec/);
+    expect(r.sent[0]).toMatch(/not a valid job request/);
+    expect(r.sent[0]).not.toMatch(/stage: spec\|/);
   });
 });
 

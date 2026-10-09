@@ -84,7 +84,7 @@ export interface FixRequest {
   readonly slug: string;
   readonly issueNumber: number;
   readonly repoArg: string | null | undefined;
-  readonly founderRequest: string | null | undefined;
+  readonly founderWords: string;
   readonly action: "dispatch_antigravity_task" | "requeue_antigravity_task";
 }
 
@@ -108,7 +108,7 @@ export async function fixBlockedPr(fix: BlockedPrFix, req: FixRequest, facts: Ta
       `Same branch, nothing new filed: ${req.slug}#${n} → PR #${pr.number} on ${branch} at ${short}. ` +
       `Antigravity gets every blocker below and fixes them on that branch now (fix round ${pr.attempts + 1}); ${REVIEWER} re-reviews the new commit.`,
     preview: [`Branch ${branch}, merges into ${pr.baseRef}`, ...blockerLines(pr.verdict), pr.url].join("\n"),
-    args: { issue: n, repo: req.repoArg ?? null, founder_request: req.founderRequest ?? null, head: pr.headSha },
+    args: { issue: n, repo: req.repoArg ?? null, founder_words: req.founderWords, head: pr.headSha },
   };
   // One literal action per tool: tests/unit/agents/capabilities.test.ts proves every gated tool has a real gate.
   const rejected = req.action === "requeue_antigravity_task"

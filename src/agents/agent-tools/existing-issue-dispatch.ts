@@ -14,9 +14,8 @@ import { describeTaskStatus, fetchTaskFacts, type TaskFacts } from "../../tools/
 import { resolveDispatchRepo } from "../../tools/dispatch-antigravity.js";
 import { startDispatchJob, startFailureNote } from "../../tools/dispatch-tick.js";
 import { engineDisplay, engineLabel, parseEngine, readDefaultEngine, type Engine } from "../../tools/coding-engine.js";
-import { LABEL_SPEC, LABEL_SPEC_REVIEW } from "../../tools/pipeline-pending.js";
-import { filedLabels } from "../../tools/dispatch-spec-intake.js";
-import { existingIssueAsk, readableIssueBody, withFounderAsk } from "../../tools/existing-issue.js";
+import { founderWordsMarker } from "../../tools/founder-words.js";
+import { readableIssueBody } from "../../tools/existing-issue.js";
 import { NO_ACTION_PREFIX } from "../tool-result.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { blockedPrFix, claimAgeMinutes, fixBlockedPr, openPrWaitReason, WORKING_LEASE_MIN } from "./blocked-pr-fix.js";
@@ -55,8 +54,6 @@ export function refusal(facts: TaskFacts, now: Date = new Date()): string | null
     const stillOpen = facts.issue.state === "open" ? ` #${n} itself is still open; close it once you have checked the fix.` : "";
     return `#${n} is already fixed — PR #${facts.pr.number} merged into ${facts.pr.baseRef}: ${facts.pr.url}\nNothing was queued or filed.${stillOpen}`;
   }
-  if (labels.has(LABEL_SPEC)) return `Not queued again: #${n}'s spec is being drafted.`;
-  if (labels.has(LABEL_SPEC_REVIEW)) return `Not queued again: #${n}'s spec is waiting for your approval in Telegram.`;
   if (labels.has("agent:working")) {
     const age = claimAgeMinutes(facts, now);
     if (age === null) {
@@ -85,8 +82,8 @@ const neverRan = (labels: readonly string[]): boolean =>
 const STALE_LABELS = ["agent:failed", "agent:blocked", "agent:needs-brief", "agent:working", "agent:review"] as const;
 
 export interface QueueOptions {
-  /** The founder's words, verbatim. Required when the issue goes to the spec pipeline (agent:spec). */
-  readonly founderRequest?: string | null | undefined;
+  /** The founder's words, verbatim (src/tools/founder-words.ts). They go on the card and, as a marker, on the issue. */
+  readonly founderWords: string;
   /** Settled by the caller; else a forced /claude or /agy, else the founder's default. Only a fresh issue gets one. */
   readonly engine?: Engine | undefined;
   readonly action: "dispatch_antigravity_task" | "requeue_antigravity_task";
@@ -108,7 +105,7 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   // A PR pr-brain blocked is waiting for exactly this decision: fix it now, on its own branch, with every blocker.
   const fix = blockedPrFix(facts);
   if (fix) {
-    const req = { slug: t.slug, issueNumber: n, repoArg: opts.repoArg, founderRequest: opts.founderRequest, action: opts.action };
+    const req = { slug: t.slug, issueNumber: n, repoArg: opts.repoArg, founderWords: opts.founderWords, action: opts.action };
     return fixBlockedPr(fix, req, facts, status, config);
   }
 
@@ -126,15 +123,9 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   const executor = fresh
     ? opts.engine ?? parseEngine(config?.configurable?.["engine"] as string | undefined) ?? readDefaultEngine()
     : undefined;
-  const labels = executor ? filedLabels(["agent:ready", "antigravity", engineLabel(executor)]) : ["agent:ready", "antigravity"];
-  const toSpec = labels.includes(LABEL_SPEC);
+  const labels = executor ? ["agent:ready", "antigravity", engineLabel(executor)] : ["agent:ready", "antigravity"];
   const body = facts.issue.body ?? "";
-  const request = opts.founderRequest?.trim() ? opts.founderRequest : "";
-  if (toSpec && !request) {
-    return `❌ Not queued: pass founder_request (the founder's words, verbatim). #${n} goes to the spec pipeline, which drafts the spec from them. Nothing was filed.`;
-  }
-  // Pass P drafts the spec from the ask alone and cannot read GitHub, so the ask carries what the issue says.
-  const newBody = toSpec ? withFounderAsk(body, existingIssueAsk(request, { number: n, title: facts.issue.title, body })) : body;
+  const words = opts.founderWords.trim();
 
   // State-derived key: once this runs, the labels and comment count change, so a
   // replayed resume takes the "already queued" branch above instead of re-writing.
@@ -142,17 +133,13 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   if (await hasBeenAudited(key)) return `${NO_ACTION_PREFIX} #${n} was already queued from an earlier approval.\n\n${status}`;
 
   const who = executor ? engineDisplay(executor) : "Antigravity";
-  const notes = [
-    newBody !== body ? "your words are appended to the issue for the spec" : "",
-    facts.issue.state === "closed" ? "the closed issue is re-opened" : "",
-  ].filter(Boolean);
+  const reopened = facts.issue.state === "closed" ? " (the closed issue is re-opened)" : "";
+  const said = words ? `Your words: “${words}”\n\n` : "";
   const card = {
     title: fresh ? `🤖 Start work on #${n} with ${who}?` : `🔁 Put #${n} back in Antigravity's queue?`,
-    summary:
-      `Same issue, nothing new filed: ${t.slug}#${n} "${facts.issue.title}" → ${labels.join(", ")}` +
-      (notes.length ? ` (${notes.join("; ")})` : ""),
-    preview: fresh ? `${facts.issue.url}\n\n${readableIssueBody(body, 1200)}` : status,
-    args: { issue: n, repo: opts.repoArg ?? null, founder_request: opts.founderRequest ?? null, engine: executor ?? null },
+    summary: `Same issue, nothing new filed: ${t.slug}#${n} "${facts.issue.title}" → ${who}, labels ${labels.join(", ")}${reopened}`,
+    preview: fresh ? `${said}${facts.issue.url}\n\n${readableIssueBody(body, 1200)}` : `${said}${status}`,
+    args: { issue: n, repo: opts.repoArg ?? null, founder_words: words, engine: executor ?? null },
   };
   // One literal action per tool: tests/unit/agents/capabilities.test.ts proves every gated tool has a real gate.
   const rejected = opts.action === "requeue_antigravity_task"
@@ -165,15 +152,14 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   for (const name of STALE_LABELS) {
     if (facts.issue.labels.includes(name)) await t.gh.rest.issues.removeLabel({ ...ref, name });
   }
-  if (newBody !== body) await t.gh.rest.issues.update({ ...ref, body: newBody });
   await t.gh.rest.issues.addLabels({ ...ref, labels });
   await t.gh.rest.issues.createComment({
     ...ref,
-    body: request
-      ? `🔁 Queued from Telegram by the founder: “${request.trim()}”. agent-dispatch picks up this same issue on its next run.`
-      : "🔁 Re-queued from Telegram by the founder. agent-dispatch picks up this same issue on its next run.",
+    body: words
+      ? `🔁 Queued from Telegram by the founder: “${words}”. agent-dispatch picks up this same issue now.\n\n${founderWordsMarker(words)}`
+      : "🔁 Re-queued from Telegram by the founder. agent-dispatch picks up this same issue now.",
   });
-  const started = await startDispatchJob(n, t.slug, toSpec ? "spec" : "build");
+  const started = await startDispatchJob(n, t.slug, "build");
   const warn = started.status === "failed" ? `\n⚠️ ${startFailureNote(n, t.slug, started.reason)}` : "";
 
   const auditRes = await writeAuditEntry({
@@ -184,12 +170,6 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   });
   if (!auditRes.written) log.warn({ key }, `writeAuditEntry conflict on ${opts.action}`);
 
-  if (toSpec) {
-    return (
-      `✅ #${n} is queued for a spec on ${t.slug} (same issue, nothing new filed). The spec is drafted from your words and ` +
-      `what #${n} says. A spec card will follow here in Telegram; nothing is built until you approve it.${warn}\n${facts.issue.url}`
-    );
-  }
   const when = facts.quotaUntil && facts.quotaUntil > new Date()
     ? `Antigravity's quota is exhausted until ${facts.quotaUntil.toISOString().slice(0, 16).replace("T", " ")} UTC, so it starts then.`
     : "Its run started now and reports back here.";

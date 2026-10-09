@@ -13,6 +13,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { describeTaskStatus, fetchTaskFacts } from "../../tools/antigravity-status.js";
+import { founderWordsFrom } from "../../tools/founder-words.js";
 import { queueExistingIssue, target, type Target } from "./existing-issue-dispatch.js";
 
 /** The named issue, or the most recently filed Antigravity issue in the repo. */
@@ -33,10 +34,6 @@ const schema = z.object({
     .nullable()
     .describe("GitHub issue number, e.g. 762. Omit for the most recently dispatched Antigravity task."),
   repo: z.string().optional().nullable().describe("owner/name. Defaults to pushkarverma3698/FounderOS."),
-});
-
-const requeueSchema = schema.extend({
-  founder_request: z.string().optional().nullable().describe("The founder's own words, copied verbatim from his message."),
 });
 
 export const antigravityTaskStatus = tool(
@@ -65,7 +62,7 @@ export const antigravityTaskStatus = tool(
 );
 
 export const requeueAntigravityTask = tool(
-  async ({ issue, repo, founder_request }, config) => {
+  async ({ issue, repo }, config) => {
     const t = await target(repo);
     if (typeof t === "string") return t;
     let n: number | undefined;
@@ -75,7 +72,7 @@ export const requeueAntigravityTask = tool(
       return `❌ Could not read the task on ${t.slug}: ${(err as Error).message}`;
     }
     if (n === undefined) return `No Antigravity issue found on ${t.slug}.`;
-    return queueExistingIssue(t, n, { founderRequest: founder_request, action: "requeue_antigravity_task", repoArg: repo }, config);
+    return queueExistingIssue(t, n, { founderWords: founderWordsFrom(config?.configurable), action: "requeue_antigravity_task", repoArg: repo }, config);
   },
   {
     name: "requeue_antigravity_task",
@@ -83,12 +80,12 @@ export const requeueAntigravityTask = tool(
       "Queue an EXISTING issue (requires founder approval) — for 'start work on #N', 'dispatch it again', " +
       "'retry #N', 'it hasn't been picked up, dispatch it'. Reads the issue first: if a merged PR already fixes it, " +
       "says so with the link and queues nothing. Re-opens a closed issue that never merged, clears agent:failed, " +
-      "sets agent:ready (agent:spec for an issue no agent has had, when the spec pipeline is on). When pr-brain " +
+      "sets agent:ready and starts its run now. When pr-brain " +
       "BLOCKED the issue's PR, this is the tool for 'fix it' / 'dispatch agy to fix the issues in the same branch': one card " +
       "lists every blocker, then the fix starts NOW on that PR's branch (no cron wait, no new issue). Refuses, with the real " +
       "reason, only for a merged fix, a run claimed under 60 min ago, a PR pr-brain has not reviewed yet or one it cleared. " +
-      "Never tell the founder it is 'already working' unless the answer says a run claimed it. Pass founder_request (his words, verbatim). " +
+      "Never tell the founder it is 'already working' unless the answer says a run claimed it. " +
       "Never use dispatch_antigravity_task to file a new issue for work that already has one.",
-    schema: requeueSchema,
+    schema,
   },
 );

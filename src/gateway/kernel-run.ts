@@ -147,16 +147,16 @@ async function sendReply(ctx: Context, text: string): Promise<void> {
  *
  * `engine` is the coding CLI the founder chose by typing /claude or /agy. It rides in `configurable.engine` and the
  * dispatch tool trusts it over its own argument: the planner is told the engine in words, and a model may drop a
- * word, so the choice cannot depend on the model copying it.
+ * word, so the choice cannot depend on the model copying it. `founderText` is his message when `text` is a prompt built from it (/task).
  */
-export function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
+export function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine, founderText?: string): Promise<void> {
   // Registered for as long as it runs so a deploy's SIGTERM waits for it (inflight-turns.ts, AG-037).
   return withInflight({ chatId: String(ctx.chat?.id ?? "unknown"), text, record: true }, (flight) =>
-    runKernelTurn(ctx, text, profileId, engine, flight.setTurnId),
+    runKernelTurn(ctx, text, profileId, engine, flight.setTurnId, founderText),
   );
 }
 
-async function runKernelTurn(ctx: Context, text: string, profileId: string | undefined, engine: Engine | undefined, setTurnId: (id: string) => void): Promise<void> {
+async function runKernelTurn(ctx: Context, text: string, profileId: string | undefined, engine: Engine | undefined, setTurnId: (id: string) => void, founderText?: string): Promise<void> {
   const arrivedAt = Date.now();
   const chatId = ctx.chat?.id ?? "unknown";
   const queued = chatTurnChains.has(String(chatId));
@@ -187,7 +187,7 @@ async function runKernelTurn(ctx: Context, text: string, profileId: string | und
           ...(profileId ? { profile_id: profileId } : {}),
           ...(engine ? { engine } : {}),
           // The founder's own words, for tools that let them outrank a model argument (read_emails' mailbox).
-          founder_text: text,
+          founder_text: founderText ?? text,
           // Fine-grained keep-alive for a single long tool call (claude_code,
           // own budget 15min) that yields no new LangGraph state for its whole
           // run — src/agents/agent-tools/engineering.ts reads this.

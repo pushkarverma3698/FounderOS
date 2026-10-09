@@ -22,8 +22,7 @@
  * `sudo -n -u antigravity` works exactly as it does for cron. The bot reaches it the way it already
  * reaches /run/agy-login.sock. Nothing in this file may start a process (a test enforces it).
  *
- * `stage` is `spec` for an `agent:spec` issue (Pass P writes the spec), `build` for an `agent:ready`
- * one (the executor implements it, then pr-brain reviews the PR) and `fix` for a PR pr-brain blocked (the executor fixes
+ * `stage` is `build` for an `agent:ready` issue (the executor implements it, then pr-brain reviews the PR) and `fix` for a PR pr-brain blocked (the executor fixes
  * every blocker on the PR's branch, then pr-brain reviews the new head; the line also carries `head`, see startFixJob).
  *
  * Why it lives at the tool layer and not in the /task handler: a gateway turn returns as soon as the
@@ -41,7 +40,7 @@ import { promoteRequestLine, validatePromoteRequest } from "./promote-plan.js";
 
 const log = childLogger({ module: "tool:dispatch-tick" });
 
-export type JobStage = "spec" | "build" | "fix";
+export type JobStage = "build" | "fix";
 
 export type StartJobResult = { status: "inert" } | { status: "started" } | { status: "failed"; reason: string };
 

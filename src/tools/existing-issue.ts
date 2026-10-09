@@ -8,16 +8,15 @@
  *   parseIssueReference  pure: the issue numbers a request names on the target repo (PR numbers excluded)
  *   findFixingPr         pure: the merged PR that fixes issue N, else an open PR that says it closes N
  *   fetchCrossRefPrs     the PRs on issue N's timeline (GitHub records every PR that mentions it)
- *   existingIssueAsk     the ask for that issue: the founder's words, then what the issue says
- *   withFounderAsk       the issue body with the ask appended as the spec-intake section
  *
  * A PR targeting `beta` never auto-closes its issue (GitHub closes issues only on the default branch), so an
  * open issue is no proof that nothing fixed it. That is why the timeline is read.
  */
 
 import type { Octokit } from "octokit";
-import { extractAsk } from "./pipeline-spec.js";
-import { VERBATIM_HEADING, verbatimAskSection } from "./dispatch-spec-intake.js";
+
+/** The section the retired spec intake appended to issue bodies (before AG-062). Old issues still carry it. */
+const VERBATIM_HEADING = "Founder request (verbatim)";
 
 export type IssueReference =
   | { kind: "none" }
@@ -129,27 +128,6 @@ export async function fetchCrossRefPrs(octokit: Octokit, owner: string, repo: st
     if (!out.some((p) => p.number === pr.number && sameRepo(p.repo, pr.repo))) out.push(pr);
   }
   return out;
-}
-
-/**
- * The issue body with the founder's words appended as the `## Founder request (verbatim)` section Pass P binds the
- * spec to. An imported issue (#41 came from a bug tracker) has none, and without it Pass P parks the issue as
- * needs-brief. A body that already ends with an ask is returned unchanged.
- */
-export function withFounderAsk(body: string, founderRequest: string): string {
-  if (extractAsk(body).ok) return body;
-  const head = body.trimEnd();
-  return [...(head ? [head, ""] : []), ...verbatimAskSection(founderRequest)].join("\n").trimEnd();
-}
-
-/**
- * The ask Pass P drafts a spec from when the founder points at an existing issue. Pass P's prompt holds only the ask
- * (deploy/lib/pass-p.sh) and its sandbox cannot read GitHub, so "Start work on issue #41" alone would give it nothing
- * to specify. His words come first and unedited; the issue as filed follows, labelled as such.
- */
-export function existingIssueAsk(founderRequest: string, issue: { number: number; title: string; body: string }): string {
-  const filed = [`Issue #${issue.number} as filed on GitHub: ${issue.title}`, issue.body.trim()].filter(Boolean).join("\n\n");
-  return [founderRequest.trimEnd(), "", "---", filed].join("\n");
 }
 
 /**
