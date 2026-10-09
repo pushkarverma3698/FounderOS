@@ -24,8 +24,8 @@ import {
 import type { Platform } from "../src/core/accounts.js";
 
 const CHAIN_CASES: Array<{ department: string; platform: Platform; expect: string }> = [
-  { department: "sales", platform: "google", expect: "turicks" },
-  { department: "comms", platform: "google", expect: "turicks" },
+  { department: "sales", platform: "google", expect: "personal" },
+  { department: "comms", platform: "google", expect: "personal" },
   { department: "jobhunt", platform: "google", expect: "personal" },
   { department: "marketing", platform: "linkedin", expect: "turicks" },
   { department: "jobhunt", platform: "linkedin", expect: "personal" },

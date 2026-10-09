@@ -177,7 +177,7 @@ describe("hub — Google reads never alert on Telegram", () => {
   });
 
   it("the bot's read path alerts (so the mock would see a send)", async () => {
-    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "turicks" });
+    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "personal" });
     expect(r.success).toBe(false);
     expect(r.error).toContain("re-authorization");
     expect(sendToChat).toHaveBeenCalledTimes(1);
@@ -186,8 +186,8 @@ describe("hub — Google reads never alert on Telegram", () => {
   it("the hub returns the same re-authorization error for mail and calendar, and sends nothing", async () => {
     const mail = await callGoogleTool("gmail_search", { query: "x" });
     expect(isError(mail)).toBe(true);
-    expect(text(mail)).toContain("## naggar\nError: Google account needs re-authorization");
-    const cal = await callGoogleTool("calendar_events", { account: "turicks" });
+    expect(text(mail)).toContain("Error: Google account needs re-authorization");
+    const cal = await callGoogleTool("calendar_events", { account: "personal" });
     expect(text(cal)).toContain("needs re-authorization");
     expect(sendToChat).not.toHaveBeenCalled();
   });

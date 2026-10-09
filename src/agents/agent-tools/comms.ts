@@ -694,7 +694,7 @@ export const readEmails = tool(
     schema: z.object({
       query: z.string().optional().nullable().describe("Gmail search query (default: 'in:inbox')"),
       limit: z.number().optional().nullable().describe("Max emails to return (default 10)"),
-      account: z.string().optional().nullable().describe("Google account: turicks | personal | naggar | a name added with /login google add | all. Default: turicks."),
+      account: z.string().optional().nullable().describe("Google account: personal | a name added with /login google add (e.g. turicks, naggar if signed in) | all. Default: personal."),
     }),
   },
 );
