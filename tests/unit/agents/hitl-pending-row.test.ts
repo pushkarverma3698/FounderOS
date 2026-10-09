@@ -56,4 +56,18 @@ describe("hitlGate pending-row rule", () => {
     expect(createInterrupt).toHaveBeenCalledTimes(1);
     expect((createInterrupt.mock.calls[0]![0] as { callback_data: string }).callback_data).toBe(JSON.stringify(B));
   });
+
+  // Issue #1055: the gateway resolves the row BEFORE it resumes, so the replay finds no
+  // pending row. It must not insert an orphan (prod 67c50034 → 553e5b7c, 64 of 149 rows).
+  it("resume replay of the card the tap just resolved → no insert", async () => {
+    const resumed = { configurable: { thread_id: "turicks:1", hitl_resumed: JSON.stringify(A) } };
+    await hitlGate(A, resumed);
+    expect(createInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("a different gated call inside the resumed run → still gets its own row", async () => {
+    const resumed = { configurable: { thread_id: "turicks:1", hitl_resumed: JSON.stringify(A) } };
+    await hitlGate(B, resumed);
+    expect(createInterrupt).toHaveBeenCalledTimes(1);
+  });
 });

@@ -11,8 +11,8 @@ export interface Verdict {
 
 /** A reminder must fire within this long of the ask ("remind me in 2 minutes" + one sweep + slack). */
 export const REMINDER_FIRE_LIMIT_MS = 4 * 60_000;
-/** Journey A runs every 3 days at 03:00 UTC; a result older than this means a run was missed. */
-export const A_LOG_MAX_AGE_H = 80;
+/** Journey A runs daily at 01:30 UTC; a result older than this means a run was missed (#1058). */
+export const A_LOG_MAX_AGE_H = 26;
 /** A real subject or event title is matched on at most this many leading characters (bots shorten long titles). */
 export const TITLE_MATCH_CHARS = 30;
 /** India has no daylight saving: IST is UTC+5:30 all year. */
@@ -226,24 +226,28 @@ export function scoreReminder(input: ReminderInput): Verdict {
   return { ok: true, detail: `fired in ${(tookMs / 60_000).toFixed(1)} min; the list named all ${scheduled.length} scheduled reminders` };
 }
 
-/** Journey A's last result, from ~/.claude/journey-a.log (its cron runs every 3 days on its own). */
-export function parseJourneyALog(
-  text: string | undefined,
-  mtimeMs: number | undefined,
-  nowMs: number,
-): { status: "green" | "red"; detail: string } {
-  if (text === undefined || mtimeMs === undefined) return { status: "red", detail: "no journey A log on this host" };
+/** One journey A result line: its own ISO time first, so the scorer ages the run, not the log file (#1058). */
+export function formatJourneyAResult(ok: boolean, repo: string | undefined, detail: string, atMs: number): string {
+  return `${new Date(atMs).toISOString()} ${ok ? "GREEN" : "RED"} journey A${repo ? ` (${repo})` : ""}: ${detail}`;
+}
+
+/** Journey A's last result, from ~/.claude/journey-a.log (its own daily cron at 01:30 UTC). */
+export function parseJourneyALog(text: string | undefined, nowMs: number): { status: "green" | "red"; detail: string } {
+  if (text === undefined) return { status: "red", detail: "no journey A log on this host" };
   const last = text
     .split("\n")
-    .filter((l) => /^(GREEN|RED) journey A\b/.test(l))
+    .filter((l) => /^(\S+ )?(GREEN|RED) journey A\b/.test(l))
     .pop();
   if (!last) return { status: "red", detail: "the journey A log has no result line" };
-  const ageH = (nowMs - mtimeMs) / 3_600_000;
-  const said = last.replace(/^(GREEN|RED) journey A( \([^)]*\))?:\s*/, "");
+  const m = /^(\d{4}-\d\d-\d\dT[\d:.]+Z) (GREEN|RED) journey A(?: \([^)]*\))?:\s*(.*)$/.exec(last);
+  const atMs = m ? Date.parse(m[1]!) : NaN;
+  if (!m || Number.isNaN(atMs)) return { status: "red", detail: `the last journey A result has no timestamp, so its age is unknown: ${last}` };
+  const ageH = (nowMs - atMs) / 3_600_000;
+  const said = m[3]!;
   if (ageH > A_LOG_MAX_AGE_H) {
     return { status: "red", detail: `last result is ${ageH.toFixed(0)}h old (limit ${A_LOG_MAX_AGE_H}h): ${said}` };
   }
-  return { status: last.startsWith("GREEN") ? "green" : "red", detail: `${said} (${ageH.toFixed(0)}h ago)` };
+  return { status: m[2] === "GREEN" ? "green" : "red", detail: `${said} (${ageH.toFixed(0)}h ago)` };
 }
 
 /** One IST calendar day as UTC instants. offsetDays 0 = the IST day containing nowMs, -1 = the day before. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   A_LOG_MAX_AGE_H,
+  formatJourneyAResult,
   istDayWindow,
   parseJourneyALog,
   REMINDER_FIRE_LIMIT_MS,
@@ -191,25 +192,51 @@ describe("scoreReminder (J5)", () => {
 });
 
 describe("parseJourneyALog", () => {
+  // Issue #1058: each result line carries its own time; the file's mtime said nothing about which run it was.
+  const at = (hAgo: number) => NOW - hAgo * 3_600_000;
   const log =
-    "GREEN journey A (o/r): PR a opened in 2 min with green CI\n" +
-    "RED journey A (o/r): no PR in 45 min\n" +
-    "GREEN journey A (o/r): PR task/issue-3 opened in 3 min with green CI\n";
+    formatJourneyAResult(true, "o/r", "PR a opened in 2 min with green CI", at(50)) + "\n" +
+    formatJourneyAResult(false, "o/r", "no PR in 45 min", at(26)) + "\n" +
+    formatJourneyAResult(true, "o/r", "PR task/issue-3 opened in 3 min with green CI", at(1)) + "\n";
   it("takes the last result line", () => {
-    const r = parseJourneyALog(log, NOW - 3_600_000, NOW);
+    const r = parseJourneyALog(log, NOW);
     expect(r.status).toBe("green");
     expect(r.detail).toContain("opened in 3 min");
+    expect(r.detail).toContain("1h ago");
   });
   it("is red when the last line is red", () => {
-    expect(parseJourneyALog("GREEN journey A (o/r): ok\nRED journey A: no PR in 45 min\n", NOW, NOW).status).toBe("red");
-  });
-  it("is red when the log is stale", () => {
-    const r = parseJourneyALog(log, NOW - (A_LOG_MAX_AGE_H + 1) * 3_600_000, NOW);
+    const text = formatJourneyAResult(true, "o/r", "ok", at(3)) + "\n" + formatJourneyAResult(false, undefined, "GitHub 500", at(2)) + "\n";
+    const r = parseJourneyALog(text, NOW);
     expect(r.status).toBe("red");
-    expect(r.detail).toContain("old");
+    expect(r.detail).toContain("GitHub 500");
+  });
+  it("is red when the last result is older than 26 h, whatever the file's age", () => {
+    expect(A_LOG_MAX_AGE_H).toBe(26);
+    const r = parseJourneyALog(formatJourneyAResult(true, "o/r", "ok", at(48)) + "\n", NOW);
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("48h old");
+  });
+  it("is green at 25 h: a daily run that finished a little late still counts", () => {
+    expect(parseJourneyALog(formatJourneyAResult(true, "o/r", "ok", at(25)) + "\n", NOW).status).toBe("green");
+  });
+  it("is red when the newest result has no timestamp (the old 3-day format)", () => {
+    const r = parseJourneyALog("GREEN journey A (o/r): PR task/issue-3 opened in 3 min with green CI\n", NOW);
+    expect(r.status).toBe("red");
+    expect(r.detail).toContain("no timestamp");
+  });
+  it("ignores stray stderr lines between results", () => {
+    const text = formatJourneyAResult(true, "o/r", "ok", at(2)) + "\ncleanup of #4 failed: GitHub 502\n";
+    expect(parseJourneyALog(text, NOW).status).toBe("green");
   });
   it("is red when there is no log", () => {
-    expect(parseJourneyALog(undefined, undefined, NOW).status).toBe("red");
+    expect(parseJourneyALog(undefined, NOW).status).toBe("red");
+  });
+});
+
+describe("formatJourneyAResult", () => {
+  it("leads with the ISO time, then the verdict line journey-daily reads", () => {
+    expect(formatJourneyAResult(true, "o/r", "PR x opened", NOW)).toBe("2026-10-09T02:30:00.000Z GREEN journey A (o/r): PR x opened");
+    expect(formatJourneyAResult(false, undefined, "boom", NOW)).toBe("2026-10-09T02:30:00.000Z RED journey A: boom");
   });
 });
 

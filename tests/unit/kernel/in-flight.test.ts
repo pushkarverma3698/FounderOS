@@ -12,6 +12,7 @@ import {
   IN_FLIGHT_MAX_LINES,
   IN_FLIGHT_UNAVAILABLE,
   buildInFlight,
+  inFlightState,
   mentionsFrom,
   renderInFlight,
   type InFlightSource,
@@ -150,5 +151,23 @@ describe("makePlanNode — in-flight block", () => {
     const system = calls[0]!.filter((m): m is SystemMessage => m instanceof SystemMessage).map((m) => String(m.content)).join("\n");
     expect(system).toContain(`approval card ${approval.id}`);
     expect(system).toContain(`reminder ${reminder.id}`);
+  });
+
+  it("reports the block's state on the trace hook, so a live turn shows whether it was built", async () => {
+    const model = { invoke: async () => new AIMessage('{"type":"reply","text":"ok"}') };
+    const seen: Array<Record<string, unknown>> = [];
+    const traceNote = (data: Record<string, unknown>) => void seen.push(data);
+    const plan = makePlanNode(model, catalog, () => now, [], undefined, undefined, new Set(), undefined, source());
+    await plan(state, { configurable: { thread_id: "turicks:111", traceNote } });
+    expect(seen).toEqual([{ inFlight: "built" }]);
+  });
+});
+
+describe("inFlightState", () => {
+  it("names off, unavailable, none and built", () => {
+    expect(inFlightState("")).toBe("off");
+    expect(inFlightState(IN_FLIGHT_UNAVAILABLE)).toBe("unavailable");
+    expect(inFlightState(renderInFlight({ approvals: [], reminders: [], turns: [] }, now))).toBe("none");
+    expect(inFlightState(renderInFlight({ approvals: [approval], reminders: [], turns: [] }, now))).toBe("built");
   });
 });
