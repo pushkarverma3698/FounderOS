@@ -78,6 +78,8 @@ describe("command catalog", () => {
     expect(needsConfirmation("halt", "")).toBe(true);
     expect(needsConfirmation("some_new_command", "")).toBe(true);
     expect(needsConfirmation("focus", "")).toBe(false);
+    // A reminder only messages the founder (set_reminder is ungated), so /remind has no "Run this?" card (J5, 2026-10-09).
+    expect(needsConfirmation("remind", "call the landlord at 3pm")).toBe(false);
     expect(needsConfirmation("focus", "close the pilot")).toBe(true);
   });
 

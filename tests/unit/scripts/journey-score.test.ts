@@ -41,6 +41,30 @@ describe("scoreInbox (J1)", () => {
   it("fails when gws found nothing but the bot invents mail", () => {
     expect(scoreInbox("You got an email from Priya about the launch.", []).ok).toBe(false);
   });
+
+  // 2026-10-09 run 47393614: the bot read the MoM mail correctly but shortened the subject.
+  const mom = [{ subject: "MoM | 8 Oct 2026", sender: "Sandeep Bist <sandeep@example.com>" }];
+  const momReply = "One email found in the work inbox since yesterday — MoM from Sandeep Bist dated Oct 8, 2026.";
+  it("passes when the reply names the sender instead of the exact subject", () => {
+    const v = scoreInbox("One email since yesterday, from Sandeep Bist, about next steps on AWS cost.", mom);
+    expect(v.ok).toBe(true);
+    expect(v.detail).toContain("sender");
+  });
+  it("passes when the reply names the subject's keyword and not its date punctuation", () => {
+    const v = scoreInbox(momReply.replace("Sandeep Bist", "your manager"), mom);
+    expect(v.ok).toBe(true);
+    expect(v.detail).toContain("keywords");
+  });
+  it("passes the 2026-10-09 reply as a whole", () => {
+    expect(scoreInbox(momReply, mom).ok).toBe(true);
+  });
+  it("does not match a sender by a bare email domain or a one-word generic keyword like 'update'", () => {
+    const generic = [{ subject: "Weekly update", sender: "no-reply@example.com" }];
+    expect(scoreInbox("There was an update on the project.", generic).ok).toBe(false);
+  });
+  it("still fails when nothing about the real mail appears", () => {
+    expect(scoreInbox("You have a message about a dentist appointment.", mom).ok).toBe(false);
+  });
 });
 
 describe("scoreCalendar (J2)", () => {
@@ -98,6 +122,42 @@ describe("scorePrs (J3)", () => {
   });
   it("passes when there are no open PRs and the bot says so", () => {
     expect(scorePrs("There are no open PRs on FounderOS.", "", []).ok).toBe(true);
+  });
+
+  // 2026-10-09 run 47393614: the reply grouped PRs under "CI Red" / "CI Pending" headings, so no PR line carried a colour.
+  const grouped =
+    "13 open PRs total.\n\n**CI Pending (1):**\n- #1053 spec fix\n\n**CI Red (2) — failing check \"PR scope\":**\n- #1048 journeys (draft)\n- #1010 plans (draft)\n\n**CI Green (1):** #1051";
+  const gprs = [
+    { number: 1053, ci: "pending", createdAt: "2026-10-08T10:00:00Z" },
+    { number: 1048, ci: "red", createdAt: "2026-10-07T10:00:00Z" },
+    { number: 1010, ci: "red", createdAt: "2026-10-05T10:00:00Z" },
+    { number: 1051, ci: "green", createdAt: "2026-10-08T12:00:00Z" },
+  ];
+  it("takes the colour from the heading above the PR line when the line has none", () => {
+    expect(scorePrs(grouped, "#1010 is the oldest.", gprs).ok).toBe(true);
+  });
+  it("still fails a PR listed under the wrong heading", () => {
+    const wrong = scorePrs("**CI Red (1):**\n- #1048 journeys", "#1048", [{ number: 1048, ci: "green", createdAt: "2026-10-07T10:00:00Z" }]);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.detail).toContain("#1048: GitHub says green");
+  });
+  it("does not trust a summary heading that names several colours", () => {
+    const summary = "9 green, 3 red, 2 pending\n- #1036 daily journeys\n- #1002 probe fix";
+    expect(scorePrs(summary, "#1002", prs).ok).toBe(false);
+  });
+  it("tolerates a PR that was closed after the snapshot", () => {
+    const v = scorePrs("• #1036 CI green", "#1036", prs, new Set([1036]));
+    expect(v.ok).toBe(true);
+  });
+  it("tolerates a PR opened after the snapshot (extra PRs in the reply are not an error)", () => {
+    expect(scorePrs(`${good}\n• #1060 new thing: CI pending`, "#1002", prs).ok).toBe(true);
+  });
+  it("accepts any colour for a snapshot PR whose CI was still pending", () => {
+    const pending = [{ number: 1053, ci: "pending", createdAt: "2026-10-08T10:00:00Z" }];
+    expect(scorePrs("• #1053 CI green", "#1053", pending).ok).toBe(true);
+  });
+  it("names the oldest PR among those still open", () => {
+    expect(scorePrs("• #1036 CI green", "#1036 is oldest", prs, new Set([1036])).ok).toBe(true);
   });
 });
 
