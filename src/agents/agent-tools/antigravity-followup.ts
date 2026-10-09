@@ -57,7 +57,9 @@ export const antigravityTaskStatus = tool(
       "Where an Antigravity task stands — queued, working, failed (with the dispatcher's own reason), in review " +
       "(PR, CI, Claude's verdict), blocked or merged — read from GitHub and the dispatcher. Read-only, no approval. " +
       "ALWAYS use this for 'where are we on #N', 'is it done', 'did Antigravity pick it up', 'why isn't it picked up'. " +
-      "Never answer those from list_issues, and never promise to monitor: this answer names the real notifications.",
+      "Never answer those from list_issues, and never promise to monitor: this answer names the real notifications. " +
+      "Relay the answer as written: keep the branch, EVERY blocker line, the fix-round count and the next-step time. " +
+      "Never drop a blocker, and never say a review is incomplete or unexplained when the answer lists a verdict.",
     schema,
   },
 );
