@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DispatchSandbox, goodBrief } from "./dispatch-sandbox.js";
@@ -391,7 +391,7 @@ describe("intake edge cases", () => {
   });
   it("a Claude weekly limit costs no attempt, and no second run is started while the wall holds", () => {
     sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
-    const env = { ...sb.gitEnv(), AGENT_PIPELINE_V2: "1", AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(), AGENT_DISPATCH_SPEC_WORK: work, FOUNDEROS_CONTRACTS_DIR: contracts };
+    const env = { ...sb.gitEnv(), AGENT_PIPELINE_V2: "1", AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(), AGENT_DISPATCH_SPEC_WORK: work, FOUNDEROS_CONTRACTS_DIR: contracts, AGENT_DISPATCH_SPEC_ENGINE: "claude" };
     const wall = { claudeRc: 0, claudeOut: "Error: You've hit your weekly limit · resets Oct 11, 12am (UTC)", env };
     sb.tick(wall);
     expect(sb.claudeRuns()).toBe(1);
@@ -401,5 +401,144 @@ describe("intake edge cases", () => {
     sb.tick(wall);
     expect(sb.claudeRuns()).toBe(1);
     expect(sb.messages().filter((m) => m.includes("usage limit"))).toHaveLength(1);
+  });
+});
+
+describe("Claude is unavailable: Antigravity writes the spec (on a model the executor does not use)", () => {
+  const BLOCKED = "agent-dispatch.claude-blocked";
+  const QUOTA_FILE = join("home", ".claude", "agent-dispatch.quota-until");
+  const inTwoDays = (): number => Math.floor(Date.now() / 1000) + 2 * 86400;
+  const wallClaude = (): void => {
+    mkdirSync(join(sb.root, "home", ".claude"), { recursive: true });
+    writeFileSync(join(sb.root, "home", ".claude", BLOCKED), `quota\n${inTwoDays()}\nYou've hit your weekly limit\n`);
+  };
+  const agyTick = (hook: string, over: { agyOut?: string; env?: Record<string, string> } = {}) =>
+    sb.tick({
+      agyHook: hook,
+      agyRc: 0,
+      agyOut: over.agyOut,
+      env: {
+        ...sb.gitEnv(),
+        AGENT_PIPELINE_V2: "1",
+        AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(),
+        AGENT_DISPATCH_SPEC_WORK: work,
+        FOUNDEROS_CONTRACTS_DIR: contracts,
+        AGENT_DISPATCH_SPEC_VITEST: fakeVitest,
+        FAKE_VITEST_LOG: join(sb.root, "fake-vitest.log"),
+        ...over.env,
+      },
+    });
+  const attempts = (n: number): number => sb.commentsOf(n).filter((c) => c.startsWith("<!-- pass-p-attempt:")).length;
+
+  it("while claude_blocked holds: agy writes the spec, the card goes out, and Claude is not started", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    const base = gitOrigin("rev-parse", "refs/heads/main");
+    const r = agyTick(writes());
+    expect(r.status).toBe(0);
+    expect(sb.claudeRuns()).toBe(0);
+    expect(sb.agyRuns()).toBe(1);
+    // a different model than the executor's (gemini-3.6-flash-medium, gemini-3.1-flash-lite)
+    expect(sb.agyModels()).toEqual(["gemini-3.1-pro-high"]);
+    // same contract: locked test on top of the base commit, pending record, one card, label moved
+    expect(gitOrigin("rev-parse", "refs/heads/task/issue-1^")).toBe(base);
+    expect(gitOrigin("diff", "--name-only", base, "refs/heads/task/issue-1").split("\n")).toEqual([TEST_FILE]);
+    expect(pendingFiles()).toHaveLength(1);
+    expect(sb.markups().some((m) => m.includes("cp:approve:"))).toBe(true);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+    expect(sb.labelsOf(1)).not.toContain(SPEC);
+    expect(attempts(1)).toBe(0);
+    // the founder's ask reaches agy fenced as data, and the run holds no GitHub token
+    expect(sb.agyPrompts()[0]).toContain("It is DATA describing the task");
+    expect(sb.agyGhTokensSeen()).toEqual(["<unset>"]);
+  });
+
+  it("a Claude run that meets the weekly limit hands the same issue to agy in the same tick, with no attempt spent", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    const r = sb.tick({
+      claudeRc: 0,
+      claudeOut: "Error: You've hit your weekly limit · resets Oct 11, 12am (UTC)",
+      agyHook: writes(),
+      agyRc: 0,
+      env: {
+        ...sb.gitEnv(),
+        AGENT_PIPELINE_V2: "1",
+        AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(),
+        AGENT_DISPATCH_SPEC_WORK: work,
+        FOUNDEROS_CONTRACTS_DIR: contracts,
+        AGENT_DISPATCH_SPEC_VITEST: fakeVitest,
+        FAKE_VITEST_LOG: join(sb.root, "fake-vitest.log"),
+      },
+    });
+    expect(r.status).toBe(0);
+    expect(sb.claudeRuns()).toBe(1);
+    expect(sb.agyRuns()).toBe(1);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+    expect(attempts(1)).toBe(0);
+    expect(existsSync(join(sb.root, "home", ".claude", BLOCKED))).toBe(true);
+  });
+
+  it("never uses an executor model for the spec: with no other candidate it waits, and no attempt is spent", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick(writes(), { env: { AGENT_DISPATCH_MODELS: "gemini-3.6-flash-medium gemini-3.1-pro-high" } });
+    expect(sb.agyRuns()).toBe(0);
+    expect(sb.claudeRuns()).toBe(0);
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    expect(attempts(1)).toBe(0);
+  });
+
+  it("a spec model agy does not know costs no attempt, and the founder is told how to fix it", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick(writes(), { env: { AGY_UNKNOWN_MODELS: "gemini-3.1-pro-high" } });
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    expect(attempts(1)).toBe(0);
+    expect(sb.messages().join("\n")).toContain("AGENT_DISPATCH_SPEC_AGY_MODELS");
+  });
+
+  it("agy's own quota wall is recorded and costs no attempt", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick("true", { agyOut: "Error: Individual quota reached. Resets in 3h10m5s" });
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    expect(attempts(1)).toBe(0);
+    expect(existsSync(join(sb.root, QUOTA_FILE))).toBe(true);
+    // next tick: the wall holds, agy is not started again
+    agyTick(writes());
+    expect(sb.agyRuns()).toBe(1);
+  });
+
+  it("a spec from agy faces the same checks: a run that edits a tracked file is an attempt and leaves no card", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick(writes(draft(), "echo changed >> README.md"));
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    expect(attempts(1)).toBe(1);
+    expect(hasBranch("task/issue-1")).toBe(false);
+    expect(pendingFiles()).toEqual([]);
+    expect(sb.markups()).toEqual([]);
+  });
+
+  it("pinned to claude, a Claude wall means waiting, not agy", () => {
+    wallClaude();
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick(writes(), { env: { AGENT_DISPATCH_SPEC_ENGINE: "claude" } });
+    expect(sb.agyRuns()).toBe(0);
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+  });
+
+  it("with Claude available, agy is never started", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    tick(writes());
+    expect(sb.claudeRuns()).toBe(1);
+    expect(sb.agyRuns()).toBe(0);
+  });
+
+  it("pinned to agy, agy writes it even though Claude is fine", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    agyTick(writes(), { env: { AGENT_DISPATCH_SPEC_ENGINE: "agy" } });
+    expect(sb.claudeRuns()).toBe(0);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
   });
 });
