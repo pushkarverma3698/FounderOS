@@ -19,6 +19,7 @@
 
 import type { KernelBindableModel, KernelChatModel, KernelTool } from "../kernel/index.js";
 import { is503Error } from "../agents/model.js";
+import { isKeyLimitError, ProviderKeyLimitError } from "../agents/provider-key-limit.js";
 import { raceWithDeadline } from "./model-deadline.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -92,6 +93,8 @@ export function withModelRetry(
         try {
           return await raceWithDeadline(model.invoke(messages), attemptTimeoutMs, label);
         } catch (err) {
+          // A spent key: every model on it gets the same 403, so stop the turn here, typed (issue #1052).
+          if (isKeyLimitError(err)) throw new ProviderKeyLimitError(err);
           if (!is503Error(err)) throw err; // auth/404/logic errors: not ours to absorb
           lastErr = err;
           if (attempt === backoff.length) break;
