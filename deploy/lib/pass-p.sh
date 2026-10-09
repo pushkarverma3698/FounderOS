@@ -251,9 +251,17 @@ pass_p_run_claude() {
   PASS_P_RUN_RC=$?
   # A usage or auth wall is Claude Code's, not this spec's: claude exits 0 on a weekly limit, so read the text whatever the
   # code. It records the wall, tells the founder once, and costs the issue no attempt (#1005, #1030: three spent on a limit).
-  wall="$(classify_agy_failure "$tmp/run.log")"
+  # Plain `claude -p` prints the limit message bare ("You've hit your weekly limit · resets ..."), with no "Error: " in
+  # front, and the classifier only trusts error lines (prod 10-09: #115 spent a 4th attempt on it). A run that printed
+  # only a few lines cannot be a spec in progress, so those lines are read as error lines.
+  if [[ "$(grep -c . "$tmp/run.log")" -le 5 ]]; then
+    sed 's/^/Error: /' "$tmp/run.log" >"$tmp/run.wall"
+  else
+    cp "$tmp/run.log" "$tmp/run.wall"
+  fi
+  wall="$(classify_agy_failure "$tmp/run.wall")"
   if [[ "$wall" == quota || "$wall" == auth ]]; then
-    claude_wall "$wall" "$tmp/run.log"
+    claude_wall "$wall" "$tmp/run.wall"
     return 3
   fi
   return 0
