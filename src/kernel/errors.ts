@@ -15,6 +15,8 @@
  *   - AbortError          → the turn-timeout guard aborted the run; retrying
  *     inside an aborted run would race the founder's next message.
  *   - TurnTimeoutError    → same deadline, surfaced by the wrapper itself.
+ *   - ProviderKeyLimitError → the model key has spent its limit; every retry
+ *     and fallback on that key gets the same 403.
  *
  * Detection is by error NAME, not instanceof: budget/timeout classes live in
  * src/infra and src/gateway, and provider SDKs re-wrap AbortError — the name
@@ -28,6 +30,7 @@ const TERMINAL_ERROR_NAMES = new Set([
   "DailyBudgetExceededError",
   "AbortError",
   "TurnTimeoutError",
+  "ProviderKeyLimitError", // spent OpenRouter key: retrying a step cannot help (issue #1052)
 ]);
 
 /** True when `err` must propagate out of the graph untouched (see module doc). */
