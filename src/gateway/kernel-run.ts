@@ -192,6 +192,8 @@ async function runKernelTurn(ctx: Context, text: string, profileId: string | und
           // own budget 15min) that yields no new LangGraph state for its whole
           // run — src/agents/agent-tools/engineering.ts reads this.
           onTurnActivity: () => touch?.(),
+          // Planner fields on the turn's trace (route.decided carries inFlight: off|unavailable|none|built).
+          traceNote: (data: Record<string, unknown>) => trace.event("route.decided", data),
         },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
@@ -316,7 +318,7 @@ async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected",
       budget = makeRunBudget();
       let touch: (() => void) | undefined;
       const config = {
-        configurable: { thread_id: threadId, onTurnActivity: () => touch?.(), ...cardEngine(pending?.callback_data) },
+        configurable: { thread_id: threadId, onTurnActivity: () => touch?.(), ...cardEngine(pending?.callback_data), hitl_resumed: pending?.callback_data },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
       };
