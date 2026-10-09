@@ -23,10 +23,8 @@ describe("renderCaptureLine", () => {
     expect(renderCaptureLine({ lastAt: new Date(NOW.getTime() - CAPTURE_STALE_MS), rowsToday: 1 }, NOW)).not.toContain("⚠️");
   });
 
-  it("warns and says what to do when no row exists yet", () => {
-    const line = renderCaptureLine({ lastAt: null, rowsToday: 0 }, NOW);
-    expect(line).toContain("no rows yet");
-    expect(line).toContain("⚠️");
+  it("says nothing when the Mac capture has never run: a warning he cannot act on from Telegram is noise", () => {
+    expect(renderCaptureLine({ lastAt: null, rowsToday: 0 }, NOW)).toBeNull();
   });
 });
 
@@ -64,6 +62,13 @@ describe("/where prints the capture line", () => {
     const { ctx: c, reply } = ctx();
     await handleWhere(c, { fetch, capture: async () => { throw new Error("db down"); } });
     expect(String(reply.mock.calls.at(-1)?.[0])).toBe("Mac capture: status unavailable (db down)");
+  });
+
+  it("prints no capture line when the capture has never run", async () => {
+    const { ctx: c, reply } = ctx();
+    await handleWhere(c, { fetch, capture: async () => ({ lastAt: null, rowsToday: 0 }) });
+    expect(reply.mock.calls.some((call) => String(call[0]).includes("Mac capture"))).toBe(false);
+    expect(reply.mock.calls.some((call) => String(call[0]).includes("install-brain-capture"))).toBe(false);
   });
 
   it("prints no capture line when no capture dependency is given", async () => {

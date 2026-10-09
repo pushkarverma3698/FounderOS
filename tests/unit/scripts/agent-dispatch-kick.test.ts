@@ -82,14 +82,14 @@ describe("agent-dispatch --issue N --repo R --stage S (a job: deploy/job-run)", 
     expect(sb.log()).toMatch(/forced issue #710, stage spec — no claim/);
   });
 
-  it("--stage needs --issue, and only spec or build", () => {
+  it("--stage needs --issue, and only spec, build or fix", () => {
     const noIssue = sb.tick({ args: ["--stage", "build"] });
     const bad = sb.tick({ args: ["--issue", "710", "--stage", "deploy"] });
 
     expect(noIssue.status).toBe(2);
     expect(noIssue.stderr).toMatch(/--stage needs --issue/);
     expect(bad.status).toBe(2);
-    expect(bad.stderr).toMatch(/--stage is spec or build/);
+    expect(bad.stderr).toMatch(/--stage is spec, build or fix/);
     expect(sb.agyRuns()).toBe(0);
   });
 });

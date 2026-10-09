@@ -29,7 +29,7 @@ const PART_BUDGET = 3800;
 /** One printed line holds at most this many escaped characters; longer text continues on the next line. */
 const LINE_BUDGET = 1200;
 
-export const CODING_ACTIONS = ["approve", "change", "cancel", "merge", "merge_ack"] as const;
+export const CODING_ACTIONS = ["approve", "change", "cancel", "merge", "merge_ack", "fix", "close_pr"] as const;
 export type CodingAction = (typeof CODING_ACTIONS)[number];
 export interface CodingCallback {
   action: CodingAction;
@@ -47,13 +47,13 @@ const NONCE_PATTERN = "[A-Za-z0-9_-]{1,32}";
 const NONCE_RE = new RegExp("^" + NONCE_PATTERN + "$");
 const CALLBACK_RE = new RegExp("^cp:(" + CODING_ACTIONS.join("|") + "):(" + NONCE_PATTERN + ")$");
 
-function assertNonce(nonce: string): void {
+export function assertNonce(nonce: string): void {
   if (typeof nonce !== "string" || !NONCE_RE.test(nonce)) {
     throw new Error("coding card nonce must match " + NONCE_PATTERN);
   }
 }
 
-function callbackData(action: CodingAction, nonce: string): string {
+export function callbackData(action: CodingAction, nonce: string): string {
   const data = "cp:" + action + ":" + nonce;
   if (Buffer.byteLength(data, "utf8") > MAX_CALLBACK_BYTES) throw new Error("callback data over 64 bytes");
   return data;
@@ -96,7 +96,7 @@ function escapedPieces(raw: string, max: number = LINE_BUDGET): string[] {
 }
 
 /** A labelled value as printed lines. The label is trusted markup; the value is untrusted text. */
-function field(label: string, raw: string, tag?: string): string[] {
+export function field(label: string, raw: string, tag?: string): string[] {
   return escapedPieces(raw).map((piece, i) => {
     const body = tag === undefined ? piece : wrap(tag, piece);
     return (i === 0 ? label : "  ") + body;
@@ -104,7 +104,7 @@ function field(label: string, raw: string, tag?: string): string[] {
 }
 
 /** Pack lines into messages. A line is never split here, and every line is short, so none is lost. */
-function packLines(lines: string[]): string[] {
+export function packLines(lines: string[]): string[] {
   const parts: string[] = [];
   let cur = "";
   for (const line of lines) {
@@ -228,7 +228,7 @@ function row(label: string, mark: Mark, reasons: string[]): string[] {
   return mark === "PASS" ? [head] : [head, ...bullets(reasons, "no reason given")];
 }
 
-function assertHttpsUrl(url: string): void {
+export function assertHttpsUrl(url: string): void {
   let ok = false;
   try {
     ok = typeof url === "string" && new URL(url).protocol === "https:";

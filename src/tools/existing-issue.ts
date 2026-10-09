@@ -17,7 +17,7 @@
 
 import type { Octokit } from "octokit";
 import { extractAsk } from "./pipeline-spec.js";
-import { verbatimAskSection } from "./dispatch-spec-intake.js";
+import { VERBATIM_HEADING, verbatimAskSection } from "./dispatch-spec-intake.js";
 
 export type IssueReference =
   | { kind: "none" }
@@ -150,4 +150,27 @@ export function withFounderAsk(body: string, founderRequest: string): string {
 export function existingIssueAsk(founderRequest: string, issue: { number: number; title: string; body: string }): string {
   const filed = [`Issue #${issue.number} as filed on GitHub: ${issue.title}`, issue.body.trim()].filter(Boolean).join("\n\n");
   return [founderRequest.trimEnd(), "", "---", filed].join("\n");
+}
+
+/**
+ * The issue body as the approval card shows it: text, not its encoding. An imported issue (Oplify's bug-tracker
+ * migration) stores its body as a JSON string literal, so the card read `"**Area/Module:** ...\\n**Status:**"`;
+ * a body already carrying the spec-intake section would also show the founder his own words back, fenced. The
+ * literal is decoded, the section dropped, and the cut lands on a word with an ellipsis (it used to stop mid-word).
+ */
+export function readableIssueBody(body: string, max: number): string {
+  const marker = body.indexOf(`## ${VERBATIM_HEADING}`);
+  let text = (marker >= 0 ? body.slice(0, marker) : body).trim();
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(text);
+      if (typeof decoded === "string") text = decoded.trim();
+    } catch {
+      // allow-failopen: not a JSON string literal after all; the text is shown as written.
+    }
+  }
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.search(/\s\S*$/);
+  return `${(space > 0 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }

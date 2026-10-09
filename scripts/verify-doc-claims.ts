@@ -65,6 +65,24 @@ interface Claim {
   readonly files?: readonly string[];
   /** Why any file is excluded — required when `files` is narrower than the path. */
   readonly exemption?: string;
+  /**
+   * The doc states a floor ("580+ files"), not an exact count: it holds while
+   * `actual - floorSlack < claimed <= actual`. For counts that move on every PR. The
+   * source-file count did, so any two PRs adding a src file failed each other's CI
+   * until one of them ran --fix (2026-10-09: #1106, #1107, #1110, #1111).
+   */
+  readonly floorSlack?: number;
+}
+
+/** Whether a documented number agrees with the measured one. */
+export function claimHolds(claimed: number, actual: number, floorSlack?: number): boolean {
+  if (floorSlack === undefined) return claimed === actual;
+  return claimed <= actual && actual - claimed < floorSlack;
+}
+
+/** The floor --fix writes: the measured count rounded down to the nearest ten. */
+export function floorOf(actual: number): number {
+  return Math.floor(actual / 10) * 10;
 }
 
 function read(relPath: string): string {
@@ -158,7 +176,8 @@ const CLAIMS: readonly Claim[] = [
   {
     name: "TypeScript source file count",
     measure: countGitTrackedSourceFiles,
-    patterns: [/\b(\d[\d,]*) TypeScript source files/g, /Source \| (\d[\d,]*) files/g],
+    patterns: [/\b(\d[\d,]*)\+? TypeScript source files/g, /Source \| (\d[\d,]*)\+? files/g],
+    floorSlack: 100,
   },
   {
     name: "ADR count",
@@ -188,6 +207,8 @@ export interface Violation {
   readonly line: number;
   readonly claimed: number;
   readonly actual: number;
+  /** What --fix writes in place of `claimed`: `actual`, or its floor for a floor claim. */
+  readonly fixTo: number;
   readonly text: string;
 }
 
@@ -208,8 +229,9 @@ export function checkClaim(claim: Claim): Violation[] {
           const raw = match[1];
           if (raw === undefined) continue;
           const claimed = toNumber(raw);
-          if (claimed !== actual) {
-            violations.push({ claim: claim.name, file, line: index + 1, claimed, actual, text: text.trim() });
+          if (!claimHolds(claimed, actual, claim.floorSlack)) {
+            const fixTo = claim.floorSlack === undefined ? actual : floorOf(actual);
+            violations.push({ claim: claim.name, file, line: index + 1, claimed, actual, fixTo, text: text.trim() });
           }
         }
       }
@@ -246,11 +268,11 @@ function applyFixes(violations: readonly Violation[]): number {
       // Replace only the offending literal, in whichever rendering it appears in,
       // leaving surrounding prose untouched.
       const stale = renderings(v.claimed);
-      const fresh = renderings(v.actual);
+      const fresh = renderings(v.fixTo);
       let updated = current;
       for (const [i, form] of stale.entries()) {
         if (updated.includes(form)) {
-          updated = updated.replace(form, fresh[i] ?? String(v.actual));
+          updated = updated.replace(form, fresh[i] ?? String(v.fixTo));
           break;
         }
       }

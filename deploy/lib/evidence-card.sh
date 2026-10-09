@@ -90,3 +90,41 @@ ec_run() {
   [[ "$EC_STATE" != "held" ]] || log "$repo_name#$pr merge held: $EC_NOTE"
   return 0
 }
+
+# ---------------------------------------------------------------------------------------------------------------------
+# The blocked-PR card. Not part of the contract flow and not behind AGENT_PIPELINE_V2: a PR pr-brain blocked is blocked on
+# every path, and the founder needs the reasons and a way to act on them from the phone (Oplify PR #116, 2026-10-09: he got
+# "CHANGES REQUESTED — blocked" and nothing else). scripts/blocked-review-card.ts decides whether there is a card (a
+# REQUEST_CHANGES verdict with a blocker for exactly this head, on an open draft PR), writes the record the [Fix now] and
+# [Close PR] buttons point at, and prints one JSON line; this sends it.
+# ---------------------------------------------------------------------------------------------------------------------
+BC_SENT=0
+
+bc_ts() {
+  ( cd "$EC_ROOT" && "$EC_NODE" --import tsx/esm scripts/blocked-review-card.ts "$@" )
+}
+
+# bc_run PR HEAD VERDICT - sets BC_SENT=1 only when the card reached Telegram. Never aborts the sweep; on any
+# problem it logs why and leaves BC_SENT=0, so the caller sends its plain message instead.
+bc_run() {
+  local pr="$1" head="$2" verdict="$3" out status
+  BC_SENT=0
+  case "$verdict" in
+    CLEARED*|APPROVED*) return 0 ;;
+  esac
+  out="$(bc_ts --repo "${repo_owner}/${repo_name}" --pr "$pr" --head "$head" 2>>"$LOG")"
+  status="$(jq -r '.status // empty' <<<"$out" 2>/dev/null | tail -n 1)"
+  case "$status" in
+    CARD)
+      if ec_send "$(jq -c '.parts' <<<"$out")" "$(jq -c '.reply_markup' <<<"$out")"; then
+        BC_SENT=1
+        log "$repo_name#$pr blocked card sent"
+      else
+        log "$repo_name#$pr blocked card could not be sent to Telegram; sending the plain message"
+      fi
+      ;;
+    NONE) log "$repo_name#$pr no blocked card: $(jq -r '.reason // "no reason given"' <<<"$out" 2>/dev/null)" ;;
+    *) log "$repo_name#$pr blocked card step failed: $(jq -r '.error // "printed nothing readable"' <<<"$out" 2>/dev/null)" ;;
+  esac
+  return 0
+}
