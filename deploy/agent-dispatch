@@ -391,21 +391,27 @@ emit_fenced_issue_text() {
 # plain-text view of the run.
 #
 # A model agy no longer knows (retired or renamed) is not a failed attempt: the same run starts again on the next
-# AGENT_DISPATCH_MODELS candidate. The retired name is warned about once ever (a marker per name), and when every
-# candidate is unknown the last run's log, which carries agy's own "not recognized" line, goes to the caller's
-# ordinary failure path: one agent:failed message that quotes it.
+# AGENT_DISPATCH_MODELS candidate. Every such downgrade is announced on Telegram, naming the run, the model that was
+# skipped and the one that takes over (a quiet fall to a weaker model is how the Oplify #115 fix ran on the cheapest
+# tier unannounced, 2026-10-09). When every candidate is unknown the last run's log, which carries agy's own "not
+# recognized" line, goes to the caller's ordinary failure path: one agent:failed message that quotes it.
 run_agy_with_progress() {
-  local label="$1" workspace="$2" prompt_file="$3" agy_log="$4" m rc=1 marker
-  for m in $AGY_EXECUTOR_MODELS; do
+  local label="$1" workspace="$2" prompt_file="$3" agy_log="$4" m rc=1 next
+  local -a models
+  read -r -a models <<<"$AGY_EXECUTOR_MODELS"
+  local i
+  for ((i = 0; i < ${#models[@]}; i++)); do
+    m="${models[$i]}"
     AGY_MODEL="$m"
     agy_run "$label" "$workspace" "$prompt_file" "$m" "$TIMEOUT_SEC" "$agy_log" "$GEMINI_API_KEY"
     rc=$?
     agy_model_unknown "$agy_log" || return "$rc"
+    next="${models[$((i + 1))]:-}"
     log "${m} is not a model agy knows: trying the next executor model"
-    marker="$HOME/.claude/agent-dispatch.warned-model-$(printf '%s' "$m" | tr -c 'A-Za-z0-9._-' '_')"
-    if [[ ! -e "$marker" ]]; then
-      : >"$marker" 2>/dev/null
-      notify "⚠️ agent-dispatch: executor model ${m} is not in agy's catalog (retired or renamed), so it is skipped and the next candidate runs. Fix: ssh founderos-vps, crontab -e, correct AGENT_DISPATCH_MODELS on the agent-dispatch line (agy models lists what exists)."
+    if [[ -n "$next" ]]; then
+      notify "⚠️ agent-dispatch: ${label}: executor model ${m} is not in agy's catalog (retired or renamed). Falling back to ${next} for this run, so it may be a weaker model. Fix: ssh founderos-vps, crontab -e, correct AGENT_DISPATCH_MODELS on the agent-dispatch line (agy models lists what exists)."
+    else
+      notify "⚠️ agent-dispatch: ${label}: executor model ${m} is not in agy's catalog and no candidate is left, so this run failed without starting. Fix: ssh founderos-vps, crontab -e, correct AGENT_DISPATCH_MODELS on the agent-dispatch line (agy models lists what exists)."
     fi
   done
   return "$rc"

@@ -35,7 +35,8 @@ import {
 import { canMerge, mergeIdempotencyKey } from "../tools/pr-evidence.js";
 import { fingerprintOf } from "../tools/spec-gate.js";
 import { parseCodingCallback } from "./coding-cards.js";
-import { liveCodingDeps } from "./coding-callbacks-live.js";
+import { liveBlockedActions, liveCodingDeps } from "./coding-callbacks-live.js";
+import { handleBlockedTap, type BlockedActions } from "./blocked-callbacks.js";
 
 export const CODING_CALLBACK_PREFIX = "cp:";
 export const SPEC_APPROVED_ACTION = "pipeline_spec_approved";
@@ -316,13 +317,22 @@ async function mergePr(ctx: Context, deps: CodingDeps, rec: PendingMerge, acknow
 }
 
 /** False when the payload is not ours, so the next callback handler gets it. */
-export async function handleCodingCallback(ctx: Context, deps: CodingDeps = liveCodingDeps()): Promise<boolean> {
+export async function handleCodingCallback(
+  ctx: Context,
+  deps: CodingDeps = liveCodingDeps(),
+  blocked: BlockedActions = liveBlockedActions(),
+): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(CODING_CALLBACK_PREFIX)) return false;
 
   const cb = parseCodingCallback(data);
   if (!cb) {
     await ctx.answerCallbackQuery({ text: "That button is out of date." });
+    return true;
+  }
+  // pr-brain's blocked-PR card works with the pipeline flag off too (blocked-callbacks.ts).
+  if (cb.action === "fix" || cb.action === "close_pr") {
+    await handleBlockedTap(ctx, cb, deps, blocked);
     return true;
   }
   if (!pipelineV2Enabled(deps.env)) {
@@ -367,7 +377,7 @@ export async function handleCodingCallback(ctx: Context, deps: CodingDeps = live
     if (rec.kind === "spec") {
       if (cb.action === "approve") await approve(ctx, deps, rec);
       else await sendBack(ctx, deps, rec, cb.action === "change" ? "change" : "cancel");
-    } else {
+    } else if (rec.kind === "merge") {
       await mergePr(ctx, deps, rec, cb.action === "merge_ack");
     }
   } catch (err) {
