@@ -8,7 +8,7 @@
 import { childLogger } from "../infra/logger.js";
 import { getDb } from "../db/client.js";
 import { hitlApprovals, actionLog } from "../db/schema.js";
-import { eq, and, gte, count } from "drizzle-orm";
+import { eq, and, gt, gte, count, notLike } from "drizzle-orm";
 
 const log = childLogger({ module: "gateway:status" });
 
@@ -136,11 +136,17 @@ export async function getSystemStatus(): Promise<StatusData> {
   const db = getDb();
 
   try {
-    // Pending approvals
+    // Pending approvals the founder can still tap: eval threads and expired cards are not his (#1061).
     const [approvalRow] = await db
       .select({ total: count() })
       .from(hitlApprovals)
-      .where(eq(hitlApprovals.status, "pending"));
+      .where(
+        and(
+          eq(hitlApprovals.status, "pending"),
+          notLike(hitlApprovals.thread_id, "eval:%"),
+          gt(hitlApprovals.expires_at, new Date()),
+        ),
+      );
 
     // Emails sent today
     const todayMidnight = new Date();
