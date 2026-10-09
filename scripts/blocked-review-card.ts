@@ -18,10 +18,9 @@
 import * as fsp from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { renderBlockedCard } from "../src/gateway/blocked-card.js";
-import { contractsDir, type StoreFs } from "../src/tools/contract-store.js";
-import { newNonce, writePending } from "../src/tools/pipeline-pending.js";
+import { contractsDir, newNonce, writePending, type StoreFs } from "../src/tools/pipeline-pending.js";
 import { blockersOf, latestVerdictForHead } from "../src/tools/pr-verdict-facts.js";
-import { execGh, readOnlyGh, type GhRunner } from "./pr-evidence.js";
+import { execGh, readOnlyGh, type GhRunner } from "./gh-read.js";
 
 export interface BlockedCardDeps {
   fs: StoreFs;

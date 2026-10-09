@@ -51,8 +51,7 @@
 #   PR_BRAIN_ROOT              where to auto-discover repos (default ~/Projects)
 #   PR_BRAIN_ENV_FILE          dotenv holding TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.
 #                              Set it and every gate action is announced on Telegram.
-#                              Unset => silent (log only). AGENT_PIPELINE_V2 is read from it too
-#                              when the environment does not set it.
+#                              Unset => silent (log only).
 #   PR_BRAIN_MAX_ATTEMPTS      failed gates on one head before it stops retrying (default 3)
 #   PR_BRAIN_MERGE             0 = review and clear, but never merge (default 1). For a manual review of a PR you
 #                              want to merge yourself, e.g. a change to this loop: a cleared PR on beta is otherwise
@@ -169,12 +168,6 @@ write_effective() {
 # that never ran. Every action this script takes on GitHub is announced.
 TG_DAEMON_NAME="${TG_DAEMON_NAME:-pr-brain}"
 ENV_FILE="${PR_BRAIN_ENV_FILE:-}"
-# The coding pipeline switch lives in .env on prod, not in cron's env (issue #956). The process env wins when it
-# sets it; exported because scripts/pipeline-evidence-card.ts reads it from its own env.
-if [[ -z "${AGENT_PIPELINE_V2+x}" && -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
-  AGENT_PIPELINE_V2=$(grep -m1 '^AGENT_PIPELINE_V2=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  export AGENT_PIPELINE_V2
-fi
 notify() {
   if tg_should_hold "$1"; then
     tg_hold "$1"
@@ -234,7 +227,7 @@ notify_photo() {
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with agent-dispatch)
-#   evidence-card.sh  ec_run: AGENT_PIPELINE_V2 only, a reviewed PR with an approved contract gets an evidence card instead of an auto-merge
+#   evidence-card.sh  ec_run: a reviewed job PR (task/issue-N) gets a merge card instead of an auto-merge
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
 for _lib in tg-quiet.sh down-state.sh gh-token.sh agy-failure.sh agy-run.sh ci-state.sh evidence-card.sh; do
@@ -1049,14 +1042,16 @@ pr_verdict() {
 # (which starts on push, long before the next 20-min sweep) has already
 # finished — so an immediate merge attempt either succeeds because they're
 # actually green, or fails loud because they are not.
-# A PR with an approved contract (AGENT_PIPELINE_V2) is merged only by the founder's [Merge] tap on its evidence card:
-# ec_run builds and sends the card, and this sets merge_result without calling merge_cleared. Every other PR merges as before.
+# A job PR (task/issue-N) is merged only by the founder's [Merge] tap on its merge card: ec_run builds and sends the
+# card, and this sets merge_result without calling merge_cleared. Every other PR (and the OplifyMessage carve-out) goes
+# through merge_cleared as before.
 merge_or_card() {
   local pr="$1" head="$2" head_ref="$3" verdict="$4"
   ec_run "$pr" "$head" "$head_ref" "$verdict"
   case "$EC_STATE" in
-    carded) merge_result="held for your Merge button on the evidence card in Telegram" ;;
+    carded) merge_result="held for your Merge button on the merge card in Telegram" ;;
     held) merge_result="HELD, not merged: ${EC_NOTE}" ;;
+    none) merge_result="not attempted (verdict was not CLEARED)" ;;
     *) merge_cleared "$pr" "$verdict" ;;
   esac
 }
@@ -1354,7 +1349,7 @@ while IFS= read -r repo; do
     fi
 
     # --pr mode is given only the number: read the branch names the sweep gets from `gh pr list`. Without head_ref,
-    # ec_issue_of finds no issue and the PR silently takes the legacy path (no evidence card; PR #974, 10-07).
+    # ec_issue_of finds no issue and the PR silently takes the legacy path (no merge card; PR #974, 10-07).
     if [[ -n "$ONE_PR" ]]; then
       head_ref="$(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null)"
       base_ref="$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)"
@@ -1369,7 +1364,7 @@ while IFS= read -r repo; do
         # A tap on a stale-base card updates the PR branch, which reruns CI on a new head. A card built while those
         # checks run reads UNKNOWN evidence and carries no merge button, and the stamp below would stop a later sweep
         # from building a better one. Leave the head unstamped; the next sweep tries again once the checks finish.
-        if ec_enabled && [[ "$head_ref" == task/issue-* ]]; then
+        if [[ "$head_ref" == task/issue-* ]]; then
           required_ci_state "$pr"
           if [[ "$CI_STATE" == pending ]]; then
             log "$repo_name#$pr head ${head:0:8}: required CI is still running — card held until it finishes, head not stamped"

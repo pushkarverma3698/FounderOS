@@ -1,4 +1,4 @@
-import type { StoreFs } from "../../src/tools/contract-store.js";
+import type { StoreFs } from "../../src/tools/pipeline-pending.js";
 
 export interface MemFs extends StoreFs {
   files: Map<string, string>;

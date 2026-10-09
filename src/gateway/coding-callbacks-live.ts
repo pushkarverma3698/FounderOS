@@ -7,8 +7,8 @@ import fsp from "node:fs/promises";
 import { Octokit } from "octokit";
 import { TENANT } from "../core/config.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
-import { contractsDir, type StoreFs } from "../tools/contract-store.js";
-import { startDispatchJob, startFixJob } from "../tools/dispatch-tick.js";
+import { startFixJob } from "../tools/dispatch-tick.js";
+import { contractsDir, type StoreFs } from "../tools/pipeline-pending.js";
 import type { BlockedActions } from "./blocked-callbacks.js";
 import type { CodingDeps } from "./coding-callbacks.js";
 
@@ -36,28 +36,8 @@ function split(slug: string): { owner: string; repo: string } {
 
 export function liveCodingDeps(env: Record<string, string | undefined> = process.env): CodingDeps {
   return {
-    env,
     fs: realFs,
     dir: contractsDir(env),
-    now: () => new Date(),
-    async setLabels(slug, issue, change) {
-      const octokit = client();
-      const { owner, repo } = split(slug);
-      for (const name of change.remove) {
-        try {
-          await octokit.rest.issues.removeLabel({ owner, repo, issue_number: issue, name });
-        } catch (err) {
-          // 404 means the label is already off the issue, which is the state we wanted.
-          if ((err as { status?: number }).status !== 404) throw err;
-        }
-      }
-      if (change.add.length > 0) await octokit.rest.issues.addLabels({ owner, repo, issue_number: issue, labels: [...change.add] });
-    },
-    async comment(slug, issue, body) {
-      const { owner, repo } = split(slug);
-      await client().rest.issues.createComment({ owner, repo, issue_number: issue, body });
-    },
-    startJob: (slug, issue, stage) => startDispatchJob(issue, slug, stage),
     async inspectPr(slug, pr) {
       const octokit = client();
       const { owner, repo } = split(slug);

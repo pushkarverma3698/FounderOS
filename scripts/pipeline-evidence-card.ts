@@ -1,36 +1,31 @@
 /**
- * The evidence card for one reviewed pipeline PR, for deploy/vps-daemons/pr-brain. Bash does the Telegram send; every
- * judgement (is there a contract, what do the checks say, may this head be merged, what does the card print, what does a
- * tap act on) is made here, by the pure functions in src/tools/ and src/gateway/coding-cards.ts.
+ * The merge card for one reviewed job PR (branch task/issue-N), for deploy/vps-daemons/pr-brain. Bash does the Telegram
+ * send; every judgement (what the required CI says, what the review decided, may this head be merged, what does the card
+ * print, what does a tap act on) is made here, by the pure functions in src/tools/ and src/gateway/coding-cards.ts.
+ * The card is keyed on the job, not on a spec contract (AG-062), and pr-brain never merges these PRs itself.
  *
  *   node --import tsx/esm scripts/pipeline-evidence-card.ts --repo owner/name --issue N --pr P --head SHA --verdict TEXT
- *     -> {"status":"DISABLED"}                                   flag off: nothing read, nothing written
- *      | {"status":"NONE"}                                       no contract for the issue: a legacy PR, old path
- *      | {"status":"INVALID","error"}                            a contract exists but cannot be read: HOLD the merge
+ *     -> {"status":"NONE","reason"}                           the review did not clear the PR: the blocked card covers it
  *      | {"status":"CARD","nonce","parts":[html..],"reply_markup","mergeable"}
  *      | {"status":"FAILED","error"}                             could not build the card: HOLD the merge
  *
- * --head is the PR head pr-brain reviewed; --verdict is pr-brain's own verdict line. Always exits 0 and prints one JSON line.
- * Steps: read the approved contract; read the PR and the base tip from GitHub; refuse if the head is not the reviewed one;
- * bind the contract to the PR; get the two evidence verdicts (spec red, implementation green); run canMerge on them; render
- * the card; write the merge record the [Merge] button points at, but ONLY when a merge button is on the card.
+ * --head is the PR head pr-brain reviewed; --verdict is pr-brain's own verdict line. Always exits 0 and prints one JSON
+ * line. Read-only on GitHub (readOnlyGh). The only write is the "merge" pending record the [Merge] button points at,
+ * and only when a merge button is on the card.
  */
 import * as fsp from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { renderEvidenceCard } from "../src/gateway/coding-cards.js";
-import { contractsDir, readContractRecord, writeContractRecord, type StoreFs } from "../src/tools/contract-store.js";
-import { notVerifiedFor, readVerdict, reviewDecisionOf } from "../src/tools/pipeline-evidence-card.js";
-import { newNonce, pipelineV2Enabled, writePending } from "../src/tools/pipeline-pending.js";
+import { requiredCiVerdict, reviewDecisionOf } from "../src/tools/pipeline-evidence-card.js";
+import { contractsDir, newNonce, writePending, type StoreFs } from "../src/tools/pipeline-pending.js";
 import { canMerge } from "../src/tools/pr-evidence.js";
-import { execGh, readOnlyGh, runPrEvidence, type CliFs, type GhRunner } from "./pr-evidence.js";
+import { execGh, readOnlyGh, type GhRunner } from "./gh-read.js";
 
 export interface EvidenceCardDeps {
   fs: StoreFs;
   gh: GhRunner;
   nonce: () => string;
   now: () => Date;
-  /** One evidence verdict (the JSON scripts/pr-evidence.ts prints) for "spec" or "green". May throw. */
-  evidence: (mode: "spec" | "green") => Promise<unknown>;
 }
 
 const line = (v: unknown): string => JSON.stringify(v) + "\n";
@@ -99,50 +94,34 @@ async function readPr(gh: GhRunner, repo: string, pr: number): Promise<PrFacts> 
 }
 
 export async function runEvidenceCard(argv: string[], env: Record<string, string | undefined>, deps: EvidenceCardDeps): Promise<string> {
-  if (!pipelineV2Enabled(env)) return line({ status: "DISABLED" });
   const parsed = parseArgs(argv);
   if (!parsed.ok) return failed(parsed.error);
   const a = parsed.value;
-  const dir = contractsDir(env);
-
-  const stored = await readContractRecord(deps.fs, dir, a.repo, a.issue);
-  if (!stored.ok) return stored.code === "not_found" ? line({ status: "NONE" }) : line({ status: "INVALID", error: stored.error });
-  const rec = stored.value;
-  if (rec.pr !== undefined && rec.pr !== a.pr) return failed(`the approved contract for #${a.issue} is bound to PR #${rec.pr}, not PR #${a.pr}`);
+  const decision = reviewDecisionOf(a.verdict);
+  if (decision !== "APPROVE") return line({ status: "NONE", reason: `the review did not clear PR #${a.pr} (${decision})` });
+  const gh = readOnlyGh(deps.gh);
 
   let facts: PrFacts;
   try {
-    facts = await readPr(deps.gh, a.repo, a.pr);
+    facts = await readPr(gh, a.repo, a.pr);
   } catch (err) {
     return failed(errText(err));
   }
   if (facts.state !== "open") return failed(`PR #${a.pr} is ${facts.state}, not open`);
   if (facts.headSha !== a.head) return failed(`the head moved while the review ran (reviewed ${a.head.slice(0, 7)}, now ${facts.headSha.slice(0, 7)}); the new head needs its own review`);
 
-  if (rec.pr === undefined) {
-    const bound = await writeContractRecord(deps.fs, dir, { ...rec, pr: a.pr });
-    if (!bound.ok) return failed(`could not bind the contract to PR #${a.pr}: ${bound.error}`);
-  }
-
-  // Red-before is judged at the spec commit, not at the PR head.
-  const specCommit = rec.spec_commit ?? rec.contract.spec_commit;
-  if (!specCommit) return failed(`the approved contract for #${a.issue} has no spec_commit`);
-  const spec = await verdictOf(deps, "spec", specCommit);
-  const green = await verdictOf(deps, "green", a.head);
-  const decision = reviewDecisionOf(a.verdict);
+  const checks = await gh(["pr", "checks", String(a.pr), "--repo", a.repo, "--required", "--json", "bucket,name"]);
+  const ci = requiredCiVerdict(checks.stdout.trim() ? checks.stdout : checks.stderr, a.head);
   const review = { decision, head_sha: a.head };
-  const gate = canMerge({ evidence: green, review, headAtReview: a.head, headNow: facts.headSha, baseAtReview: facts.baseSha, baseNow: facts.baseSha });
-  const notVerified = notVerifiedFor(rec.contract);
+  const gate = canMerge({ evidence: ci, review, headAtReview: a.head, headNow: facts.headSha, baseAtReview: facts.baseSha, baseNow: facts.baseSha });
   const nonce = deps.nonce();
 
   let card;
   try {
     card = renderEvidenceCard({
-      spec,
-      green,
+      ci,
       review: { decision, findings: [] },
       merge: gate,
-      notVerified,
       prUrl: facts.url,
       nonce,
       subject: { repo: a.repo, pr: a.pr, issue: a.issue, title: facts.title },
@@ -151,15 +130,15 @@ export async function runEvidenceCard(argv: string[], env: Record<string, string
     return failed("card: " + errText(err));
   }
   const markup = { inline_keyboard: card.keyboard.inline_keyboard };
-  const mergeable = spec.status === "PASS" && green.status === "PASS" && decision === "APPROVE" && gate.ok;
+  const mergeable = ci.status === "PASS" && gate.ok;
   if (mergeable) {
-    const written = await writePending(deps.fs, dir, {
+    const written = await writePending(deps.fs, contractsDir(env), {
       kind: "merge",
       nonce,
       repo: a.repo,
       issue: a.issue,
       pr: a.pr,
-      evidence: green,
+      evidence: ci,
       review,
       head_at_review: a.head,
       base_at_review: facts.baseSha,
@@ -170,16 +149,7 @@ export async function runEvidenceCard(argv: string[], env: Record<string, string
   return line({ status: "CARD", nonce, parts: card.html, reply_markup: markup, mergeable });
 }
 
-async function verdictOf(deps: EvidenceCardDeps, mode: "spec" | "green", head: string) {
-  try {
-    return readVerdict(await deps.evidence(mode), head);
-  } catch (err) {
-    // allow-failopen: a run that crashed becomes an UNKNOWN row on the card, which never carries a merge button
-    return { status: "UNKNOWN" as const, reasons: [`the ${mode} evidence run failed: ${errText(err)}`], head_sha: head };
-  }
-}
-
-const realFs: CliFs = {
+const realFs: StoreFs = {
   readFile: (p) => fsp.readFile(p, "utf8"),
   writeFile: (p, d) => fsp.writeFile(p, d),
   rename: (a, b) => fsp.rename(a, b),
@@ -187,21 +157,10 @@ const realFs: CliFs = {
     await fsp.mkdir(p, o);
   },
   rm: (p) => fsp.rm(p, { recursive: true, force: true }),
-  mkdtemp: (prefix) => fsp.mkdtemp(prefix),
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const argv = process.argv.slice(2);
-  const gh = readOnlyGh(execGh);
-  const issue = argv[argv.indexOf("--issue") + 1] ?? "";
-  const repo = argv[argv.indexOf("--repo") + 1] ?? "";
-  const pr = argv[argv.indexOf("--pr") + 1] ?? "";
-  const evidence = async (mode: "spec" | "green"): Promise<unknown> => {
-    const args = ["--repo", repo, "--issue", issue, "--mode", mode, ...(mode === "green" ? ["--pr", pr] : [])];
-    const r = await runPrEvidence(args, process.env, { gh: execGh, fs: realFs });
-    return JSON.parse(r.stdout) as unknown;
-  };
-  runEvidenceCard(argv, process.env, { fs: realFs, gh, nonce: newNonce, now: () => new Date(), evidence })
+  runEvidenceCard(process.argv.slice(2), process.env, { fs: realFs, gh: execGh, nonce: newNonce, now: () => new Date() })
     .catch((err: unknown) => failed("unexpected: " + errText(err)))
     .then((out) => {
       process.stdout.write(out);

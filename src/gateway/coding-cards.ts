@@ -1,10 +1,11 @@
 /**
- * FounderOS — the two Telegram cards the founder decides on in the coding pipeline.
+ * FounderOS — the merge card the founder decides on in the coding pipeline, and the layout helpers the blocked card
+ * (blocked-card.ts) shares with it.
  *
- * Spec card: what the task will change and how it will be tested, before anything is built.
- * Evidence card: red-before, green-after, gate and review, after it is built, with the merge button.
+ * Merge card: the PR's required CI, pr-brain's review and the merge gate, with the merge button. It is keyed on the
+ * job (a task/issue-N PR), not on a spec contract (AG-062).
  *
- * Pure renderers: no Telegram client, no network, no clock. Nothing here is wired into a handler yet.
+ * Pure renderers: no Telegram client, no network, no clock.
  * Invariants these functions hold, because the founder acts on what they print:
  *  - Fail closed. Anything that is not exactly PASS (or exactly APPROVE, or merge.ok === true) is
  *    never shown as a tick and never gets a merge button. A missing review is UNKNOWN, not PASS.
@@ -13,14 +14,11 @@
  *  - Every string that came from a model, a repo or a reviewer is HTML-escaped.
  *  - Callback data is cp:<action>:<nonce>, at most 64 bytes; parseCodingCallback is its only reader.
  *
- * Both renderers return html as an array of messages. Send them in order and attach the keyboard to
+ * Renderers return html as an array of messages. Send them in order and attach the keyboard to
  * the LAST one. Callers must not join the array: the parts are each under the Telegram limit.
  */
 import { InlineKeyboard } from "grammy";
 import { safeHtml } from "./approval-card.js";
-import { renderCitation } from "../tools/task-contract.js";
-import type { Risk, TaskContract } from "../tools/task-contract.js";
-import type { SpecGateResult } from "../tools/spec-gate.js";
 
 /** Telegram rejects a message whose text is 4096 characters or longer. */
 export const TELEGRAM_HTML_LIMIT = 4096;
@@ -29,7 +27,7 @@ const PART_BUDGET = 3800;
 /** One printed line holds at most this many escaped characters; longer text continues on the next line. */
 const LINE_BUDGET = 1200;
 
-export const CODING_ACTIONS = ["approve", "change", "cancel", "merge", "merge_ack", "fix", "close_pr"] as const;
+export const CODING_ACTIONS = ["merge", "fix", "close_pr"] as const;
 export type CodingAction = (typeof CODING_ACTIONS)[number];
 export interface CodingCallback {
   action: CodingAction;
@@ -123,51 +121,6 @@ function strings(x: unknown): string[] {
   return Array.isArray(x) ? x.map((v) => String(v)) : [];
 }
 
-// ── spec card ───────────────────────────────────────────────────────────────
-
-export interface SpecCardOpts {
-  nonce: string;
-  repo: string;
-  issue: number;
-}
-
-const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
-
-function riskText(proposed: Risk, effective: Risk): string {
-  if (effective === proposed) return effective;
-  const raised = (RISK_RANK[effective] ?? 0) > (RISK_RANK[proposed] ?? 0);
-  return effective + (raised ? " (raised from " : " (proposed ") + proposed + ")";
-}
-
-/**
- * The spec card: Now / After / Test / Scope / Risk, then [Approve] [Change] [Cancel].
- * When the spec gate asked questions instead of passing, the questions are printed and Approve is
- * not offered: a task the gate could not pin down is not approvable.
- */
-export function renderSpecCard(contract: TaskContract, gate: SpecGateResult, opts: SpecCardOpts): Card {
-  assertNonce(opts.nonce);
-  const lines: string[] = [];
-  lines.push(...field("Spec for ", opts.repo + "#" + String(opts.issue)));
-  lines.push(...field("Now: ", contract.current_behavior.text));
-  for (const c of contract.current_behavior.citations) lines.push(...field("  at ", renderCitation(c), "code"));
-  lines.push(...field("After: ", contract.expected_behavior));
-  lines.push(...field("Test: ", contract.locked_tests.join(", "), "code"));
-  lines.push(...field("Scope: ", contract.scope.join(", "), "code"));
-  lines.push(...field("Risk: ", riskText(contract.risk, gate.effectiveRisk)));
-  const approvable = gate.status === "PASS";
-  if (!approvable) {
-    lines.push("", "Not approvable yet. Answer these first:");
-    const questions = strings(gate.questions);
-    if (questions.length === 0) lines.push("  (the spec gate gave no question)");
-    questions.forEach((q, i) => lines.push(...field("  " + (i + 1) + ". ", q)));
-  }
-  const keyboard = new InlineKeyboard();
-  if (approvable) keyboard.text("✅ Approve", callbackData("approve", opts.nonce));
-  keyboard.text("✏️ Change", callbackData("change", opts.nonce));
-  keyboard.text("❌ Cancel", callbackData("cancel", opts.nonce));
-  return { html: packLines(lines), keyboard };
-}
-
 // ── evidence card ───────────────────────────────────────────────────────────
 
 /** A narrow local shape: this file does not import the review module. */
@@ -180,16 +133,12 @@ export interface CardVerdict {
   reasons: readonly string[];
 }
 export interface EvidenceCardInput {
-  /** Red before: the locked tests failed on the base commit. */
-  spec: CardVerdict;
-  /** Green after: the locked tests and CI pass on the PR head. */
-  green: CardVerdict;
+  /** The PR's required CI checks at the head under review. */
+  ci: CardVerdict;
   /** Null when no review ran. That is UNKNOWN, never a pass. */
   review: CardReview | null;
   /** The merge gate (canMerge). Only the boolean true counts. */
   merge: { ok: boolean; reasons: readonly string[] };
-  /** Things nobody checked. Non-empty swaps [Merge] for [I checked it — merge]. */
-  notVerified: readonly string[];
   prUrl: string;
   nonce: string;
   /** What the card is about: the founder reads this before any row (CLAUDE.md #26). The title is untrusted text. */
@@ -240,25 +189,20 @@ export function assertHttpsUrl(url: string): void {
 }
 
 /**
- * The evidence card: Red before / Green after / Gate / Review, each with its mark, every non-PASS
- * row with all of its reasons, then the NOT VERIFIED list, then the buttons.
- * [Merge] needs all four rows PASS (review APPROVE, merge.ok exactly true) and nothing unverified.
- * If only notVerified blocks it, the button becomes [I checked it — merge]. Otherwise there is none.
+ * The merge card: Required CI / Review / Gate, each with its mark, every non-PASS row with all of its reasons, then the
+ * buttons. [Merge] needs all three rows PASS (review APPROVE, merge.ok exactly true). Otherwise there is none.
  */
 export function renderEvidenceCard(input: EvidenceCardInput): Card {
   assertNonce(input.nonce);
   assertHttpsUrl(input.prUrl);
-  const specMark = markOf(input.spec?.status);
-  const greenMark = markOf(input.green?.status);
+  const ciMark = markOf(input.ci?.status);
   const reviewM = reviewMark(input.review);
   const gateMark: Mark = input.merge?.ok === true ? "PASS" : input.merge?.ok === false ? "FAIL" : "UNKNOWN";
 
   const title = String(input.subject?.title ?? "").replace(/\s+/g, " ").trim() || "(no title)";
   const s = input.subject;
-  const lines: string[] = field(wrap("b", "Evidence") + " for ", `${s?.repo}#${s?.pr} (issue #${s?.issue}): ${title}`);
-  lines.push(...row("Red before", specMark, strings(input.spec?.reasons)));
-  lines.push(...row("Green after", greenMark, strings(input.green?.reasons)));
-  lines.push(...row("Gate", gateMark, strings(input.merge?.reasons)));
+  const lines: string[] = field(wrap("b", "Ready to merge?") + " ", `${s?.repo}#${s?.pr} (issue #${s?.issue}): ${title}`);
+  lines.push(...row("Required CI", ciMark, strings(input.ci?.reasons)));
   const findings = input.review === null || !Array.isArray(input.review.findings) ? [] : input.review.findings;
   const reviewHead = "Review: " + MARK_TEXT[reviewM];
   if (reviewM === "PASS" && findings.length === 0) {
@@ -267,24 +211,15 @@ export function renderEvidenceCard(input: EvidenceCardInput): Card {
     const noReview = input.review === null ? ["no review ran"] : [];
     lines.push(reviewHead, ...bullets(noReview.concat(findings.map(findingText)), "no reason given"));
   }
+  lines.push(...row("Gate", gateMark, strings(input.merge?.reasons)));
 
-  const rowsPass = specMark === "PASS" && greenMark === "PASS" && reviewM === "PASS";
+  const rowsPass = ciMark === "PASS" && reviewM === "PASS";
   if (gateMark === "PASS" && !rowsPass) {
-    lines.push("", wrap("b", "Gate says mergeable but a row above is not PASS. The gate and the evidence are inconsistent, so there is no merge button."));
-  }
-
-  const unverified = Array.isArray(input.notVerified) ? strings(input.notVerified) : ["notVerified list missing"];
-  if (unverified.length > 0) {
-    lines.push("", wrap("b", "NOT VERIFIED"));
-    for (const item of unverified) lines.push(...field("  • ", item));
+    lines.push("", wrap("b", "Gate says mergeable but a row above is not PASS. The gate and the rows are inconsistent, so there is no merge button."));
   }
 
   const keyboard = new InlineKeyboard();
-  if (rowsPass && gateMark === "PASS") {
-    if (unverified.length === 0) keyboard.text("🚀 Merge", callbackData("merge", input.nonce));
-    else keyboard.text("☑️ I checked it — merge", callbackData("merge_ack", input.nonce));
-    keyboard.row();
-  }
+  if (rowsPass && gateMark === "PASS") keyboard.text("🚀 Merge", callbackData("merge", input.nonce)).row();
   keyboard.url("🔗 Open PR", input.prUrl);
   return { html: packLines(lines), keyboard };
 }

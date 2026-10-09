@@ -1,69 +1,44 @@
 /**
- * FounderOS - coding pipeline v2: flag, labels and pending records
- * ================================================================
- * The three things every wave-3 step shares, so the dispatcher, the gateway and the evidence job cannot
- * drift apart:
- *  - the AGENT_PIPELINE_V2 flag (exactly "1" is on),
- *  - the issue labels the flow moves through,
- *  - the pending record: what a Telegram card points at. The card carries only `cp:<action>:<nonce>`; the nonce
- *    names a file under <contracts dir>/pending/ that holds what the founder was shown. Tapping reads the file,
- *    never the callback data, so a forged or stale tap cannot change what is approved or merged.
+ * FounderOS - coding pipeline: pending records behind Telegram cards
+ * ==================================================================
+ * A card carries only `cp:<action>:<nonce>`; the nonce names a file under <contracts dir>/pending/ that holds what
+ * the founder was shown. Tapping reads the file, never the callback data, so a forged or stale tap cannot change
+ * what is merged or closed.
  *
- * Three kinds: "spec" (a contract waiting for approval, written by Pass P), "merge" (evidence and review for one PR
- * head, written when the evidence card goes out) and "fix" (a PR pr-brain blocked, written when the blocked card goes out). A tap CLAIMS the record by renaming it, which is atomic: of two
- * taps (a double tap, or two deliveries of one tap) exactly one gets the record. A transient failure after the claim
- * calls releasePending so the founder can tap again; a finished action leaves the claimed file as its trace.
+ * Two kinds: "merge" (required CI and review for one PR head, written when the merge card goes out) and "fix" (a PR
+ * pr-brain blocked, written when the blocked card goes out). A tap CLAIMS the record by renaming it, which is
+ * atomic: of two taps (a double tap, or two deliveries of one tap) exactly one gets the record. A transient failure
+ * after the claim calls releasePending so the founder can tap again; a finished action leaves the claimed file as
+ * its trace.
  *
- * fs is injected (StoreFs, as in contract-store.ts); nothing here throws on bad data or a failing fs.
+ * fs is injected (StoreFs); nothing here throws on bad data or a failing fs.
  */
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import { z } from "zod";
-import { TaskContractSchema } from "./task-contract.js";
-import type { StoreFs } from "./contract-store.js";
 
-export const PIPELINE_V2_FLAG = "AGENT_PIPELINE_V2";
-
-/** On only for exactly "1", the same reading scripts/pr-evidence.ts uses. */
-export function pipelineV2Enabled(env: Record<string, string | undefined>): boolean {
-  return env[PIPELINE_V2_FLAG] === "1";
+export interface StoreFs {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, data: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  mkdir(path: string, opts: { recursive: boolean }): Promise<void>;
+  rm(path: string): Promise<void>;
 }
 
-/** Issue filed, waiting for Pass P to write the contract and the locked test. */
-export const LABEL_SPEC = "agent:spec";
-/** Contract written and sent as a spec card; waiting for the founder. */
-export const LABEL_SPEC_REVIEW = "agent:spec-review";
-/** Approved: the executor may claim it. Existing label, same meaning as before the pipeline. */
-export const LABEL_READY = "agent:ready";
+/** The directory name predates the merge card; prod's records live there, so it stays. */
+export const DEFAULT_CONTRACTS_DIR = "/var/lib/founderos/contracts";
+
+export function contractsDir(env: Record<string, string | undefined>): string {
+  const d = env.FOUNDEROS_CONTRACTS_DIR?.trim();
+  return d ? d : DEFAULT_CONTRACTS_DIR;
+}
 
 const Sha = z.string().regex(/^[0-9a-f]{40}$/, "must be a full 40-character lowercase hex sha");
 const NONCE_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const Nonce = z.string().regex(NONCE_RE, "must match [A-Za-z0-9_-]{1,32}");
 const Repo = z.string().regex(/^(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/, "must look like owner/name");
 const Iso = z.string().datetime();
-
-export const PendingSpecSchema = z
-  .object({
-    kind: z.literal("spec"),
-    nonce: Nonce,
-    repo: Repo,
-    issue: z.number().int().positive(),
-    contract: TaskContractSchema,
-    effective_risk: z.enum(["low", "medium", "high"]),
-    fingerprint: z.string().regex(/^[0-9a-f]{64}$/, "must be a sha256 hex digest"),
-    spec_commit: Sha,
-    created_at: Iso,
-  })
-  .strict()
-  .superRefine((r, ctx) => {
-    if (r.contract.repo !== r.repo) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["contract", "repo"], message: "contract.repo must equal the record repo" });
-    }
-    if (r.contract.spec_commit !== r.spec_commit) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["spec_commit"], message: "spec_commit must equal contract.spec_commit" });
-    }
-  });
 
 export const PendingMergeSchema = z
   .object({
@@ -108,19 +83,18 @@ export const PendingFixSchema = z
   })
   .strict();
 
-export const PendingRecordSchema = z.union([PendingSpecSchema, PendingMergeSchema, PendingFixSchema]);
+export const PendingRecordSchema = z.union([PendingMergeSchema, PendingFixSchema]);
 
-export type PendingSpec = z.infer<typeof PendingSpecSchema>;
 export type PendingMerge = z.infer<typeof PendingMergeSchema>;
 export type PendingFix = z.infer<typeof PendingFixSchema>;
-export type PendingRecord = PendingSpec | PendingMerge | PendingFix;
+export type PendingRecord = PendingMerge | PendingFix;
 
 export type PendingErrorCode = "not_found" | "invalid" | "exists" | "io" | "bad_key";
 export type PendingResult<T> = { ok: true; value: T } | { ok: false; code: PendingErrorCode; error: string };
 
 const fail = (code: PendingErrorCode, error: string): { ok: false; code: PendingErrorCode; error: string } => ({ ok: false, code, error });
 
-/** 12 random bytes as 16 URL-safe characters: fits cp:merge_ack:<nonce> in Telegram's 64-byte callback limit. */
+/** 12 random bytes as 16 URL-safe characters: fits cp:close_pr:<nonce> in Telegram's 64-byte callback limit. */
 export function newNonce(): string {
   return randomBytes(12).toString("base64url");
 }

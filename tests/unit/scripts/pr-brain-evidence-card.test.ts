@@ -1,10 +1,9 @@
 /**
- * pr-brain + the evidence card (AGENT_PIPELINE_V2) — deploy/lib/evidence-card.sh wired into deploy/vps-daemons/pr-brain.
- * ======================================================================================================================
- * With the flag on, a reviewed PR that has an approved contract is merged only by the founder's [Merge] tap, never by
- * pr-brain. These run the real script against stub `claude`, `gh`, `curl` and `node` binaries. The stub `node` stands in
+ * pr-brain + the merge card — deploy/lib/evidence-card.sh wired into deploy/vps-daemons/pr-brain.
+ * ================================================================================================
+ * A reviewed job PR (branch task/issue-N) is merged only by the founder's [Merge] tap, never by pr-brain. These run the real script against stub `claude`, `gh`, `curl` and `node` binaries. The stub `node` stands in
  * for scripts/pipeline-evidence-card.ts (its own tests: pipeline-evidence-card-cli.test.ts) and prints a canned line, so
- * what is pinned here is only the bash side: which of legacy | carded | held happens, and what reaches Telegram.
+ * what is pinned here is only the bash side: which of legacy | none | carded | held happens, and what reaches Telegram.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -19,7 +18,7 @@ const SCRIPT = fileURLToPath(new URL("../../../deploy/vps-daemons/pr-brain", imp
 const CARD = JSON.stringify({
   status: "CARD",
   nonce: "abc123",
-  parts: ["<b>EVIDENCE CARD</b>", "<b>part two</b>"],
+  parts: ["<b>MERGE CARD</b>", "<b>part two</b>"],
   reply_markup: { inline_keyboard: [[{ text: "Merge", callback_data: "cp:merge:abc123" }]] },
   mergeable: true,
 });
@@ -73,7 +72,7 @@ function sweep(opts: {
 
 const merged = (): boolean => /pr merge 7 --squash/.test(read("gh.log"));
 const curlCalls = (): string[] => read("curl.log").split("\n@@\n").filter((s) => s.trim() !== "");
-const cardSends = (): string[] => curlCalls().filter((c) => c.includes("EVIDENCE CARD") || c.includes("part two"));
+const cardSends = (): string[] => curlCalls().filter((c) => c.includes("MERGE CARD") || c.includes("part two"));
 const gateDone = (): string => curlCalls().find((c) => c.includes("Gate done")) ?? "";
 
 beforeEach(() => {
@@ -132,65 +131,38 @@ describe("pr-brain + merge card: every job PR it clears", () => {
   });
 });
 
-describe("pr-brain + evidence card: legacy paths stay as they were", () => {
-  it("flag off: no card, the script is never run, the CLEARED PR is merged", () => {
-    sweep({ ec: CARD });
-    expect(merged()).toBe(true);
-    expect(read("ec-args.log")).toBe("");
-    expect(cardSends()).toHaveLength(0);
-  });
-
-  it("flag set to anything but 1 is off", () => {
-    sweep({ ec: CARD, flag: "true" });
-    expect(merged()).toBe(true);
-    expect(read("ec-args.log")).toBe("");
-  });
-
-  it("flag on, but the issue has no contract (NONE): legacy merge", () => {
-    sweep({ ec: '{"status":"NONE"}', flag: "1" });
-    expect(read("ec-args.log")).toContain("--issue 7");
-    expect(merged()).toBe(true);
-    expect(cardSends()).toHaveLength(0);
-  });
-
-  it("flag on, the script says DISABLED: legacy merge", () => {
-    sweep({ ec: '{"status":"DISABLED"}', flag: "1" });
-    expect(merged()).toBe(true);
-  });
-
-  it("flag on, a head that is not task/issue-N: the script is not asked, legacy path", () => {
-    sweep({ ec: CARD, flag: "1", headRef: "feat/other" });
-    expect(read("ec-args.log")).toBe("");
-  });
-
-  it("flag on, an OplifyMessage repo: a human merges there, the card path is not used", () => {
-    sweep({ ec: CARD, flag: "1", owner: "OplifyMessage" });
-    expect(read("ec-args.log")).toBe("");
-    expect(merged()).toBe(false);
-  });
-});
-
-describe("pr-brain + evidence card: the flag read from PR_BRAIN_ENV_FILE", () => {
-  // Issue #956: on prod the flag lives only in /opt/founderos/.env, not in cron's env.
-  it("flag only in the env file: the card path runs and the PR is not auto-merged", () => {
-    writeFileSync(f(".env"), 'TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\nAGENT_PIPELINE_V2="1"\n');
-    sweep({ ec: CARD });
-    expect(read("ec-args.log")).toContain("--issue 7");
-    expect(merged()).toBe(false);
-    expect(cardSends()).toHaveLength(2);
-  });
-
-  it("the process env wins over the env file", () => {
-    writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\nAGENT_PIPELINE_V2=1\n");
+describe("pr-brain + merge card: paths that are not a card", () => {
+  it("an AGENT_PIPELINE_V2 left in the env or the env file changes nothing: the flag is gone", () => {
+    writeFileSync(f(".env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=1\nGITHUB_TOKEN=test-github-token\nAGENT_PIPELINE_V2=0\n");
     sweep({ ec: CARD, flag: "0" });
+    expect(read("ec-args.log")).toContain("--issue 7");
+    expect(cardSends()).toHaveLength(2);
+    expect(merged()).toBe(false);
+  });
+
+  it("the review did not clear (NONE): no card and no merge", () => {
+    sweep({ ec: '{"status":"NONE","reason":"review is not APPROVE"}' });
+    expect(read("ec-args.log")).toContain("--issue 7");
+    expect(merged()).toBe(false);
+    expect(cardSends()).toHaveLength(0);
+    expect(gateDone()).toContain("not attempted (verdict was not CLEARED)");
+  });
+
+  it("a head that is not task/issue-N: the script is not asked, legacy path", () => {
+    sweep({ ec: CARD, headRef: "feat/other" });
     expect(read("ec-args.log")).toBe("");
-    expect(merged()).toBe(true);
+  });
+
+  it("an OplifyMessage repo: a human merges there, the card path is not used", () => {
+    sweep({ ec: CARD, owner: "OplifyMessage" });
+    expect(read("ec-args.log")).toBe("");
+    expect(merged()).toBe(false);
   });
 });
 
-describe("pr-brain + evidence card: a contract exists", () => {
+describe("pr-brain + merge card: a job PR the review cleared", () => {
   it("sends the card with the keyboard on the LAST part, and does not merge", () => {
-    sweep({ ec: CARD, flag: "1" });
+    sweep({ ec: CARD });
     expect(merged()).toBe(false);
     const sends = cardSends();
     expect(sends).toHaveLength(2);
@@ -201,7 +173,7 @@ describe("pr-brain + evidence card: a contract exists", () => {
   });
 
   it("asks the script about this repo, issue, PR, head and the verdict, and nothing else", () => {
-    sweep({ ec: CARD, flag: "1" });
+    sweep({ ec: CARD });
     const args = read("ec-args.log");
     expect(args).toContain("scripts/pipeline-evidence-card.ts");
     expect(args).toContain("--repo owner/widgets");
@@ -212,50 +184,50 @@ describe("pr-brain + evidence card: a contract exists", () => {
   });
 
   it("--pr mode (a hand run) reads the branch from GitHub, so the card path still runs", () => {
-    sweep({ ec: CARD, flag: "1", onePr: true });
+    sweep({ ec: CARD, onePr: true });
     expect(read("ec-args.log")).toContain("--issue 7");
     expect(cardSends()).toHaveLength(2);
     expect(merged()).toBe(false);
   });
 
   it("parses the issue from task/issue-N with no slug", () => {
-    sweep({ ec: CARD, flag: "1", headRef: "task/issue-12" });
+    sweep({ ec: CARD, headRef: "task/issue-12" });
     expect(read("ec-args.log")).toContain("--issue 12");
   });
 
   it("holds the merge with the script's reason when the card could not be built (FAILED)", () => {
-    sweep({ ec: '{"status":"FAILED","error":"the PR head moved since review"}', flag: "1" });
+    sweep({ ec: '{"status":"FAILED","error":"the PR head moved since review"}' });
     expect(merged()).toBe(false);
     expect(cardSends()).toHaveLength(0);
     expect(gateDone()).toContain("HELD, not merged");
     expect(gateDone()).toContain("the PR head moved since review");
   });
 
-  it("holds the merge when the contract is unreadable (INVALID)", () => {
-    sweep({ ec: '{"status":"INVALID","error":"contract record is not valid"}', flag: "1" });
+  it("holds the merge when the arguments were refused (INVALID)", () => {
+    sweep({ ec: '{"status":"INVALID","error":"--head must be a full sha"}' });
     expect(merged()).toBe(false);
-    expect(gateDone()).toContain("contract record is not valid");
+    expect(gateDone()).toContain("--head must be a full sha");
   });
 
   it("holds the merge when the script prints nothing readable (a crash must not become a merge)", () => {
-    sweep({ ec: "", flag: "1" });
+    sweep({ ec: "" });
     expect(merged()).toBe(false);
     expect(gateDone()).toContain("HELD, not merged");
   });
 
   it("holds the merge when the script prints something unknown", () => {
-    sweep({ ec: '{"status":"PASS"}', flag: "1" });
+    sweep({ ec: '{"status":"PASS"}' });
     expect(merged()).toBe(false);
   });
 
   it("holds the merge, and says so, when Telegram refuses the card", () => {
-    sweep({ ec: CARD, flag: "1", curlFail: true });
+    sweep({ ec: CARD, curlFail: true });
     expect(merged()).toBe(false);
     expect(read("pr-brain.log") + read("home/.claude/pr-brain.log")).toContain("merge held");
   });
 
   it("sends the card without a sound in quiet hours (a decision is not dropped, only muted)", () => {
-    sweep({ ec: CARD, flag: "1", quietNow: "3" });
+    sweep({ ec: CARD, quietNow: "3" });
     const sends = cardSends();
     expect(sends).toHaveLength(2);
     for (const s of sends) expect(s).toContain("disable_notification=true");
@@ -263,12 +235,12 @@ describe("pr-brain + evidence card: a contract exists", () => {
   });
 
   it("sends with a sound in the day", () => {
-    sweep({ ec: CARD, flag: "1", quietNow: "12" });
+    sweep({ ec: CARD, quietNow: "12" });
     for (const s of cardSends()) expect(s).not.toContain("disable_notification");
   });
 });
 
-describe("pr-brain + evidence card: no other route to a merge", () => {
+describe("pr-brain + merge card: no other route to a merge", () => {
   it("merge_cleared is called from merge_or_card only, so the carry-forward path cannot skip the card", () => {
     const src = readFileSync(SCRIPT, "utf8");
     const calls = src.split("\n").filter((l) => /^\s*(\*\) )?merge_cleared "\$pr"/.test(l.trim()) || /\bmerge_cleared "\$pr"/.test(l));
