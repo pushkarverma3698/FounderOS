@@ -14,7 +14,7 @@ import { runGws } from "../../src/infra/gws-runner.js";
 import { extractGwsMessageIds } from "../../src/tools/email-messages.js";
 import { fetchGwsMessages } from "../../src/tools/gmail-gws-read.js";
 import { summarizeChecks } from "../../src/tools/github-pr.js";
-import type { GoogleRead, HealthReads } from "./health-line.js";
+import { CLAUDE_PROBE_CMD, gwsErrorLine, type GoogleRead, type HealthReads } from "./health-line.js";
 import type { OpenPr } from "./journey-score.js";
 import type { WhereCounts } from "./journey-where.js";
 
@@ -150,9 +150,8 @@ export async function readAiStudio(): Promise<HealthReads["aiStudio"]> {
 
 /** The coding pipeline's Claude login, as claude-agent with every API-key env removed (subscription only). */
 export async function readClaude(): Promise<HealthReads["claude"]> {
-  const cmd = "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN && timeout 60 claude -p ok --max-turns 1 --output-format json";
   try {
-    const { stdout, stderr } = await run("sudo", ["-n", "-u", "claude-agent", "--", "bash", "-lc", cmd], { timeout: 90_000 });
+    const { stdout, stderr } = await run("sudo", ["-n", "-u", "claude-agent", "--", "bash", "-lc", CLAUDE_PROBE_CMD], { timeout: 90_000 });
     return { exitCode: 0, stdout, stderr };
   } catch (err) {
     const e = err as { code?: number | string; stdout?: string; stderr?: string };
@@ -169,7 +168,7 @@ export async function readGoogle(): Promise<GoogleRead[]> {
       const dir = gwsDir(account);
       const ownLogin = existsSync(`${dir}/credentials.json`);
       const r = await runGws(["gmail", "users", "getProfile", "--params", params], GWS_TIMEOUT_MS, { gwsProfileDir: dir });
-      if (!r.ok) return { account, ownLogin, error: r.error.split("\n")[0]!.slice(0, 160) };
+      if (!r.ok) return { account, ownLogin, error: gwsErrorLine(r.error) };
       const root = (r.parsed && typeof r.parsed === "object" ? r.parsed : {}) as Record<string, unknown>;
       const data = (root["data"] ?? root) as Record<string, unknown>;
       const email = typeof data["emailAddress"] === "string" ? data["emailAddress"] : undefined;
