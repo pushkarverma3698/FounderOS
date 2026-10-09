@@ -549,7 +549,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
 
     const paused = sent().filter((m) => m.includes("PAUSED"));
     expect(paused).toHaveLength(1);
-    expect(paused[0]).toMatch(/no reviewer model is configured that differs from the executor model gemini-3\.6-flash-medium/);
+    expect(paused[0]).toMatch(/no reviewer model is configured that differs from the executor model gemini-3\.8-flash-medium/);
     expect(agyLog("pf-models")).toHaveLength(0);
     expect(agyLog("calls")).toHaveLength(0);
   });
