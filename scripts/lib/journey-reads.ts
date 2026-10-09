@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { promisify } from "node:util";
 import { sql } from "drizzle-orm";
-import { defaultGwsProfileDir, isAccountKey } from "../../src/core/accounts.js";
+import { defaultGwsProfileDir, isBuiltinGoogleAccount } from "../../src/core/accounts.js";
 import { getDb } from "../../src/db/client.js";
 import { listGoogleMailboxes, mailboxProfileDir } from "../../src/infra/google-mailboxes.js";
 import { runGws } from "../../src/infra/gws-runner.js";
@@ -28,7 +28,7 @@ const why = (err: unknown): string => (err instanceof Error ? err.message : Stri
 type Failed = { error: string };
 
 export function gwsDir(account: string): string {
-  return isAccountKey(account) ? defaultGwsProfileDir(account) : mailboxProfileDir(account);
+  return isBuiltinGoogleAccount(account) ? defaultGwsProfileDir("personal") : mailboxProfileDir(account);
 }
 
 /** J1 truth: subjects of the account's inbox mail from the last 24 h. */
