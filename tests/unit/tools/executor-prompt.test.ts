@@ -85,7 +85,11 @@ describe("buildExecutorPrompt: what the executor is told", () => {
 
   it("forbids adding a dependency and requires making locked tests pass", () => {
     const p = ok();
-    expect(p).toMatch(/rewrite it into the correct framework before making it pass/i);
+    expect(p).toMatch(/Do not edit, move, delete or skip the locked tests/);
+    // pr-evidence fails a PR whose locked test hash moved after the spec commit, so a prompt that invites a rewrite
+    // sends every such run to agent:blocked (#1115 told it to rewrite a wrong-framework test).
+    expect(p).not.toMatch(/rewrite it into the correct framework/i);
+    expect(p).toMatch(/wrong testing framework[^\n]*stop and say so in the PR body/i);
     expect(p).toMatch(/no new dependenc/i);
   });
 
