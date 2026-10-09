@@ -328,14 +328,14 @@ describe("Gemini thinking level on every google-genai model", () => {
     (m as { client?: { generationConfig?: { thinkingConfig?: unknown } } }).client?.generationConfig?.thinkingConfig;
 
   it("asks for LOW thinking by default, on the field and in the request config", () => {
-    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.8-flash";
     const model = getModel();
     expect(thinkingOf(model)).toEqual({ thinkingLevel: "LOW" });
     expect(requestThinkingOf(model)).toEqual({ thinkingLevel: "LOW" });
   });
 
   it("covers the worker model and the google-genai half of the fallback chain", () => {
-    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.8-flash";
     process.env["WORKER_AGENT_MODEL"] = "google-genai:gemini-3.1-flash-lite";
     process.env["AGENT_FALLBACK_MODELS"] =
       "google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free";
@@ -349,7 +349,7 @@ describe("Gemini thinking level on every google-genai model", () => {
   });
 
   it("omits thinkingConfig entirely under DEFAULT — the rollback to Google's dynamic thinking", () => {
-    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.8-flash";
     process.env["GEMINI_THINKING_LEVEL"] = "DEFAULT";
     const model = getModel();
     expect(thinkingOf(model)).toBeUndefined();
@@ -357,7 +357,7 @@ describe("Gemini thinking level on every google-genai model", () => {
   });
 
   it("honours MEDIUM and HIGH", () => {
-    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.8-flash";
     process.env["GEMINI_THINKING_LEVEL"] = "HIGH";
     expect(requestThinkingOf(getModel())).toEqual({ thinkingLevel: "HIGH" });
     process.env["GEMINI_THINKING_LEVEL"] = "medium";
@@ -365,7 +365,7 @@ describe("Gemini thinking level on every google-genai model", () => {
   });
 
   it("refuses an unknown level at construction, which boot does first", () => {
-    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.8-flash";
     process.env["GEMINI_THINKING_LEVEL"] = "MINIMAL";
     expect(() => getModel()).toThrow(/GEMINI_THINKING_LEVEL/);
   });

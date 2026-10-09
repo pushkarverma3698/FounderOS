@@ -330,7 +330,7 @@ describe("fail-first: a locked test must fail on the code as it is (#956 → #96
     // not in the manifest, so it never counts as a file the run wrote.
     expect(sb.labelsOf(1)).toContain(REVIEW);
     const prompt = sb.claudePrompts()[0] ?? "";
-    expect(prompt).toContain("node_modules/.bin/vitest run --cache=false");
+    expect(prompt).toContain("using the testing framework mandated by docs/antigravity/STANDARDS.md");
     expect(prompt).toContain("must FAIL");
   });
 });
@@ -438,7 +438,7 @@ describe("Claude is unavailable: Antigravity writes the spec (on a model the exe
     expect(r.status).toBe(0);
     expect(sb.claudeRuns()).toBe(0);
     expect(sb.agyRuns()).toBe(1);
-    // a different model than the executor's (gemini-3.6-flash-medium, gemini-3.1-flash-lite)
+    // a different model than the executor's (gemini-3.8-flash-medium, gemini-3.1-flash-lite)
     expect(sb.agyModels()).toEqual(["gemini-3.1-pro-high"]);
     // same contract: locked test on top of the base commit, pending record, one card, label moved
     expect(gitOrigin("rev-parse", "refs/heads/task/issue-1^")).toBe(base);
@@ -505,7 +505,7 @@ describe("Claude is unavailable: Antigravity writes the spec (on a model the exe
   it("never uses an executor model for the spec: with no other candidate it waits, and no attempt is spent", () => {
     wallClaude();
     sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
-    agyTick(writes(), { env: { AGENT_DISPATCH_MODELS: "gemini-3.6-flash-medium gemini-3.1-pro-high" } });
+    agyTick(writes(), { env: { AGENT_DISPATCH_MODELS: "gemini-3.8-flash-medium gemini-3.1-pro-high" } });
     expect(sb.agyRuns()).toBe(0);
     expect(sb.claudeRuns()).toBe(0);
     expect(sb.labelsOf(1)).toEqual([SPEC]);

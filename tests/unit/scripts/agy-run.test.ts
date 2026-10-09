@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 const LIB_DIR = fileURLToPath(new URL("../../../deploy/lib/", import.meta.url));
 const FAKE_KEY = "AI" + "za" + "Sy" + "k".repeat(33);
 
-const init = { event: "init", conversation_id: "c", init: { model: "gemini-3.6-flash-medium", cwd: "/w", tools: ["run_command"] } };
+const init = { event: "init", conversation_id: "c", init: { model: "gemini-3.8-flash-medium", cwd: "/w", tools: ["run_command"] } };
 const step = (index: number, state: "ACTIVE" | "DONE", rest: Record<string, unknown>): Record<string, unknown> => ({
   event: "step_update",
   step_update: { conversation_id: "c", step_index: index, state, ...rest },
@@ -82,7 +82,7 @@ ${script}`,
 
 function render(rawText: string, label = "Antigravity #44 · owner/app", started = "$(( $(date +%s) - 125 ))"): string {
   writeFileSync(join(root, "raw.jsonl"), rawText);
-  return bash(`agy_progress_render "${join(root, "raw.jsonl")}" "${label}" gemini-3.6-flash-medium "${started}"`).stdout.replace(/\n$/, "");
+  return bash(`agy_progress_render "${join(root, "raw.jsonl")}" "${label}" gemini-3.8-flash-medium "${started}"`).stdout.replace(/\n$/, "");
 }
 
 interface TgCall {
@@ -143,7 +143,7 @@ afterEach(() => {
 describe("agy_progress_render — what the founder reads while agy works", () => {
   it("a run with no events yet renders just its header (agy is still starting)", () => {
     const text = render("");
-    expect(text).toBe("🔧 Antigravity #44 · owner/app\n⏱ 2m · gemini-3.6-flash-medium · 0 tool calls");
+    expect(text).toBe("🔧 Antigravity #44 · owner/app\n⏱ 2m · gemini-3.8-flash-medium · 0 tool calls");
   });
 
   it("shows the last five tool calls with their state, never narration or tool output", () => {
@@ -166,7 +166,7 @@ describe("agy_progress_render — what the founder reads while agy works", () =>
     expect(text).toBe(
       [
         "🔧 Antigravity #44 · owner/app",
-        "⏱ 2m · gemini-3.6-flash-medium · 6 tool calls",
+        "⏱ 2m · gemini-3.8-flash-medium · 6 tool calls",
         "",
         "✅ run git status",
         "✅ search getSessionStatus",
@@ -263,7 +263,7 @@ describe("agy_text_view — the plain text the failure classifier reads", () => 
 describe("agy_run — one run, one Telegram message", () => {
   const RUN = (key: string): string => `
 WORK="${root}/work"; mkdir -p "$WORK"; printf 'do the task' >"${root}/prompt"
-agy_run "Antigravity #44 · owner/app" "$WORK" "${root}/prompt" gemini-3.6-flash-medium 1800 "${root}/text.log" "${key}"
+agy_run "Antigravity #44 · owner/app" "$WORK" "${root}/prompt" gemini-3.8-flash-medium 1800 "${root}/text.log" "${key}"
 echo "rc=$?"
 agy_progress_outcome "📦 PR #9 opened"
 `;
@@ -314,7 +314,7 @@ agy_progress_outcome "📦 PR #9 opened"
 
     const sudo = readFileSync(join(root, "sudo-argv.log"), "utf8");
     expect(sudo).toContain("-u tester -- bash -lc");
-    expect(sudo).toContain(`${root}/work ${root}/prompt 1800 gemini-3.6-flash-medium 1680s`);
+    expect(sudo).toContain(`${root}/work ${root}/prompt 1800 gemini-3.8-flash-medium 1680s`);
   });
 
   it("does not stop the run when Telegram is unreachable: no message id, no edits to nowhere", () => {

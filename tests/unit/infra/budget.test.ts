@@ -62,8 +62,8 @@ describe("estimateCost", () => {
 describe("estimateCost — prod models are priced, not defaulted (2026-10-08)", () => {
   it.each([
     ["openrouter:anthropic/claude-sonnet-5.5", 2.0, 10.0],
-    ["google-genai:gemini-3.6-flash", 0.75, 3.75],
-    ["openrouter:google/gemini-3.6-flash", 0.75, 3.75],
+    ["google-genai:gemini-3.8-flash", 0.75, 3.75],
+    ["openrouter:google/gemini-3.8-flash", 0.75, 3.75],
     ["openrouter:inclusionai/ling-3.0-flash", 0.021, 0.063],
     ["inclusionai/ling-3.0-flash", 0.021, 0.063],
   ])("%s costs $%s/M in and $%s/M out", (model, inPerM, outPerM) => {
@@ -231,7 +231,7 @@ describe("BudgetGuardCallback — onAccrue sink", () => {
 
 /** A real ChatGoogleGenerativeAI whose request returns a canned Gemini response. */
 function geminiReturning(usageMetadata: Record<string, number>): ChatGoogleGenerativeAI {
-  const model = new ChatGoogleGenerativeAI({ apiKey: "test-key", model: "gemini-3.6-flash", temperature: 0, maxRetries: 0 });
+  const model = new ChatGoogleGenerativeAI({ apiKey: "test-key", model: "gemini-3.8-flash", temperature: 0, maxRetries: 0 });
   (model as unknown as { completionWithRetry: () => Promise<unknown> }).completionWithRetry = async () => ({
     response: {
       candidates: [{ content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP", index: 0 }],
@@ -269,19 +269,19 @@ function ledger(modelId: string): { calls: AccruedCall[]; tracker: BudgetTracker
 
 describe("BudgetGuardCallback — thought tokens reach the ledger", () => {
   it("records Gemini's thought tokens as output (100 in, 50 visible, 250 thoughts → 300 out)", async () => {
-    const { calls, tracker, cb } = ledger("google-genai:gemini-3.6-flash");
+    const { calls, tracker, cb } = ledger("google-genai:gemini-3.8-flash");
     await geminiReturning({ promptTokenCount: 100, candidatesTokenCount: 50, thoughtsTokenCount: 250, totalTokenCount: 400 })
       .invoke("hi", { callbacks: [cb] });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 300 });
     // Priced at the output rate: Gemini bills thoughts as output.
-    expect(calls[0]!.usd).toBeCloseTo(estimateCost(100, 300, "google-genai:gemini-3.6-flash"), 12);
+    expect(calls[0]!.usd).toBeCloseTo(estimateCost(100, 300, "google-genai:gemini-3.8-flash"), 12);
     // The run cap reads the same numbers as the ledger row.
     expect(tracker.summary.totalOutputTokens).toBe(300);
   });
 
   it("records the visible output unchanged when Gemini did not think", async () => {
-    const { calls, cb } = ledger("google-genai:gemini-3.6-flash");
+    const { calls, cb } = ledger("google-genai:gemini-3.8-flash");
     await geminiReturning({ promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 })
       .invoke("hi", { callbacks: [cb] });
     expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 50 });
@@ -303,7 +303,7 @@ describe("BudgetGuardCallback — thought tokens reach the ledger", () => {
     // this branch already reads them (generationInfo.usage_metadata). The total
     // can include tokens that are not output (toolUsePromptTokenCount), so the
     // explicit thought count wins when it is there.
-    const { calls, cb } = ledger("google-genai:gemini-3.6-flash");
+    const { calls, cb } = ledger("google-genai:gemini-3.8-flash");
     const raw: LLMResult = {
       generations: [[{
         text: "ok",

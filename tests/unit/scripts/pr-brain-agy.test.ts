@@ -337,7 +337,7 @@ describe("where and how the reviewer runs", () => {
     expect(agyLog("push")).toEqual(["https://push-disabled.invalid/"]);
   });
 
-  it("with a model that is NOT the executor's, as `agy --model` (the executor runs gemini-3.6-flash-medium)", () => {
+  it("with a model that is NOT the executor's, as `agy --model` (the executor runs gemini-3.8-flash-medium)", () => {
     sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
 
     expect(agyLog("model")).toEqual(["claude-sonnet-5-5-medium"]);
@@ -538,18 +538,18 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
   });
 
   it("never reviews with the executor's own model, even when the list names it first", () => {
-    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { PR_BRAIN_MODELS: "gemini-3.6-flash-medium,gemini-3.1-pro-high" } });
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { PR_BRAIN_MODELS: "gemini-3.8-flash-medium,gemini-3.1-pro-high" } });
 
     expect(agyLog("pf-models")).toEqual([FALLBACK]);
     expect(agyLog("model")).toEqual([FALLBACK]);
   });
 
   it("pauses, and says why, when the only configured model IS the executor's", () => {
-    sweep({ env: { PR_BRAIN_MODELS: "gemini-3.6-flash-medium" } });
+    sweep({ env: { PR_BRAIN_MODELS: "gemini-3.8-flash-medium" } });
 
     const paused = sent().filter((m) => m.includes("PAUSED"));
     expect(paused).toHaveLength(1);
-    expect(paused[0]).toMatch(/no reviewer model is configured that differs from the executor model gemini-3\.6-flash-medium/);
+    expect(paused[0]).toMatch(/no reviewer model is configured that differs from the executor model gemini-3\.8-flash-medium/);
     expect(agyLog("pf-models")).toHaveLength(0);
     expect(agyLog("calls")).toHaveLength(0);
   });
@@ -563,7 +563,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
   it("also keeps off every executor FALLBACK candidate: a PR does not record which AGENT_DISPATCH_MODELS entry wrote it", () => {
     sweep({
       agyOut: review("BRAIN-VERDICT: PASS"),
-      env: { AGENT_DISPATCH_MODELS: `gemini-3.6-flash-medium,${FALLBACK}`, PR_BRAIN_MODELS: `${FALLBACK} ${SPENT}` },
+      env: { AGENT_DISPATCH_MODELS: `gemini-3.8-flash-medium,${FALLBACK}`, PR_BRAIN_MODELS: `${FALLBACK} ${SPENT}` },
     });
 
     expect(agyLog("model")).toEqual([SPENT]);

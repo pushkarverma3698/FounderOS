@@ -20,7 +20,7 @@ const NOW = Date.UTC(2026, 9, 4, 14, 0, 0);
 const sec = (ms: number): number => Math.floor(ms / 1000);
 
 const FRESH_BRAIN = `written=${sec(NOW - 5 * 60_000)}\nengine=agy\nreviewers=claude-sonnet-5-5-medium gemini-3.1-pro-high\nmerge=1\n`;
-const FRESH_DISPATCH = `written=${sec(NOW - 5 * 60_000)}\nagy_model=gemini-3.6-flash-medium\nclaude_model=sonnet\n`;
+const FRESH_DISPATCH = `written=${sec(NOW - 5 * 60_000)}\nagy_model=gemini-3.8-flash-medium\nclaude_model=sonnet\n`;
 
 /** Files by basename ("pr-brain.off"); a value of Error is thrown when read. */
 function deps(files: Record<string, string | Error>, engine: "agy" | "claude" = "agy"): BackgroundDeps {
@@ -65,7 +65,7 @@ describe("background_jobs — healthy", () => {
   it("names the writer for the default engine and the other one", () => {
     const dispatch = job(view, "Coding dispatch");
     expect(dispatch).toMatchObject({ kind: "daemon", state: "on", runs: "every 15 minutes" });
-    expect(dispatch.detail).toContain("Antigravity on gemini-3.6-flash-medium");
+    expect(dispatch.detail).toContain("Antigravity on gemini-3.8-flash-medium");
     expect(dispatch.detail).toContain("Claude Code on sonnet");
   });
 

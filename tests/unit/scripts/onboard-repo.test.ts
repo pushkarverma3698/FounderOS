@@ -141,7 +141,7 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
 
     expect(r.stdout).toMatch(/ok\s+review checkout\s+.*widgets/);
     expect(r.stdout).toMatch(/ok\s+agy workspace\s+.*widgets/);
-    expect(r.stdout).toMatch(/ok\s+labels\s+8 of 8/);
+    expect(r.stdout).toMatch(/ok\s+labels\s+10 of 10/);
     expect(r.stdout).not.toMatch(/MISSING|FAILED/);
   });
 
@@ -186,14 +186,14 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
     expect(labelCreates()).toEqual([]);
     expect(mutatingSudo()).toEqual([]);
     expect({ review: snapshot(sb.reviewDir(REPO)), ws: snapshot(sb.workspaceDir(REPO)), labels: [...sb.repoLabels(REPO)] }).toEqual(before);
-    expect(second.stdout).toMatch(/ok\s+labels\s+8 of 8/);
+    expect(second.stdout).toMatch(/ok\s+labels\s+10 of 10/);
   });
 
   it("creates only the labels that are missing, with --force", () => {
     sb.setRepoLabels(REPO, ["agent:ready", "agent:working", "agent:review", "agent:failed"]);
     sb.onboard([REPO]);
 
-    expect(labelCreates()).toHaveLength(4);
+    expect(labelCreates()).toHaveLength(6);
     for (const missing of ["agent:blocked", "agent:needs-brief", "engine:agy", "engine:claude"]) {
       expect(labelCreates().join("\n")).toContain(missing);
     }
@@ -210,7 +210,7 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
     const r = sb.onboard([REPO]);
 
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/ok\s+labels\s+8 of 8/);
+    expect(r.stdout).toMatch(/ok\s+labels\s+10 of 10/);
     expect(labelCreates()).toEqual([]);
   });
 
@@ -404,7 +404,8 @@ describe("onboard-repo.sh — secrets", () => {
 
 describe("the labels", () => {
   it("are exactly the agent:* labels the daemon uses, none invented and none left out", () => {
-    const used = new Set(readFileSync(DAEMON, "utf8").match(/agent:[a-z]+(?:-[a-z]+)*/g) ?? []);
+    const daemonText = readFileSync(DAEMON, "utf8") + " " + readFileSync(fileURLToPath(new URL("../../../deploy/lib/pass-p.sh", import.meta.url)), "utf8");
+    const used = new Set(daemonText.match(/agent:[a-z]+(?:-[a-z]+)*/g) ?? []);
     expect([...used].sort()).toEqual([...AGENT_LABELS].sort());
     const declared = readFileSync(SCRIPT, "utf8").match(/agent:[a-z]+(?:-[a-z]+)*/g) ?? [];
     expect([...new Set(declared)].sort()).toEqual([...AGENT_LABELS].sort());
