@@ -17,12 +17,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkClaim, runChecks } from "../../../scripts/verify-doc-claims.js";
+import { checkClaim, claimHolds, floorOf, runChecks } from "../../../scripts/verify-doc-claims.js";
 
 const SCRIPT = fileURLToPath(new URL("../../../scripts/verify-doc-claims.ts", import.meta.url));
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 describe("verify-doc-claims", () => {
+  // A floor claim ("580+ files") survives PRs that add files; an exact one failed every
+  // concurrent PR that added a src file (2026-10-09).
+  it("a floor claim holds from the floor up to the slack, and fails below or above it", () => {
+    expect(claimHolds(580, 588, 100)).toBe(true);
+    expect(claimHolds(580, 679, 100)).toBe(true);
+    expect(claimHolds(580, 680, 100)).toBe(false); // stale: the floor fell too far behind
+    expect(claimHolds(590, 588, 100)).toBe(false); // overclaims
+    expect(claimHolds(588, 588)).toBe(true);
+    expect(claimHolds(587, 588)).toBe(false); // exact claims stay exact
+    expect(floorOf(588)).toBe(580);
+  });
+
   it("finds no drift in the committed recruiter-path docs", () => {
     // Arrange / Act
     const violations = runChecks();
