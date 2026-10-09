@@ -80,7 +80,7 @@ function homeText(firstName?: string): string {
     `    <code>/status</code> · <code>/budget</code> · <code>/login</code>\n\n` +
     // Every kernel worker, named from the same table the 🧭 list uses. The old
     // hand-written list left out jobhunt and marked "asks first" by hand (Admin
-    // was wrong: schedule_task and record_event are gated). Which tools ask
+    // was wrong: schedule_task is gated). Which tools ask
     // first is now read from HITL_GATED_TOOLS, one tap away.
     `<b>Or just talk to me</b> — I route it to the right team:\n` +
     WORKERS.map((w) => `${DEPARTMENT_LABELS[w].emoji} ${DEPARTMENT_LABELS[w].label}`).join(" · ") +

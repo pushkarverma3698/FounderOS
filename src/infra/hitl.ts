@@ -44,7 +44,6 @@ export const HITL_GATED_TOOLS = new Set([
   "ui_check",
   "project_workflow",
   "create_calendar_event",
-  "record_event",
   "deliver_artifact",
   "synthesize_skill",
   "write_file",
