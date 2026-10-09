@@ -27,10 +27,10 @@ import { createSendEmailTool } from "../../../src/agents/agent-tools/comms.js";
 import { approvedEmailFrom } from "../../../src/agents/dictated-body.js";
 import { _resetBrandRetries } from "../../../src/infra/brand-retry.js";
 
-const FOUNDER = "send an email to pushkarai3698@gmail.com with subject QA test 9 Oct and body: This is a live QA test from FounderOS. Please ignore.";
+const FOUNDER = "send an email to founder@example.com with subject QA test 9 Oct and body: This is a live QA test from FounderOS. Please ignore.";
 const DICTATED = "This is a live QA test from FounderOS. Please ignore.";
 const MODEL_REWRITE = "Hi Pushkar,\n\nThis is a QA test message.\n\nBest regards";
-const ARGS = { to: "pushkarai3698@gmail.com", subject: "QA test 9 Oct", body: MODEL_REWRITE };
+const ARGS = { to: "founder@example.com", subject: "QA test 9 Oct", body: MODEL_REWRITE };
 
 beforeEach(() => {
   _resetBrandRetries();
