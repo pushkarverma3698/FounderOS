@@ -72,6 +72,7 @@ import {
 } from "./agent-tools/video.js";
 import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
 import { setReminder, listReminders, editReminder } from "./agent-tools/reminders.js";
+import { listCalendarEvents } from "./agent-tools/calendar-read.js";
 import { listWorkflows } from "./agent-tools/workflows.js";
 import { antigravityTaskStatus, requeueAntigravityTask } from "./agent-tools/antigravity-followup.js";
 import { readContext, updateContext } from "../tools/context.js";
@@ -126,7 +127,7 @@ import { uiCheck } from "./agent-tools/ui-qa.js";
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, searchKnowledge, recallConversationTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, publishSignal, scanAiVisibility, getGapScans],
-  comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
+  comms: [createSendEmailTool("comms"), readEmails, listCalendarEvents, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, antigravityTaskStatus, requeueAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs, searchKnowledge],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],

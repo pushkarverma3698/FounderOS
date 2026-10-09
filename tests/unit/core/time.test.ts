@@ -45,6 +45,20 @@ describe("plannerNowLine", () => {
   });
 });
 
+describe("plannerNowLine after midnight", () => {
+  it("states today's and tomorrow's dates, and reads 'tomorrow' at 00:30 as the coming morning", () => {
+    const line = plannerNowLine(() => new Date("2026-10-09T19:00:00Z"), IST); // 00:30 IST Sat 10 Oct
+    expect(line).toContain("Today is 2026-10-10");
+    expect(line).toContain("tomorrow is 2026-10-11");
+    expect(line).toMatch(/after midnight/i);
+  });
+  it("is plain in the daytime: no after-midnight rule", () => {
+    const line = plannerNowLine(() => new Date("2026-10-09T06:27:00Z"), IST); // 11:57 IST
+    expect(line).toContain("Today is 2026-10-09");
+    expect(line).not.toMatch(/after midnight/i);
+  });
+});
+
 describe("nextRecurrence — next fire strictly after now", () => {
   it("daily: a time earlier today rolls to tomorrow 09:00 IST", () => {
     const next = nextRecurrence({ kind: "daily", time: "09:00" }, frozen, IST);

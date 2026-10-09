@@ -60,17 +60,61 @@ const quoteList = (items: readonly string[], max = 3): string =>
     .map((s) => `"${s}"`)
     .join(", ") + (items.length > max ? ` and ${items.length - max} more` : "");
 
-/** J1: the reply names at least one real subject from the last 24 h, or says nothing when gws found nothing. */
-export function scoreInbox(reply: string, subjects: readonly string[]): Verdict {
-  if (subjects.length === 0) {
+export interface InboxMail {
+  subject: string;
+  /** The From header, "Name <addr>" or a bare address. */
+  sender?: string;
+}
+
+/** Words too generic to prove a reply is about one particular mail. */
+const GENERIC_SUBJECT_WORDS = new Set([
+  "update", "updates", "fyi", "hello", "hi", "meeting", "reminder", "notification", "newsletter", "message", "email", "mail", "notes", "info",
+]);
+const MONTHS = new Set(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"]);
+
+/** The distinctive words of a subject: no re/fwd, no digits or month names (dates), no generic words, 3+ letters. */
+export function subjectKeywords(subject: string): string[] {
+  return normalize(subject)
+    .replace(/^((re|fw|fwd|aw)\s+)+/, "")
+    .split(" ")
+    .filter((w) => w.length >= 3 && !/\d/.test(w) && !MONTHS.has(w) && !GENERIC_SUBJECT_WORDS.has(w));
+}
+
+/** The sender's display name ("Sandeep Bist" from `Sandeep Bist <s@x.com>`); undefined for a bare address. */
+export function senderName(sender: string | undefined): string | undefined {
+  const m = /^\s*"?([^"<@]+?)"?\s*<[^>]*>\s*$/.exec(sender ?? "");
+  const n = m?.[1] ? normalize(m[1]) : "";
+  return n.length >= 4 ? n : undefined;
+}
+
+/** How the reply points at this mail: its subject, its sender's name, or every distinctive word of its subject. */
+function mentionedBy(reply: string, mail: InboxMail): string | undefined {
+  if (names(reply, mail.subject)) return "subject";
+  const padded = ` ${normalize(reply)} `;
+  const who = senderName(mail.sender);
+  if (who && padded.includes(` ${who} `)) return "sender";
+  const words = subjectKeywords(mail.subject);
+  if (words.length > 0 && words.every((w) => padded.includes(` ${w} `))) return "keywords";
+  return undefined;
+}
+
+/**
+ * J1: the reply is about at least one real mail from the last 24 h, or says nothing when gws found nothing.
+ * The bot shortens and paraphrases subjects ("MoM | 8 Oct 2026" → "MoM from Sandeep Bist dated Oct 8"), so a mail
+ * counts as named by its subject, its sender's display name, or all the distinctive words of its subject.
+ */
+export function scoreInbox(reply: string, mails: ReadonlyArray<string | InboxMail>): Verdict {
+  if (mails.length === 0) {
     return saysNothing(reply)
       ? { ok: true, detail: "gws found no mail in the last 24 h and the bot said so" }
       : { ok: false, detail: "gws found no mail in the last 24 h but the bot did not say there was nothing" };
   }
-  const hit = subjects.find((s) => names(reply, s));
-  return hit
-    ? { ok: true, detail: `named "${hit}" (one of ${subjects.length} real subjects)` }
-    : { ok: false, detail: `named none of the ${subjects.length} real subjects, e.g. ${quoteList(subjects)}` };
+  const list = mails.map((m): InboxMail => (typeof m === "string" ? { subject: m } : m));
+  for (const mail of list) {
+    const how = mentionedBy(reply, mail);
+    if (how) return { ok: true, detail: `named "${mail.subject}" by its ${how} (one of ${list.length} real mails)` };
+  }
+  return { ok: false, detail: `named none of the ${list.length} real mails, e.g. ${quoteList(list.map((m) => m.subject))}` };
 }
 
 /** J2: every event gws returns for today is named, or the reply says the day is empty. */
@@ -103,28 +147,53 @@ const VERDICT_WORDS: Record<string, RegExp> = {
 /** "#1018", "PR 1018", or a bare markdown table cell "| 1018 |" (the bot answers lists as tables). */
 const prRef = (n: number): RegExp => new RegExp(`(#|\\bPR\\s*#?)${n}\\b|\\|\\s*${n}\\s*\\|`, "i");
 
-/** J3: every open PR is named with GitHub's CI verdict on its line; the follow-up names the oldest PR. */
-export function scorePrs(reply: string, followUp: string, prs: readonly OpenPr[]): Verdict {
-  if (prs.length === 0) {
+/** The colours a line of the reply speaks of. */
+const colours = (line: string): string[] => Object.keys(VERDICT_WORDS).filter((k) => VERDICT_WORDS[k]!.test(line));
+
+/**
+ * The text that speaks for a PR line: the line itself plus, when replies group PRs ("**CI Red (3):**" then bullets),
+ * the nearest heading above it. A heading names one colour or it is a summary ("9 green, 3 red") and says nothing.
+ */
+function contextFor(lines: readonly string[], index: number, anyPr: RegExp): string {
+  const own = lines[index]!;
+  for (let i = index - 1; i >= 0; i--) {
+    const l = lines[i]!;
+    if (l.trim() === "" || anyPr.test(l) || /^\s*([-*•]|\d+[.)])\s/.test(l) || l.trim().startsWith("|")) continue;
+    return colours(l).length === 1 ? `${own} ${l}` : own;
+  }
+  return own;
+}
+
+/**
+ * J3: every PR in the pre-ask GitHub snapshot is named with GitHub's CI verdict, and the follow-up names the oldest.
+ * The list moves while the bot answers, so: PRs opened after the snapshot may appear in the reply freely, a snapshot PR
+ * missing from `stillOpen` (closed or merged since) is skipped, and a snapshot PR whose CI was still pending may have
+ * settled to any colour. `stillOpen` omitted = nothing closed.
+ */
+export function scorePrs(reply: string, followUp: string, prs: readonly OpenPr[], stillOpen?: ReadonlySet<number>): Verdict {
+  const live = stillOpen ? prs.filter((p) => stillOpen.has(p.number)) : prs;
+  if (live.length === 0) {
     return saysNothing(reply) || /\bno open\b/i.test(reply)
       ? { ok: true, detail: "no open PRs and the bot said so" }
       : { ok: false, detail: "GitHub has no open PRs but the bot did not say so" };
   }
   const problems: string[] = [];
   const lines = reply.split("\n");
-  for (const pr of prs) {
-    const own = lines.filter((l) => prRef(pr.number).test(l));
+  const anyPr = new RegExp(`(#|\\bPR\\s*#?)\\d{3,}\\b|\\|\\s*\\d{3,}\\s*\\|`, "i");
+  for (const pr of live) {
+    const ref = prRef(pr.number);
+    const own = lines.map((l, i) => (ref.test(l) ? contextFor(lines, i, anyPr) : undefined)).filter((l): l is string => l !== undefined);
     if (own.length === 0) {
       problems.push(`#${pr.number} not named`);
       continue;
     }
-    const words = VERDICT_WORDS[pr.ci];
+    const words = pr.ci === "pending" ? undefined : VERDICT_WORDS[pr.ci];
     if (words && !own.some((l) => words.test(l))) problems.push(`#${pr.number}: GitHub says ${pr.ci}, the reply does not`);
   }
-  const oldest = [...prs].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0]!;
+  const oldest = [...live].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0]!;
   if (!prRef(oldest.number).test(followUp)) problems.push(`follow-up did not name the oldest PR #${oldest.number}`);
   return problems.length === 0
-    ? { ok: true, detail: `all ${prs.length} open PRs and their CI verdicts match GitHub; follow-up named #${oldest.number}` }
+    ? { ok: true, detail: `all ${live.length} open PRs and their CI verdicts match GitHub; follow-up named #${oldest.number}` }
     : { ok: false, detail: problems.join("; ") };
 }
 

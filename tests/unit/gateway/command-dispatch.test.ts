@@ -59,6 +59,8 @@ describe("command catalog", () => {
     const names = plannableCommands().map((c) => c.name);
     expect(names).not.toContain("reset");
     expect(names).not.toContain("start");
+    // /remind's handler is itself a planner turn: routing plain words to it loops (card -> Run -> same card, no row).
+    expect(names).not.toContain("remind");
     expect(names.some((n) => n.startsWith("wife_"))).toBe(false);
     const menu = new Set(COMMAND_MENU.map((e) => e.command));
     for (const n of names) expect(menu.has(n)).toBe(true);
