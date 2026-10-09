@@ -733,6 +733,14 @@ note_wall() { # note_wall ENGINE TEXT
   log "$2"
 }
 
+engine_wall_text() { # engine_wall_text ENGINE — the wall engine_ready just reported, as one line for the founder
+  case "$1" in
+    claude) if claude_blocked; then claude_block_summary; else printf 'Claude Code has no token on %s' "$HOST"; fi ;;
+    *) if down_active; then printf 'Antigravity is paused (%s since %s)' "$(down_class)" "$(down_since)"
+       else printf 'Antigravity quota is exhausted until %s' "$(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")")"; fi ;;
+  esac
+}
+
 claude_block_summary() {
   case "$(claude_block_class)" in
     quota) printf 'Claude Code blocked (quota) until %s' "$(quota_until_human "$(claude_block_extra)")" ;;
@@ -1451,7 +1459,11 @@ redispatch_unresolved_reviews() {
     local engine ename
     engine="$(issue_engine "$issue" agy)" || { log "#${issue} could not read its labels — PR #${pr} skipped this tick"; continue; }
     ename="$(engine_display "$engine")"
-    engine_ready "$engine" || continue
+    if ! engine_ready "$engine"; then
+      # The bot already told the founder his fix started; a wall that keeps it from starting is said to him, not only logged.
+      [[ "$forced" -eq 1 ]] && fix_refused "$issue" "$pr" "$(engine_wall_text "$engine"), so ${ename} cannot fix PR #${pr} now. Say \"fix it\" again once it is back"
+      continue
+    fi
 
     if [[ "$DRY_RUN" -eq 1 && "$mode" == nonblockers ]]; then
       log "DRY RUN would send the non-blocking findings of PR #${pr} to ${ename} (issue #${issue}, attempt $((attempts + 1)))"

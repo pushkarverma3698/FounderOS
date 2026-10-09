@@ -10,6 +10,7 @@
  * It runs under the same dispatch lock as the cron, so the two can never fix the same PR at once.
  */
 
+import { writeFileSync } from "node:fs";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DispatchSandbox } from "./dispatch-sandbox.js";
 
@@ -115,6 +116,17 @@ describe("a founder-requested fix on a blocked PR", () => {
 
     expect(sb.agyRuns()).toBe(0);
     expect(sb.messages().join("\n")).toMatch(/has not reviewed/i);
+  });
+
+  it("tells the founder when the executor is behind a wall, instead of only logging it", () => {
+    blockedPr();
+    writeFileSync(sb.statePath("agent-dispatch.quota-until"), String(Math.floor(Date.now() / 1000) + 3600));
+
+    sb.tick({ args: fixArgs(), agyOut: "done", agyRc: 0 });
+
+    expect(sb.agyRuns()).toBe(0);
+    expect(attempts()).toHaveLength(0);
+    expect(sb.messages().join("\n")).toMatch(/no fix started[\s\S]*quota is exhausted/i);
   });
 
   it("does nothing on a PR that is already cleared (not a draft)", () => {
