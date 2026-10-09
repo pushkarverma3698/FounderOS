@@ -5,6 +5,18 @@
  * passes them in; a read that failed arrives as { error } and is printed red with its reason, never as green.
  */
 
+/** The coding pipeline's Claude probe, as claude-agent with every API-key env removed (subscription only). stdin is /dev/null: with no stdin, `claude -p` warns "no stdin data" and exits 1. */
+export const CLAUDE_PROBE_CMD =
+  "unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN && timeout 60 claude -p ok --max-turns 1 --output-format json < /dev/null";
+
+/** gws prints "Using keyring backend: keyring" before the error; show the line that carries the error. */
+export function gwsErrorLine(raw: string, max = 160): string {
+  const lines = raw.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const real = lines.filter((l) => !l.startsWith("Using keyring backend"));
+  const pick = real.find((l) => /error|invalid_grant|failed/i.test(l)) ?? real[0] ?? lines[0] ?? "";
+  return pick.slice(0, max);
+}
+
 /** Below this many dollars on the OpenRouter balance OR on the key's own limit, the line is red. */
 export const OPENROUTER_MIN_USD = 1;
 
