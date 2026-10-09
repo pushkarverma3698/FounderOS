@@ -18,7 +18,7 @@ import { formatError, formatResult, type McpToolResult } from "./brain-tools.js"
 
 const ACCOUNT_SCHEMA = {
   type: "string",
-  description: "One Google account: turicks, personal, naggar, or a name the founder added in Telegram. Omit to read all of them.",
+  description: "One Google account: personal, or a name the founder added in Telegram. Omit to read all of them.",
 };
 
 export const GOOGLE_TOOLS = [

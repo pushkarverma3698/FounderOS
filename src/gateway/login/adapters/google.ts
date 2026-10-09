@@ -9,7 +9,7 @@
 import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { ACCOUNT_SEED_SPECS, isAccountKey } from "../../../core/accounts.js";
+import { ACCOUNT_SEED_SPECS, isBuiltinGoogleAccount } from "../../../core/accounts.js";
 import { listGoogleMailboxes, mailboxNameProblem, mailboxProfileDir } from "../../../infra/google-mailboxes.js";
 import { runGws, type GwsRunOutcome } from "../../../infra/gws-runner.js";
 import { clearCredentialAlert, isCredentialFailure } from "../../../infra/provider-probes.js";
@@ -86,7 +86,7 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
     get targets() {
       return deps.mailboxes();
     },
-    addProblem: (name) => (isAccountKey(name) ? undefined : mailboxNameProblem(name)),
+    addProblem: (name) => (isBuiltinGoogleAccount(name) ? undefined : mailboxNameProblem(name)),
 
     async start(target): Promise<LoginStarted> {
       const client = await deps.readClient();
@@ -128,12 +128,12 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
       }
       if (hadBackup) await rm(`${file}.bak`, { force: true });
       deps.clearAlerts(target);
-      const use = isAccountKey(target) ? "" : `\nAsk for it by name, e.g. "read ${esc(target)} mail". Sign out: /login google remove ${esc(target)}`;
+      const use = isBuiltinGoogleAccount(target) ? "" : `\nAsk for it by name, e.g. "read ${esc(target)} mail". Sign out: /login google remove ${esc(target)}`;
       return { ok: true, html: `✅ ${esc(labelOf(target))} is signed in as <b>${esc(email)}</b>. Verified with a live Gmail call.${use}` };
     },
 
     async remove(target): Promise<LoginFinished> {
-      if (isAccountKey(target)) {
+      if (isBuiltinGoogleAccount(target)) {
         return { ok: false, html: `${esc(labelOf(target))} is built in and stays. Renew it with /login google ${target}.` };
       }
       await deps.forget(target);
@@ -147,7 +147,7 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
     },
 
     async logout(target): Promise<LoginFinished> {
-      if (!isAccountKey(target)) return this.remove!(target);
+      if (!isBuiltinGoogleAccount(target)) return this.remove!(target);
       const dir = deps.profileDir(target);
       await deps.deleteCredentials(`${dir}/credentials.json`);
       // The real failed call: the same Gmail request the sign-in used, against the folder that no longer holds a login.

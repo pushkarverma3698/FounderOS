@@ -1,7 +1,7 @@
 /**
  * FounderOS — which Google mailboxes exist
  * ========================================
- * The three built-in accounts (src/core/accounts.ts) plus any the founder added from Telegram
+ * The one built-in account (`personal`, src/core/accounts.ts) plus any the founder added from Telegram
  * with `/login google add <name>`. An added mailbox is nothing but its signed-in credentials file
  * at `~/.founderos/accounts/<name>/gws/credentials.json`: no DB row, no config. Signing it out
  * (`/login google remove <name>`) deletes that folder and the name is gone everywhere.
@@ -11,7 +11,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { ACCOUNT_KEYS, isAccountKey } from "../core/accounts.js";
+import { GOOGLE_BUILTIN_ACCOUNT, isBuiltinGoogleAccount } from "../core/accounts.js";
 
 export interface MailboxFs {
   home(): string;
@@ -47,17 +47,17 @@ export function mailboxProfileDir(name: string, fs: MailboxFs = realFs): string 
   return `${fs.home()}/.founderos/accounts/${name}/gws`;
 }
 
-/** Built-in accounts first, then added ones (signed in at least once), alphabetical. */
+/** The built-in account first, then added ones (turicks and naggar count as added once signed in), alphabetical. */
 export function listGoogleMailboxes(fs: MailboxFs = realFs): string[] {
   const added = fs
     .listDirs(`${fs.home()}/.founderos/accounts`)
-    .filter((n) => !isAccountKey(n) && !mailboxNameProblem(n) && fs.exists(`${mailboxProfileDir(n, fs)}/credentials.json`))
+    .filter((n) => !isBuiltinGoogleAccount(n) && !mailboxNameProblem(n) && fs.exists(`${mailboxProfileDir(n, fs)}/credentials.json`))
     .sort();
-  return [...ACCOUNT_KEYS, ...added];
+  return [GOOGLE_BUILTIN_ACCOUNT, ...added];
 }
 
 export function isAddedMailbox(name: string, fs: MailboxFs = realFs): boolean {
-  return !isAccountKey(name) && listGoogleMailboxes(fs).includes(name);
+  return !isBuiltinGoogleAccount(name) && listGoogleMailboxes(fs).includes(name);
 }
 
 /**

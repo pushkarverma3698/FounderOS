@@ -40,7 +40,7 @@ export const readEmailsTool: UnifiedTool = {
       },
       account_key: {
         type: "string",
-        description: "Which Google account: turicks, personal, naggar, a name added with /login google add, or 'all'.",
+        description: "Which Google account: personal, a name added with /login google add, or 'all'.",
       },
     },
     required: [],
