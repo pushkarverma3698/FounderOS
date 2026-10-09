@@ -128,7 +128,7 @@ describe("kernel self-healing (real graph, scripted models)", () => {
   });
 
   it("isKernelTerminalError: classifies the exact terminal set, nothing else", () => {
-    for (const name of ["BudgetExceededError", "DailyBudgetExceededError", "AbortError", "TurnTimeoutError"]) {
+    for (const name of ["BudgetExceededError", "DailyBudgetExceededError", "AbortError", "TurnTimeoutError", "ProviderKeyLimitError"]) {
       const e = new Error("x");
       e.name = name;
       expect(isKernelTerminalError(e)).toBe(true);

@@ -6,6 +6,7 @@ import { BudgetExceededError } from "../infra/budget.js";
 import { DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
+import { isKeyLimitError, keyLimitLine, ProviderKeyLimitError } from "../agents/provider-key-limit.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { retryKeyboard } from "./retry-button.js";
 import { modelErrorLine } from "./model-error-line.js";
@@ -76,6 +77,13 @@ export async function replyForError(
       `🔁 <b>Hit the graph recursion limit</b> — this should not happen in v3; please report. State is preserved.`,
       { parse_mode: "HTML" },
     );
+    return;
+  }
+  if (err instanceof ProviderKeyLimitError || isKeyLimitError(err)) {
+    // A spent key is not an outage: no auto-retry, no Retry button, and the
+    // raw 403 (with its key-hash URL) stays in the logs (issue #1052).
+    log.error({ err: err instanceof Error ? err.message : String(err) }, "Model key limit reached");
+    await ctx.reply(`🔑 <b>${safeHtml(await keyLimitLine())}</b>`, { parse_mode: "HTML" });
     return;
   }
   if (isModelFallbackError(err)) {
