@@ -64,7 +64,11 @@ export interface TaskFacts {
   readonly comments: readonly TaskComment[];
   readonly pr: TaskPr | null;
   readonly quotaUntil: Date | null;
+  /** Claude Code writes the specs; while its wall holds, no spec is written. Absent = no wall. */
+  readonly claudeBlock?: ClaudeBlock | null;
 }
+
+export type ClaudeBlock = { readonly kind: "quota"; readonly until: Date } | { readonly kind: "auth"; readonly until: null };
 
 const CLAIM = /<!-- agent-claimed: (\S+)/;
 const DISPATCH_FAILURE = /^agent-dispatch could not verify a PR landed[^\n]*/m;
@@ -103,6 +107,24 @@ function prLines(pr: TaskPr): string[] {
     lines.push(`${REVIEWER} reviewed the current head and cleared it (ready to merge).`);
   }
   lines.push(pr.url);
+  return lines;
+}
+
+const SPEC_ATTEMPT = /<!-- pass-p-attempt: (\d+) -->[^\n]*\n+([^\n]+)/;
+
+/** The spec stage, said as it is: a wall, a failed attempt, or a draft that is really under way. */
+function specDraftLines(f: TaskFacts, now: Date): string[] {
+  const lines: string[] = [];
+  const wall = f.claudeBlock;
+  if (wall?.kind === "quota" && wall.until > now) {
+    lines.push(`⏸️ No spec is being written: Claude Code's usage limit holds until ${utc(wall.until)}. Drafting resumes by itself then; no card will arrive before.`);
+  } else if (wall?.kind === "auth") {
+    lines.push("⏸️ No spec is being written: Claude Code's login was refused. It needs a fresh login before any spec is drafted.");
+  } else {
+    lines.push("📝 A spec is being drafted from your request. A spec card will follow in Telegram; nothing is built before you approve it.");
+  }
+  const attempt = [...f.comments].reverse().map((c) => c.body.match(SPEC_ATTEMPT)).find(Boolean);
+  if (attempt) lines.push(`Last try: attempt ${attempt[1]} of 3 produced no usable spec — ${attempt[2]}`);
   return lines;
 }
 
@@ -156,7 +178,7 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
     return [head, "📝 The spec is waiting for your approval in Telegram. Nothing is built until you approve it.", issue.url].join("\n");
   }
   if (labels.has("agent:spec")) {
-    return [head, "📝 A spec is being drafted from your request. A spec card will follow in Telegram; nothing is built before you approve it.", issue.url].join("\n");
+    return [head, ...specDraftLines(f, now), issue.url].join("\n");
   }
   return [
     head,
@@ -175,6 +197,21 @@ export async function readQuotaUntil(file: string = QUOTA_FILE): Promise<Date | 
     return Number.isFinite(epoch) && epoch > 0 ? new Date(epoch * 1000) : null;
   } catch {
     // allow-failopen: no file is the normal case — the quota is not exhausted.
+    return null;
+  }
+}
+
+const CLAUDE_BLOCK_FILE = join(homedir(), ".claude", "agent-dispatch.claude-blocked");
+
+/** Line 1 is the class, line 2 the epoch the wall lifts (quota). An unreadable file means no wall. */
+export async function readClaudeBlock(file: string = CLAUDE_BLOCK_FILE): Promise<ClaudeBlock | null> {
+  try {
+    const [klass, extra] = (await readFile(file, "utf8")).split("\n");
+    if (klass === "auth") return { kind: "auth", until: null };
+    const epoch = Number(extra);
+    return klass === "quota" && Number.isFinite(epoch) && epoch > 0 ? { kind: "quota", until: new Date(epoch * 1000) } : null;
+  } catch {
+    // allow-failopen: no file is the normal case — Claude Code is not walled.
     return null;
   }
 }
@@ -241,5 +278,6 @@ export async function fetchTaskFacts(
     comments,
     pr,
     quotaUntil: await quotaReader(),
+    claudeBlock: await readClaudeBlock(),
   };
 }

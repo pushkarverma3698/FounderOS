@@ -389,4 +389,17 @@ describe("intake edge cases", () => {
     expect(sb.claudeRuns()).toBe(before);
     expect(hasBranch("task/issue-1")).toBe(false);
   });
+  it("a Claude weekly limit costs no attempt, and no second run is started while the wall holds", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    const env = { ...sb.gitEnv(), AGENT_PIPELINE_V2: "1", AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(), AGENT_DISPATCH_SPEC_WORK: work, FOUNDEROS_CONTRACTS_DIR: contracts };
+    const wall = { claudeRc: 0, claudeOut: "Error: You've hit your weekly limit · resets Oct 11, 12am (UTC)", env };
+    sb.tick(wall);
+    expect(sb.claudeRuns()).toBe(1);
+    expect(sb.labelsOf(1)).toEqual([SPEC]);
+    expect(sb.commentsOf(1).join("\n")).not.toContain("pass-p-attempt");
+    expect(sb.messages().filter((m) => m.includes("usage limit"))).toHaveLength(1);
+    sb.tick(wall);
+    expect(sb.claudeRuns()).toBe(1);
+    expect(sb.messages().filter((m) => m.includes("usage limit"))).toHaveLength(1);
+  });
 });
