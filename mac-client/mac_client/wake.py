@@ -69,7 +69,10 @@ def main() -> int:
 
     top = [f"{j.company} — {j.title}" for j in jobs]
     try:
-        notify.send(notify.queue_ready_message(len(jobs), top, fetch_failures))
+        # The bot's now:jobs button opens the DEFAULT profile's brief, so another candidate's queue gets no button
+        # rather than one that shows the wrong person's roles.
+        markup = notify.queue_ready_keyboard() if jobs and profile_id == DEFAULT_PROFILE_ID else None
+        notify.send(notify.queue_ready_message(len(jobs), top, fetch_failures), reply_markup=markup)
     except notify.NotifyError as err:
         print(f"⚠ queue synced ({len(jobs)} jobs) but Telegram failed: {err}")
         return 1
