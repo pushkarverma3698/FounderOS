@@ -1,8 +1,8 @@
 /**
  * The morning journey cron line is installed by deploy — deploy/sync-daemons.sh, ensure_journey_cron.
  * =====================================================================================================
- * AG-051: one 08:00 IST run (scripts/journey-daily.ts) replaces the hand-installed journey B and C lines; journey A
- * keeps its own 3-day line. The edit is read back and the old crontab restored when any kept line did not survive,
+ * AG-051: one 08:00 IST run (scripts/journey-daily.ts) replaces the hand-installed journey B and C lines. Journey A
+ * runs daily at 01:30 UTC from its own line (#1058), replacing the old 3-day one. The edit is read back and the old crontab restored when any kept line did not survive,
  * the same safety the kick-cron removal has. Own file (not sync-daemons.test.ts) so it does not collide with other
  * work on that file; same harness: a fake HOME and a crontab command backed by a file.
  */
@@ -19,6 +19,8 @@ const SYNC = fileURLToPath(new URL("../../../deploy/sync-daemons.sh", import.met
 const RUN = "cd /opt/founderos && PATH=/usr/local/bin:/usr/bin:/bin node --import tsx/esm --env-file=.env";
 /** The exact line deploy installs. */
 const DAILY = `30 2 * * * ${RUN} scripts/journey-daily.ts >> $HOME/.claude/journey-daily.log 2>&1`;
+/** Journey A, daily at 01:30 UTC so its result is under an hour old when the morning run scores it (#1058). */
+const A_DAILY = `30 1 * * * ${RUN} scripts/journey-coding.ts >> $HOME/.claude/journey-a.log 2>&1`;
 // What the box really has (crontab -l on founderos-vps, 2026-10-08), the journey lines.
 const C_LINE = `30 2 * * * ${RUN} scripts/journey-jobs-group.ts >> $HOME/.claude/journey-c.log 2>&1`;
 const B_LINE = `45 2 * * * ${RUN} scripts/journey-where.ts >> $HOME/.claude/journey-b.log 2>&1`;
@@ -68,14 +70,26 @@ function sync(env: Record<string, string> = {}, path = "/usr/bin:/bin") {
 }
 
 describe("sync-daemons.sh — the morning journey cron", () => {
-  it("installs the 02:30 UTC line, removes the B and C lines, keeps A and every other line", () => {
+  it("installs A daily at 01:30 and the 02:30 UTC morning run, removes the 3-day A, B and C lines, keeps every other line", () => {
     fakeCrontab([...OTHER, C_LINE, B_LINE, A_LINE, ""].join("\n"));
 
     const r = sync({ SYNC_DAEMONS_JOURNEY_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(lines()).toEqual([...OTHER, A_LINE, DAILY]);
-    expect(r.out).toContain("sync-daemons: journey cron installed: scripts/journey-daily.ts at 02:30 UTC (08:00 IST), 2 old journey lines removed");
+    expect(lines()).toEqual([...OTHER, A_DAILY, DAILY]);
+    expect(r.out).toContain(
+      "sync-daemons: journey cron installed: scripts/journey-coding.ts at 01:30 UTC, scripts/journey-daily.ts at 02:30 UTC (08:00 IST), 3 old journey lines removed",
+    );
+  });
+
+  it("moves the box's real crontab (10-09: the 3-day A line and the daily line) to A daily", () => {
+    fakeCrontab([...OTHER, A_LINE, DAILY].join("\n") + "\n");
+
+    const r = sync({ SYNC_DAEMONS_JOURNEY_CRONTAB: crontab });
+
+    expect(r.status, r.err).toBe(0);
+    expect(lines()).toEqual([...OTHER, A_DAILY, DAILY]);
+    expect(r.out).toContain("1 old journey lines removed");
   });
 
   it("is idempotent: a second deploy finds the line and writes nothing", () => {
@@ -88,6 +102,7 @@ describe("sync-daemons.sh — the morning journey cron", () => {
     expect(second.status, second.err).toBe(0);
     expect(readFileSync(state, "utf8")).toBe(once);
     expect(lines().filter((l) => l === DAILY)).toHaveLength(1);
+    expect(lines().filter((l) => l === A_DAILY)).toHaveLength(1);
     expect(second.out).toContain("journey cron already installed");
   });
 
@@ -97,7 +112,7 @@ describe("sync-daemons.sh — the morning journey cron", () => {
     const r = sync({ SYNC_DAEMONS_JOURNEY_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(lines()).toEqual([...OTHER, DAILY]);
+    expect(lines()).toEqual([...OTHER, A_DAILY, DAILY]);
   });
 
   it("leaves commented-out journey lines alone", () => {
@@ -106,7 +121,7 @@ describe("sync-daemons.sh — the morning journey cron", () => {
     const r = sync({ SYNC_DAEMONS_JOURNEY_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(lines()).toEqual([`# ${B_LINE}`, OTHER[0], DAILY]);
+    expect(lines()).toEqual([`# ${B_LINE}`, OTHER[0], A_DAILY, DAILY]);
   });
 
   it("installs the line for a user who has no crontab yet", () => {
@@ -115,7 +130,7 @@ describe("sync-daemons.sh — the morning journey cron", () => {
     const r = sync({ SYNC_DAEMONS_JOURNEY_CRONTAB: crontab });
 
     expect(r.status, r.err).toBe(0);
-    expect(lines()).toEqual([DAILY]);
+    expect(lines()).toEqual([A_DAILY, DAILY]);
   });
 
   it("fails loudly, and puts the old crontab back, when the write does not stick", () => {
