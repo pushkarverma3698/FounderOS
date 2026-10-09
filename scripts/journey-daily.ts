@@ -5,7 +5,7 @@
  * ONE message goes to the founder DM. Rows land in agents.journey_runs for the trend.
  *
  *   J1 work inbox · J2 calendar · J3 open PRs (+ follow-up) · J4 not built (waits for the AG-056 job row) · J5 reminder
- *   A: last result from ~/.claude/journey-a.log (its own 3-day cron) · B: /where vs GitHub · C: jobs group freshness
+ *   A: last result from ~/.claude/journey-a.log (its own cron, daily at 01:30 UTC) · B: /where vs GitHub · C: jobs group freshness
  *
  * Installed by deploy (deploy/sync-daemons.sh, ensure_journey_cron) at 02:30 UTC. By hand on the VPS:
  *   node --import tsx/esm --env-file=.env scripts/journey-daily.ts
@@ -13,7 +13,7 @@
  *      JOURNEY_WHERE_REPO (default pushkarverma3698/FounderOS), JOBHUNT_CHAT_ID, JOURNEY_MAX_AGE_H (C, default 26).
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { Api, type TelegramClient } from "telegram";
 import { DEFAULT_ACCOUNT_KEY } from "../src/core/accounts.js";
 import { DAILY_BUDGET_USD, TENANT } from "../src/core/config.js";
@@ -142,14 +142,12 @@ async function journeyC(client: TelegramClient): Promise<JourneyResult> {
 function journeyA(): JourneyResult {
   const file = `${process.env["HOME"] ?? ""}/.claude/journey-a.log`;
   let text: string | undefined;
-  let mtimeMs: number | undefined;
   try {
     text = readFileSync(file, "utf8");
-    mtimeMs = statSync(file).mtimeMs;
   } catch {
     text = undefined; // allow-failopen: a missing log is scored red ("no journey A log on this host") by parseJourneyALog
   }
-  const r = parseJourneyALog(text, mtimeMs, Date.now());
+  const r = parseJourneyALog(text, Date.now());
   return { id: "A", ...r };
 }
 
