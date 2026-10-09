@@ -79,6 +79,7 @@ const RULES = [
   "- The locked tests are already on your branch. Do not edit, move, delete or skip the locked tests. They must pass when you stop.",
   "- Change only files inside the scope. A file outside it needs the founder's yes: stop and say so in the PR instead.",
   "- No new dependencies. Stay inside the size limits. Do not touch CI, workflows, lockfiles, secrets or .env files.",
+  "- Look at how existing tests are written in this repo before writing new ones.",
   "- Verify with only the test files you added or changed, plus `pnpm lint && pnpm verify:arch`. Do not run the full `pnpm test` or `pnpm gate`: CI runs them.",
   "- Commit and push early, so work done is not lost if the run is cut off. Report what you ran and what it printed; if you did not run something, say so.",
   "- If you cannot make the locked tests pass inside the scope, stop and say why in the PR body. Do not weaken a test to get green.",
