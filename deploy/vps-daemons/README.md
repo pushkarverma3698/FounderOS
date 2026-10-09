@@ -37,7 +37,7 @@ loop stopped with it. `pr-brain` now has an engine:
 | | `agy` (default) | `claude` |
 |---|---|---|
 | Runs | the Antigravity CLI as the `antigravity` user, in its own clone `/opt/agy-workspace/review/<repo>` on the PR head | headless Claude Code in `/opt/review/<repo>` |
-| Model | `claude-sonnet-5-5-medium`, then `gemini-3.1-pro-high` if that one's quota is gone or agy no longer has it (`PR_BRAIN_MODELS`, best first; `agy models` lists what exists). **Never** the executor's `gemini-3.6-flash-medium`: the code skips it | `sonnet` (`PR_BRAIN_MODEL`) |
+| Model | `claude-sonnet-5-5-medium`, then `gemini-3.1-pro-high` if that one's quota is gone or agy no longer has it (`PR_BRAIN_MODELS`, best first; `agy models` lists what exists). **Never** the executor's `gemini-3.8-flash-medium`: the code skips it | `sonnet` (`PR_BRAIN_MODEL`) |
 | Can push to the PR | **no** (the clone's push URL is disabled) | yes (verdict B) |
 | Verdict | the model ends with `BRAIN-VERDICT: PASS` or `FAIL`; **the script** makes the PR ready/draft and posts the reviewed marker. No verdict line = a failed attempt | read from the PR's state, as before |
 | Telegram | one message, edited while it runs: `Reviewing <repo>#<n>`, the last tool calls, the clock, the verdict | the gate's start and verdict |

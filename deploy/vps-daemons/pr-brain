@@ -10,7 +10,7 @@
 #
 # THE REVIEWER IS AN ENGINE, chosen by PR_BRAIN_ENGINE:
 #   agy     (default) the Antigravity CLI, as the antigravity user, in a fresh conversation on a clean
-#           checkout of the PR head. Its model is NEVER the executor's (gemini-3.6-flash-medium): the
+#           checkout of the PR head. Its model is NEVER the executor's (gemini-3.8-flash-medium): the
 #           executor is never its own grader, which is the whole reason this loop has a separate reviewer.
 #           The candidates, best first, are PR_BRAIN_MODELS (default claude-sonnet-5-5-medium, then
 #           gemini-3.1-pro-high). Quota is per model family on this account, so a wall on one moves the
@@ -45,7 +45,7 @@
 #                              (default "claude-sonnet-5-5-medium gemini-3.1-pro-high")
 #   PR_BRAIN_MODEL             one model: claude engine (default sonnet); on agy it means PR_BRAIN_MODELS=<it>
 #   PR_BRAIN_EXECUTOR_MODEL    the model that writes the PRs, never used as the reviewer (default: the one
-#                              agent-dispatch uses, AGENT_DISPATCH_MODEL or gemini-3.6-flash-medium)
+#                              agent-dispatch uses, AGENT_DISPATCH_MODEL or gemini-3.8-flash-medium)
 #   PR_BRAIN_TIMEOUT_SEC       agy engine: one review's time limit (default 1800)
 #   PR_BRAIN_BUDGET_USD        claude engine: per-PR spend cap (default 5)
 #   PR_BRAIN_ROOT              where to auto-discover repos (default ~/Projects)

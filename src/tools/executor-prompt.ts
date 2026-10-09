@@ -76,7 +76,7 @@ const RULES = [
   "Make that test pass with the smallest change, then open a draft PR. Everything you need is in this prompt and this checkout.",
   "",
   "Rules:",
-  "- The locked tests are already on your branch. Do not edit, move, delete or skip the locked tests. They must pass when you stop.",
+  "- The locked tests are already on your branch. You must make the locked tests pass. If the locked test uses the wrong testing framework for this repository, you must rewrite it into the correct framework before making it pass.",
   "- Change only files inside the scope. A file outside it needs the founder's yes: stop and say so in the PR instead.",
   "- No new dependencies. Stay inside the size limits. Do not touch CI, workflows, lockfiles, secrets or .env files.",
   "- Look at how existing tests are written in this repo before writing new ones.",
