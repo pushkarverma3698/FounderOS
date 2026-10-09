@@ -50,3 +50,27 @@ export function resolveEmailBody(modelBody: string, founderText: string): { body
   if (labelled) return { body: labelled, dictated: true };
   return { body: modelBody, dictated: isVerbatimFromFounder(modelBody, founderText) };
 }
+
+/**
+ * The email card the founder just approved, read back from the resume config (`hitl_resumed` is that card's JSON).
+ * Approving re-runs the tool from the top, and that run no longer has his message: the card is what he approved,
+ * so the replay sends its body and raises its exact payload. Null when the resumed card is not this email.
+ */
+export function approvedEmailFrom(
+  resumedCard: unknown,
+  to: string,
+  subject: string,
+): { body: string; summary: string } | null {
+  if (typeof resumedCard !== "string") return null;
+  let card: { action?: unknown; summary?: unknown; args?: { to?: unknown; subject?: unknown; body?: unknown } };
+  try {
+    card = JSON.parse(resumedCard);
+  } catch {
+    // allow-failopen: not a card we can read means "no approved card"; the replay then takes the normal gated path
+    return null;
+  }
+  const args = card?.args;
+  if (card?.action !== "send_email" || args?.to !== to || args?.subject !== subject) return null;
+  if (typeof args.body !== "string" || typeof card.summary !== "string") return null;
+  return { body: args.body, summary: card.summary };
+}

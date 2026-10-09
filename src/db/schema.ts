@@ -608,7 +608,7 @@ export type NewConversation = typeof conversations.$inferInsert;
  * Stores significant events: decisions made, tasks completed, outcomes,
  * and conversation highlights worth recalling later.
  *
- * Agents write to this via the `record_event` tool (HITL-gated).
+ * Agents write to this via the `record_event` tool (no approval: a low-risk write into his own log).
  * The `search_memory` tool queries this table alongside knowledge_entries
  * and founder_context to answer "what happened with X?" questions.
  */
@@ -619,7 +619,7 @@ export const episodicMemory = agentsSchema.table(
 
     tenant_id: text("tenant_id").notNull().default("turicks"),
 
-    /** conversation | decision | outcome | task_completed */
+    /** note | conversation | decision | outcome | task_completed */
     event_type: text("event_type").notNull(),
 
     /** When the event actually happened (not when it was written) */

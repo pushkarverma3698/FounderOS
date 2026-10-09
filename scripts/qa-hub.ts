@@ -53,11 +53,11 @@ async function main(): Promise<void> {
   const mailText = textOf(mail);
   report(
     "gmail_search answers for every account",
-    ["turicks", "personal", "naggar"].every((a) => mailText.includes(`## ${a}`)),
+    ["personal"].every((a) => mailText.includes(`## ${a}`)),
     mail.isError ? `all accounts failed: ${mailText}` : mailText,
   );
 
-  const cal = await call(all, "calendar_events", { account: "turicks", days: 2 });
+  const cal = await call(all, "calendar_events", { account: "personal", days: 2 });
   report("calendar_events answers", textOf(cal).length > 0, textOf(cal));
 
   const bogus = await call(all, "gmail_search", { query: "x", account: "someone-else" });

@@ -35,7 +35,7 @@ import {
 import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { resolveEmailBody } from "../dictated-body.js";
+import { approvedEmailFrom, resolveEmailBody } from "../dictated-body.js";
 import { NO_ACTION_PREFIX } from "../tool-result.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 
@@ -139,8 +139,13 @@ export async function outboundAdvice(text: string, channel: Channel, tool?: stri
 export function createSendEmailTool(department: string) {
   return tool(
     async ({ to, subject, body: modelBody, account_key }, config) => {
+    // Replay after Approve: the card he approved is the email. The resume run has no founder_text, so without this the
+    // replay re-derived the body from the model's text and let the critic block what he had already approved.
+    const approved = approvedEmailFrom(config?.configurable?.["hitl_resumed"], to, subject);
     // The body the founder dictated is sent as he wrote it; the model's rewrite of it is discarded.
-    const { body, dictated } = resolveEmailBody(modelBody, String(config?.configurable?.["founder_text"] ?? ""));
+    const { body, dictated } = approved
+      ? { body: approved.body, dictated: true }
+      : resolveEmailBody(modelBody, String(config?.configurable?.["founder_text"] ?? ""));
     // G4: Postgres-backed daily send ceiling (enforced before HITL so we don't
     // waste an approval card on a quota-exceeded email). Limit is env-overridable.
     if (DAILY_EMAIL_LIMIT > 0) {
@@ -164,7 +169,7 @@ export function createSendEmailTool(department: string) {
     let brand: { proceed: boolean; fix?: string; warning?: string; retryKey: string };
     if (dictated) {
       brand = { proceed: true, retryKey: brandRetryKey(config?.configurable?.["thread_id"] as string | undefined, "outreach") };
-      const advice = await outboundAdvice(body, "outreach", "send_email");
+      const advice = approved ? undefined : await outboundAdvice(body, "outreach", "send_email");
       if (advice) brand.warning = advice;
     } else {
       brand = await outboundQualityGate(body, "outreach", config, "send_email");
@@ -174,7 +179,7 @@ export function createSendEmailTool(department: string) {
     const rejected = await hitlGate({
       action: "send_email",
       title: `📧 Send email to ${to}${account_key ? ` from ${account_key}` : ""}?`,
-      summary: brand.warning ? `Subject: ${subject}\n${brand.warning}` : `Subject: ${subject}`,
+      summary: approved?.summary ?? (brand.warning ? `Subject: ${subject}\n${brand.warning}` : `Subject: ${subject}`),
       preview: body,
       args: { to, subject, body },
     }, config);
@@ -689,7 +694,7 @@ export const readEmails = tool(
     schema: z.object({
       query: z.string().optional().nullable().describe("Gmail search query (default: 'in:inbox')"),
       limit: z.number().optional().nullable().describe("Max emails to return (default 10)"),
-      account: z.string().optional().nullable().describe("Google account: turicks | personal | naggar | a name added with /login google add | all. Default: turicks."),
+      account: z.string().optional().nullable().describe("Google account: personal | a name added with /login google add (e.g. turicks, naggar if signed in) | all. Default: personal."),
     }),
   },
 );

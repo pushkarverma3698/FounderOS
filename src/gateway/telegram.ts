@@ -57,10 +57,9 @@ import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
-import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
-import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
-import { COMMAND_CALLBACK_PREFIX, handleCommandCallback, registerCommandDispatch } from "./command-dispatch.js";
-import { CODING_CALLBACK_PREFIX, MERGE_CALLBACK_PREFIX, handleCodingCallback, handleMergeCallback } from "./merge-digest-callback.js";
+import { handleCommandCallback, registerCommandDispatch } from "./command-dispatch.js";
+import { handleCodingCallback, handleMergeCallback } from "./merge-digest-callback.js";
+import { auditCallbackTap, isDecisionButton } from "./callback-audit.js";
 import { handleRetryCallback } from "./retry-callback.js";
 import { emptyStateHtml } from "./empty-states.js";
 import {
@@ -101,12 +100,6 @@ function defaultChatAccess(): ChatAccessConfig {
     answerAllChatIds: env.TELEGRAM_ANSWER_ALL_CHAT_IDS,
     ownerUserId: env.TELEGRAM_OWNER_USER_ID,
   });
-}
-
-/** Buttons whose tap causes a side effect — the founder's alone outside his own chat. Retry re-runs his turn. */
-function isDecisionButton(data: string): boolean {
-  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX, COMMAND_CALLBACK_PREFIX, MERGE_CALLBACK_PREFIX, CODING_CALLBACK_PREFIX];
-  return prefixes.some((p) => data.startsWith(p));
 }
 
 export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultChatAccess()): void {
@@ -152,7 +145,9 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
       }
     }
     const tapped = ctx.callbackQuery?.data ?? "";
-    if (tapped && isDecisionButton(tapped) && !mayActAsOwner(who, ctx.from?.id, access)) {
+    const refused = tapped !== "" && isDecisionButton(tapped) && !mayActAsOwner(who, ctx.from?.id, access);
+    if (tapped) await auditCallbackTap(ctx, who, refused ? "refused" : "allowed"); // who tapped, before anything acts on it
+    if (refused) {
       await ctx.answerCallbackQuery({ text: "Only the owner can approve or dispatch this." });
       return;
     }

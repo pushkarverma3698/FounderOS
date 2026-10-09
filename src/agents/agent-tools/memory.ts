@@ -1,35 +1,23 @@
 /**
  * Supervisor-level memory tools.
- *   record_event        — WRITE (HITL-gated): commits an event to episodic_memory.
+ *   record_event        — WRITE (no approval): commits an event or a saved note to episodic_memory.
  *   recall_conversation — READ: what the founder said in past conversations, by day and/or topic.
  */
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { recordEventTool as rawRecordEvent } from "../../tools/memory.js";
-import { hitlGate } from "./hitl.js";
 import { appTimeZone, systemClock } from "../../core/time.js";
 import { earliestConversationTurn, findConversationTurns } from "../../db/conversation-turns.js";
 import { recallConversation } from "../../tools/recall-conversation.js";
 
 /**
- * HITL wrapper around the raw recordEventTool. The approval card lets the founder
- * review the event before it's committed to episodic_memory.
+ * Saving a note or an event to the founder's own memory is a low-risk write he just asked for: it sends nothing and
+ * changes nothing outside the log. It is NOT approval-gated (live QA 2026-10-09: "save a note" raised a card).
  */
 export const recordEvent = tool(
-  async ({ title, summary, tags, event_type, occurred_at }, config) => {
-    const tagsStr = tags.join(", ") || "(none)";
-    const rejected = await hitlGate({
-      action: "record_event",
-      title: `📝 Record event: "${title}"?`,
-      summary: `Type: ${event_type} | Tags: ${tagsStr}`,
-      preview: summary,
-      args: { title, summary, tags, event_type, occurred_at },
-    }, config);
-    if (rejected) return rejected;
-
-    return rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at });
-  },
+  async ({ title, summary, tags, event_type, occurred_at }) =>
+    rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at }),
   {
     name: "record_event",
     description: rawRecordEvent.description,
@@ -38,8 +26,8 @@ export const recordEvent = tool(
       summary: z.string().describe("1–3 sentences describing what happened"),
       tags: z.array(z.string()).describe("Keyword tags for retrieval"),
       event_type: z
-        .enum(["conversation", "decision", "outcome", "task_completed"])
-        .describe("Category of event"),
+        .enum(["note", "conversation", "decision", "outcome", "task_completed"])
+        .describe("note = something the founder asked to save; the rest describe what happened"),
       occurred_at: z.string().optional().nullable().describe("ISO 8601 timestamp. Defaults to now."),
     }),
   },
