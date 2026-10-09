@@ -21,6 +21,15 @@
 #      agent:spec-review. A card that could not be sent leaves the label alone, so the next tick tries again.
 #   ASK: one comment with the questions, agent:needs-brief, one Telegram message. REJECT x3: the same, saying why.
 #
+# WHICH CLI WRITES THE SPEC (pass_p_spec_engine)
+#   Claude Code by default. While its wall holds (claude_blocked), or when the run itself meets a usage or auth wall,
+#   Antigravity writes the spec instead, on a model that is NOT one of the executor's (pass_p_agy_model): the coder
+#   must not grade its own spec. Same prompt, same contract, same verify + fail-first + card; only the CLI differs. A
+#   wall on either CLI costs the issue no attempt. AGENT_DISPATCH_SPEC_ENGINE=claude|agy pins one CLI (default auto).
+#   The agy run happens in its own copy owned by the antigravity user (agy only logs in as that user), WITHOUT the
+#   GitHub token; what it leaves is copied into the claude-agent sandbox, and every later step (manifest, contract,
+#   fail-first vitest, extraction) runs there exactly as for a Claude spec.
+#
 # NEEDS FROM THE SOURCING SCRIPT: log, notify, gh, jq, as_antigravity, as_antigravity_gh (lib/gh-token.sh), set_integration_branch, tg_is_quiet, REPO,
 #   WORKSPACE, ENV_FILE, FORCE_ISSUE, DRY_RUN.
 
@@ -32,6 +41,11 @@ PASS_P_MAX_ATTEMPTS="${AGENT_DISPATCH_SPEC_ATTEMPTS:-3}"
 PASS_P_USER="${AGENT_DISPATCH_SPEC_USER:-claude-agent}"
 PASS_P_MODEL="${AGENT_DISPATCH_SPEC_MODEL:-opus}"
 PASS_P_TIMEOUT_SEC="${AGENT_DISPATCH_SPEC_TIMEOUT_SEC:-900}"
+# auto = Claude Code, Antigravity while Claude is walled; claude / agy pin one. Anything else means auto.
+PASS_P_ENGINE_MODE="${AGENT_DISPATCH_SPEC_ENGINE:-auto}"
+# Candidate models for the Antigravity spec, best first. One that is also an executor model is skipped.
+PASS_P_AGY_MODELS="${AGENT_DISPATCH_SPEC_AGY_MODELS:-gemini-3.1-pro-high}"
+PASS_P_AGY_MODELS="${PASS_P_AGY_MODELS//,/ }"
 # Where the TS scripts live (the deployed checkout) and where the claude-agent user may create work directories.
 PASS_P_ROOT="${AGENT_DISPATCH_PIPELINE_ROOT:-/opt/founderos}"
 PASS_P_WORK_BASE="${AGENT_DISPATCH_SPEC_WORK:-/var/lib/claude-agent/spec-work}"
@@ -52,6 +66,50 @@ as_claude_agent() {
 # pass_p_ts SUBCOMMAND — scripts/pipeline-spec.ts with stdin passed through; prints its one JSON line.
 pass_p_ts() {
   ( cd "$PASS_P_ROOT" && "$PASS_P_NODE" --import tsx/esm scripts/pipeline-spec.ts "$1" )
+}
+
+# pass_p_agy_model: the first candidate spec model the executor does not use ("" when there is none).
+# AGY_EXECUTOR_MODELS (agy-run.sh) is the executor's whole candidate list, not just its first, so a fallback executor
+# model cannot end up grading the spec it was handed either.
+pass_p_agy_model() { pass_p_agy_models | head -n1 | tr -d '\n'; }
+
+# pass_p_agy_models: every eligible spec model, best first, one per line.
+pass_p_agy_models() {
+  local m e
+  for m in $PASS_P_AGY_MODELS; do
+    for e in $AGY_EXECUTOR_MODELS; do
+      [[ "$m" == "$e" ]] && continue 2
+    done
+    printf '%s\n' "$m"
+  done
+}
+
+# pass_p_agy_ready: may Antigravity write a spec right now? 0 = yes. A different model than the executor's must exist,
+# and agy's own wall (a rejected login, a quota) must not hold. engine_ready logs the wall once per tick.
+pass_p_agy_ready() {
+  [[ -n "$(pass_p_agy_model)" ]] || { log "pass P: no Antigravity spec model that differs from the executor's (${AGY_EXECUTOR_MODELS}); set AGENT_DISPATCH_SPEC_AGY_MODELS"; return 1; }
+  engine_ready agy
+}
+
+# pass_p_spec_engine: prints claude, agy or none, the CLI that writes the next spec. Never prints a walled CLI.
+pass_p_spec_engine() {
+  case "$PASS_P_ENGINE_MODE" in
+    claude)
+      if claude_blocked; then printf 'none'; else printf 'claude'; fi
+      ;;
+    agy)
+      if pass_p_agy_ready; then printf 'agy'; else printf 'none'; fi
+      ;;
+    *)
+      if ! claude_blocked; then
+        printf 'claude'
+      elif pass_p_agy_ready; then
+        printf 'agy'
+      else
+        printf 'none'
+      fi
+      ;;
+  esac
 }
 
 pass_p_enabled() { [[ "${AGENT_PIPELINE_V2:-}" == "1" ]]; }
@@ -170,17 +228,102 @@ pass_p_card_send() {
 # and must never stop the rest of the tick. The scratch directories are removed on every path out (no RETURN trap: it
 # would outlive this function and fire on every later function return).
 pass_p_issue() {
-  local issue="$1" tmp wd
+  local issue="$1" engine="$2" tmp wd
   tmp="$(mktemp -d /tmp/pass-p-XXXXXX)" || return 0
   wd="${PASS_P_WORK_BASE}/issue-${issue}-$$"
-  pass_p_issue_body "$issue" "$tmp" "$wd"
+  pass_p_issue_body "$issue" "$tmp" "$wd" "$engine"
   rm -r -f "$tmp"
   as_claude_agent 'rm -r -f "$1" "$1.prompt"' "$wd" >/dev/null 2>&1 || true
   return 0
 }
 
+# The exit code of the run that wrote the spec; pass_p_run_claude / pass_p_run_agy set it.
+PASS_P_RUN_RC=0
+
+# pass_p_run_claude ISSUE TMP WD: Claude Code writes the spec in the sandbox copy, as the spec user. Leaves $tmp/run.log.
+# Returns 0 (it ran; PASS_P_RUN_RC is its exit code), 3 (a usage or auth wall: recorded, no attempt) or 4 (could not start; counted).
+pass_p_run_claude() {
+  local issue="$1" tmp="$2" wd="$3" wall
+  pass_p_prompt "$(cat "$tmp/ask")" | as_claude_agent 'cat >"$1.prompt"' "$wd" >>"$LOG" 2>&1 \
+    || { pass_p_reject "$issue" "could not hand the prompt to user ${PASS_P_USER}"; return 4; }
+  as_claude_agent 'cd "$1" && exec </dev/null && unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN && timeout "$3" claude -p "$(cat "$1.prompt")" --model "$2" --dangerously-skip-permissions' \
+    "$wd" "$PASS_P_MODEL" "$PASS_P_TIMEOUT_SEC" >"$tmp/run.log" 2>&1
+  PASS_P_RUN_RC=$?
+  # A usage or auth wall is Claude Code's, not this spec's: claude exits 0 on a weekly limit, so read the text whatever the
+  # code. It records the wall, tells the founder once, and costs the issue no attempt (#1005, #1030: three spent on a limit).
+  wall="$(classify_agy_failure "$tmp/run.log")"
+  if [[ "$wall" == quota || "$wall" == auth ]]; then
+    claude_wall "$wall" "$tmp/run.log"
+    return 3
+  fi
+  return 0
+}
+
+# pass_p_run_agy ISSUE TMP WD BASE_SHA: Antigravity writes the spec. It only logs in as the antigravity user, so the run
+# happens in a copy that user owns (no .git, no GitHub token, no .env), and what it leaves is copied into WD, the spec
+# user's sandbox, where the manifest, the contract read, the fail-first run and the extraction go on unchanged.
+# Same returns as pass_p_run_claude. The run's exit code is NOT an attempt: agy exits non-zero after finishing the work
+# (#452); a run that wrote nothing usable fails the contract check, which is.
+pass_p_run_agy() {
+  local issue="$1" tmp="$2" wd="$3" base_sha="$4" xd rc=3
+  xd="$(as_antigravity 'mktemp -d /tmp/pass-p-agy-XXXXXX' 2>>"$LOG")" || xd=""
+  if [[ -z "$xd" ]]; then pass_p_reject "$issue" "could not create a work directory for the Antigravity spec run"; return 4; fi
+  pass_p_run_agy_in "$issue" "$tmp" "$wd" "$base_sha" "$xd"; rc=$?
+  as_antigravity 'rm -r -f "$1" "$1.prompt"' "$xd" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
+pass_p_run_agy_in() {
+  local issue="$1" tmp="$2" wd="$3" base_sha="$4" xd="$5" model wall until_epoch
+  if ! as_antigravity 'cd "$1" && git archive "$2" | tar -x -C "$3" && ln -s "$4/node_modules" "$3/node_modules"' "$WORKSPACE" "$base_sha" "$xd" "$PASS_P_ROOT" >>"$LOG" 2>&1 \
+     || ! pass_p_prompt "$(cat "$tmp/ask")" | as_antigravity 'cat >"$1.prompt"' "$xd" >>"$LOG" 2>&1; then
+    pass_p_reject "$issue" "could not prepare the Antigravity spec copy"
+    return 4
+  fi
+  local ran=0
+  for model in $(pass_p_agy_models); do
+    # No GitHub token: GH_TOKEN= empties the one agy_run would forward (the prelude then unsets it in agy's shell).
+    GH_TOKEN= agy_run "Spec for #${issue} · ${REPO}" "$xd" "$xd.prompt" "$model" "$PASS_P_TIMEOUT_SEC" "$tmp/run.log" "${GEMINI_API_KEY:-}"
+    PASS_P_RUN_RC=$?
+    ran=1
+    agy_model_unknown "$tmp/run.log" || break
+    log "pass P: ${model} is not a model agy knows: trying the next spec model"
+  done
+  [[ "$ran" -eq 1 ]] || return 3
+  if agy_model_unknown "$tmp/run.log"; then
+    log "pass P: #${issue}: no Antigravity spec model is in agy's catalog; no attempt counted"
+    notify "⚠️ agent-dispatch: the Antigravity spec model(s) '${PASS_P_AGY_MODELS}' are not in agy's catalog, so a spec cannot be written while Claude Code is walled. Fix: set AGENT_DISPATCH_SPEC_AGY_MODELS on the agent-dispatch cron line to a model 'agy models' lists."
+    return 3
+  fi
+  wall="$(classify_agy_failure "$tmp/run.log")"
+  case "$wall" in
+    quota)
+      until_epoch="$(quota_reset_epoch "$tmp/run.log")" || until_epoch=$(( $(date -u +%s) + 3600 ))
+      record_quota_wall "$until_epoch"
+      notify "⏸️ agent-dispatch: Antigravity quota exhausted until $(quota_until_human "$until_epoch") while writing the spec for #${issue} (${REPO}). No attempt counted; it is retried after that."
+      return 3
+      ;;
+    auth)
+      log "pass P: #${issue}: Antigravity auth failure while writing the spec; no attempt counted"
+      pause_for_auth "$(quoted_failure_line auth "$tmp/run.log")"
+      return 3
+      ;;
+  esac
+
+  # Bring the result into the spec user's copy: wipe its working tree (not .git, not node_modules), then unpack what the
+  # run left. A file the run deleted is then a deletion in git status, exactly as for a Claude run.
+  if ! as_claude_agent 'cd -P "$1" && find . -mindepth 1 -maxdepth 1 ! -name .git ! -name node_modules -exec rm -r -f {} +' "$wd" >>"$LOG" 2>&1 \
+     || ! { as_antigravity 'cd -P "$1" && tar -c --exclude=node_modules --exclude=.git .' "$xd" | as_claude_agent 'cd -P "$1" && tar -x --no-same-owner' "$wd"; } >>"$LOG" 2>&1; then
+    pass_p_reject "$issue" "could not copy the Antigravity spec result into the sandbox"
+    return 4
+  fi
+  [[ "$PASS_P_RUN_RC" -eq 0 ]] || log "pass P: #${issue}: agy exited ${PASS_P_RUN_RC}; judging what it left, not the exit code"
+  PASS_P_RUN_RC=0
+  return 0
+}
+
 pass_p_issue_body() {
-  local issue="$1" tmp="$2" wd="$3" ask_json base_sha cited lc verdict status
+  local issue="$1" tmp="$2" wd="$3" engine="$4" ask_json base_sha cited lc verdict status
 
   gh issue view "$issue" --repo "$REPO" --json body --jq .body >"$tmp/body" 2>/dev/null || { log "pass P: cannot read #${issue}"; return 0; }
   ask_json="$(pass_p_ts ask <"$tmp/body")"
@@ -199,7 +342,7 @@ pass_p_issue_body() {
   fi
   base_sha="$(as_antigravity 'cd "$1" && git rev-parse "origin/$2"' "$WORKSPACE" "$INTEGRATION_BRANCH" 2>/dev/null | tr -d '[:space:]')"
   [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || { log "pass P: #${issue}: no base commit for origin/${INTEGRATION_BRANCH}"; return 0; }
-  [[ "$DRY_RUN" -eq 1 ]] && { log "pass P: DRY RUN: would write a spec for #${issue} at ${base_sha:0:12}"; return 0; }
+  [[ "$DRY_RUN" -eq 1 ]] && { log "pass P: DRY RUN: would write a spec for #${issue} at ${base_sha:0:12} with ${engine}"; return 0; }
 
   # A fresh copy: git archive carries no .git and no untracked or ignored files, so nothing but tracked source is exposed.
   if ! as_claude_agent 'rm -rf "$1" && mkdir -p "$1"' "$wd" >>"$LOG" 2>&1 \
@@ -210,22 +353,25 @@ pass_p_issue_body() {
     return 0
   fi
 
-  pass_p_prompt "$(cat "$tmp/ask")" | as_claude_agent 'cat >"$1.prompt"' "$wd" >>"$LOG" 2>&1 \
-    || { pass_p_reject "$issue" "could not hand the prompt to user ${PASS_P_USER}"; return 0; }
-  local run_rc
-  as_claude_agent 'cd "$1" && exec </dev/null && unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN && timeout "$3" claude -p "$(cat "$1.prompt")" --model "$2" --dangerously-skip-permissions' \
-    "$wd" "$PASS_P_MODEL" "$PASS_P_TIMEOUT_SEC" >"$tmp/run.log" 2>&1
-  run_rc=$?
-  # A usage or auth wall is Claude Code's, not this spec's: claude exits 0 on a weekly limit, so read the text whatever the
-  # code. It records the wall, tells the founder once, and costs the issue no attempt (#1005, #1030: three spent on a limit).
-  local wall
-  wall="$(classify_agy_failure "$tmp/run.log")"
-  if [[ "$wall" == quota || "$wall" == auth ]]; then
-    claude_wall "$wall" "$tmp/run.log"
-    return 0
+  # Who writes it: the engine chosen for this tick, and on a Claude wall Antigravity takes this same issue (a wall on either
+  # CLI is recorded, the founder is told once, and the issue loses no attempt).
+  local rc
+  if [[ "$engine" == claude ]]; then
+    pass_p_run_claude "$issue" "$tmp" "$wd"; rc=$?
+    if [[ "$rc" -eq 4 ]]; then return 0; fi
+    if [[ "$rc" -eq 3 ]]; then
+      [[ "$PASS_P_ENGINE_MODE" == claude ]] && return 0
+      pass_p_agy_ready || { log "pass P: #${issue}: Claude Code is walled and Antigravity cannot write the spec either; it waits"; return 0; }
+      log "pass P: #${issue}: Claude Code is walled; Antigravity writes the spec"
+      engine=agy
+    fi
   fi
-  if [[ "$run_rc" -ne 0 ]]; then
-    pass_p_reject "$issue" "the Claude run ended with exit ${run_rc}: $(tail -n 3 "$tmp/run.log" | tr '\n' ' ')"
+  if [[ "$engine" == agy ]]; then
+    pass_p_run_agy "$issue" "$tmp" "$wd" "$base_sha"; rc=$?
+    [[ "$rc" -eq 0 ]] || return 0
+  fi
+  if [[ "$PASS_P_RUN_RC" -ne 0 ]]; then
+    pass_p_reject "$issue" "the ${engine} run ended with exit ${PASS_P_RUN_RC}: $(tail -n 3 "$tmp/run.log" | tr '\n' ' ')"
     return 0
   fi
 
@@ -374,18 +520,24 @@ pass_p_finish() {
   return 0
 }
 
-# pass_p_run — called by run_tick for the current repo. At most one issue per tick: a spec run takes minutes of Claude.
+# pass_p_run: called by run_tick for the current repo. At most one issue per tick: a spec run takes minutes of a CLI.
 pass_p_run() {
   pass_p_enabled || return 0
   # A card at night would sit unseen, and the run that wrote it would have been paid for twice: wait for the morning.
   # A forced issue (a job the founder just asked for) is the exception: he is awake and waiting for its card.
   if [[ -z "$FORCE_ISSUE" ]] && tg_is_quiet 2>/dev/null; then log "pass P: Telegram quiet hours; no spec is written now"; return 0; fi
-  # The spec is written by Claude Code: while its wall holds, a run only burns an attempt on a limit message.
-  if claude_blocked; then log "pass P: Claude Code is blocked ($(claude_block_class)); no spec is written now"; return 0; fi
-  local issue
+  local issue engine
   for issue in $(pass_p_pick); do
     [[ -n "$issue" ]] || continue
-    pass_p_issue "$issue"
+    # Claude Code writes the spec; while its wall holds Antigravity does, on another model than the executor's. Asked only
+    # when there is an issue to write for, so an idle tick never reports a wall.
+    # log() prints to stdout too, so the answer is the last word, not the whole capture
+    engine="$(pass_p_spec_engine | tail -n1)"; engine="${engine##* }"
+    if [[ "$engine" == none ]]; then
+      log "pass P: no CLI can write a spec now (Claude Code: $(claude_block_class || true); mode ${PASS_P_ENGINE_MODE}); #${issue} waits, no attempt counted"
+      return 0
+    fi
+    pass_p_issue "$issue" "$engine"
     break
   done
   return 0
