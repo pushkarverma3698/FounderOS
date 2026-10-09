@@ -545,6 +545,14 @@ describe("resumeKernel", () => {
     expect("engine" in plain.configurable).toBe(false);
   });
 
+  it("resumes with the resolved card's payload as configurable.hitl_resumed, so the replay inserts no orphan row (#1055)", async () => {
+    const data = '{"action":"send_email","args":{"to":"x"}}';
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString(), callback_data: data });
+    await resumeKernel(fakeCtx().ctx, "approved");
+    const [, cfg] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect(cfg.configurable["hitl_resumed"]).toBe(data);
+  });
+
   it("model exhaustion on a resume does NOT auto-retry (no raw input to replay) — manual message", async () => {
     getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
     fakeKernel.stream.mockImplementation(async function* () {

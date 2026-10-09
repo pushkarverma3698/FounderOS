@@ -318,7 +318,7 @@ async function resumeKernelTurn(ctx: Context, decision: "approved" | "rejected",
       budget = makeRunBudget();
       let touch: (() => void) | undefined;
       const config = {
-        configurable: { thread_id: threadId, onTurnActivity: () => touch?.(), ...cardEngine(pending?.callback_data) },
+        configurable: { thread_id: threadId, onTurnActivity: () => touch?.(), ...cardEngine(pending?.callback_data), hitl_resumed: pending?.callback_data },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
       };
