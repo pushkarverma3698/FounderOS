@@ -17,6 +17,7 @@ import {
   fetchCrossRefPrs,
   findFixingPr,
   parseIssueReference,
+  readableIssueBody,
   withFounderAsk,
   type CrossRefPr,
 } from "../../../src/tools/existing-issue.js";
@@ -211,5 +212,36 @@ describe("existingIssueAsk", () => {
 
   it("an issue with an empty body still names its title", () => {
     expect(existingIssueAsk("go", { number: 7, title: "t", body: "" })).toBe("go\n\n---\nIssue #7 as filed on GitHub: t");
+  });
+});
+
+describe("readableIssueBody — the text on the approval card", () => {
+  // Live QA 2026-10-09: the requeue card for Oplify #115 showed `"**Area/Module:** Auth\n**Status:** Open\n..."`
+  // with literal backslash-n escapes, then the whole "## Founder request (verbatim)" section, then cut a word in half.
+  // The imported issue body is itself a JSON string literal; the card has to show the text, not the encoding.
+  const imported = JSON.stringify("**Area/Module:** Auth / sign-in\n**Status:** Open\n\n**Decision / notes:**\nreturns 404 on sign-in.");
+
+  it("decodes a body that was stored as a JSON string literal", () => {
+    const text = readableIssueBody(imported, 1200);
+    expect(text).toContain("**Status:** Open\n");
+    expect(text).not.toContain("\\n");
+    expect(text.startsWith('"')).toBe(false);
+  });
+
+  it("leaves the appended founder-request section off the card", () => {
+    const body = withFounderAsk(imported, "Dispatch a coding task for issue #115");
+    const text = readableIssueBody(body, 1200);
+    expect(text).toContain("returns 404 on sign-in.");
+    expect(text).not.toContain("Founder request");
+    expect(text).not.toContain("```");
+  });
+
+  it("keeps an ordinary markdown body as it is", () => {
+    expect(readableIssueBody("Plain **markdown** body.\n\n- one\n- two", 1200)).toBe("Plain **markdown** body.\n\n- one\n- two");
+  });
+
+  it("cuts at a word boundary with an ellipsis, never mid-word", () => {
+    const text = readableIssueBody("alpha beta gamma delta epsilon", 14);
+    expect(text).toBe("alpha beta…");
   });
 });

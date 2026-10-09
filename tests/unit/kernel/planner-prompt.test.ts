@@ -125,3 +125,19 @@ describe("buildPlannerPrompt — a stale context line is dated or asked about, n
     expect(staleRule).toBe(contextRule + 1);
   });
 });
+
+describe("buildPlannerPrompt — news and outside-world questions go to research", () => {
+  // 2026-10-09 live QA: "what is the latest news on Anthropic Claude this week?" was planned as
+  // "Check the status of the Antigravity task for Oplify issue 115": the answer was a coding-pipeline status.
+  it("sends news, current events and public facts to research search_web, even when they name Claude or Anthropic", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/news|current events/i);
+    expect(prompt).toContain("search_web");
+    expect(prompt).toMatch(/Anthropic/);
+  });
+
+  it("keeps the coding-pipeline status rule for questions that name an issue, PR, repo or Antigravity", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/only a question that names .*(issue|PR|repo|Antigravity)/i);
+  });
+});
