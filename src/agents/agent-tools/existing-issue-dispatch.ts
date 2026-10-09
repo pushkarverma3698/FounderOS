@@ -16,7 +16,7 @@ import { startDispatchJob, startFailureNote } from "../../tools/dispatch-tick.js
 import { engineDisplay, engineLabel, parseEngine, readDefaultEngine, type Engine } from "../../tools/coding-engine.js";
 import { LABEL_SPEC, LABEL_SPEC_REVIEW } from "../../tools/pipeline-pending.js";
 import { filedLabels } from "../../tools/dispatch-spec-intake.js";
-import { existingIssueAsk, withFounderAsk } from "../../tools/existing-issue.js";
+import { existingIssueAsk, readableIssueBody, withFounderAsk } from "../../tools/existing-issue.js";
 import { NO_ACTION_PREFIX } from "../tool-result.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
@@ -128,7 +128,7 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
     summary:
       `Same issue, nothing new filed: ${t.slug}#${n} "${facts.issue.title}" → ${labels.join(", ")}` +
       (notes.length ? ` (${notes.join("; ")})` : ""),
-    preview: fresh ? `${facts.issue.url}\n\n${body.trim().slice(0, 1200)}` : status,
+    preview: fresh ? `${facts.issue.url}\n\n${readableIssueBody(body, 1200)}` : status,
     args: { issue: n, repo: opts.repoArg ?? null, founder_request: opts.founderRequest ?? null, engine: executor ?? null },
   };
   // One literal action per tool: tests/unit/agents/capabilities.test.ts proves every gated tool has a real gate.
