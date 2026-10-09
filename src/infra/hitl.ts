@@ -143,9 +143,12 @@ export async function hitlGate(
   config?: RunnableConfig,
 ): Promise<string | null> {
   const threadId = threadIdFrom(config);
-  if (threadId) {
+  const serialized = JSON.stringify(payload);
+  // The gateway resolves the tapped row before it resumes, so this replay finds no pending
+  // row; `hitl_resumed` names the card it resolved, and inserting again leaves an orphan (#1055).
+  const isResumeReplay = config?.configurable?.["hitl_resumed"] === serialized;
+  if (threadId && !isResumeReplay) {
     const existing = await getPendingInterrupt(threadId);
-    const serialized = JSON.stringify(payload);
     // A pending row for THIS payload is the resume re-execution: keep it. A row for a
     // different payload is an abandoned card — expire it so the new card gets its own
     // row and nonce (otherwise one tap resolves a request the founder never approved).
