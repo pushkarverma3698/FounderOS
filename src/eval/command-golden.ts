@@ -50,7 +50,6 @@ export const COMMAND_GOLDEN_TASKS: GoldenTask[] = [
   cmd("projects-show", "list my active projects", "projects"),
   cmd("goals-show", "how am I doing against my goals", "goals"),
   cmd("goal-add", "my goal this month is 20 applications", "goal"),
-  cmd("remind-call", "remind me to call the landlord at 3pm", "remind"),
   cmd("newproject-site", "start a new project called naggar-site, a brochure site for a client", "newproject"),
   cmd("commands-list", "what can you do, list every command", "commands"),
   cmd("halt-stop", "stop everything right now, refuse all new work", "halt"),
@@ -62,6 +61,7 @@ export const COMMAND_GOLDEN_TASKS: GoldenTask[] = [
   notCmd("multi", "show me where oplify stands and then draft cover letters for the top three jobs", "two commands plus reasoning is a plan", "jobhunt"),
   notCmd("reason", "look at what the agent loop is doing and tell me which blocked task I should unblock first", "reasoning over a command's output is a plan, not a command", "engineering"),
   notCmd("missing-arg", "mark one of them as applied", "the row number is missing: ask for it, never guess"),
+  notCmd("remind-call", "remind me to call the landlord at 3pm", "/remind's handler is a planner turn: routing to it loops (QA 2026-10-09); plan set_reminder", "admin"),
   notCmd("chat", "thanks, that was helpful", "small talk is a direct reply"),
   notCmd("research", "research what Stripe does and summarise it in two lines", "open research is a plan", "research"),
   // 2026-10-09 live QA: news about Anthropic/Claude was answered with a coding-pipeline status for Oplify #115.

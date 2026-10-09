@@ -15,7 +15,7 @@ import { extractGwsMessageIds } from "../../src/tools/email-messages.js";
 import { fetchGwsMessages } from "../../src/tools/gmail-gws-read.js";
 import { summarizeChecks } from "../../src/tools/github-pr.js";
 import { CLAUDE_PROBE_CMD, gwsErrorLine, type GoogleRead, type HealthReads } from "./health-line.js";
-import type { OpenPr } from "./journey-score.js";
+import type { InboxMail, OpenPr } from "./journey-score.js";
 import type { WhereCounts } from "./journey-where.js";
 
 const run = promisify(execFile);
@@ -31,8 +31,8 @@ export function gwsDir(account: string): string {
   return isBuiltinGoogleAccount(account) ? defaultGwsProfileDir("personal") : mailboxProfileDir(account);
 }
 
-/** J1 truth: subjects of the account's inbox mail from the last 24 h. */
-export async function inboxSubjects(account: string): Promise<string[] | Failed> {
+/** J1 truth: subject and sender of the account's inbox mail from the last 24 h. */
+export async function inboxMails(account: string): Promise<InboxMail[] | Failed> {
   const dir = gwsDir(account);
   const params = JSON.stringify({ userId: "me", q: "in:inbox newer_than:1d", maxResults: INBOX_SUBJECTS_MAX });
   const listed = await runGws(["gmail", "users", "messages", "list", "--params", params], GWS_TIMEOUT_MS, { gwsProfileDir: dir });
@@ -41,7 +41,9 @@ export async function inboxSubjects(account: string): Promise<string[] | Failed>
   if (ids.length === 0) return [];
   const { messages, error } = await fetchGwsMessages(ids, INBOX_SUBJECTS_MAX, GWS_TIMEOUT_MS, dir);
   if (error && messages.length === 0) return { error: `gws could not read ${account} mail: ${error.slice(0, 160)}` };
-  return messages.map((m) => m.subject ?? "").filter((s) => s.trim().length > 0);
+  return messages
+    .map((m) => ({ subject: m.subject ?? "", sender: m.sender }))
+    .filter((m) => m.subject.trim().length > 0);
 }
 
 /** J2 truth: titles of today's events (one IST day) on the account's primary calendar. */
@@ -78,6 +80,12 @@ export async function openPrs(repo: string): Promise<OpenPr[]> {
       return { number: p.number, ci, createdAt: p.created_at };
     }),
   );
+}
+
+/** J3: which PR numbers are open right now (one call, no CI reads): the bot's list moves while it answers. */
+export async function openPrNumbers(repo: string): Promise<Set<number>> {
+  const prs = await github<Array<{ number: number }>>(`/repos/${repo}/pulls?state=open&per_page=50`);
+  return new Set(prs.map((p) => p.number));
 }
 
 /** Journey B truth: the same three GitHub search counts /where prints. */
