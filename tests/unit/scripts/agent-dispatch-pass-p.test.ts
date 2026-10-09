@@ -330,7 +330,7 @@ describe("fail-first: a locked test must fail on the code as it is (#956 → #96
     // not in the manifest, so it never counts as a file the run wrote.
     expect(sb.labelsOf(1)).toContain(REVIEW);
     const prompt = sb.claudePrompts()[0] ?? "";
-    expect(prompt).toContain("node_modules/.bin/vitest run --cache=false");
+    expect(prompt).toContain("using the testing framework mandated by docs/antigravity/STANDARDS.md");
     expect(prompt).toContain("must FAIL");
   });
 });
