@@ -49,7 +49,7 @@ describe("agent-dispatch reports its writer models", () => {
     sb.tick();
     expect(sb.hasState("agent-dispatch.effective")).toBe(true);
     const r = report(sb.readState("agent-dispatch.effective"));
-    expect(r.get("agy_model")).toBe("gemini-3.6-flash-medium");
+    expect(r.get("agy_model")).toBe("gemini-3.8-flash-medium");
     expect(r.get("claude_model")).toBe("sonnet");
     expect(recent(r.get("written"))).toBe(true);
   });

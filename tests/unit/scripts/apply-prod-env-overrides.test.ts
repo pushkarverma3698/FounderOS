@@ -92,7 +92,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("openrouter:google/gemini-3.6-flash");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("openrouter:google/gemini-3.8-flash");
     expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("openrouter:nvidia/nemotron-3-super-120b-a12b:free");
   });
 
@@ -111,7 +111,7 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     for (const k of ["WORKER_AGENT_MODEL", "WORKER_FALLBACK_MODELS", "PLANNER_FALLBACK_MODELS"]) {
       expect(countOf(rendered, k), `${k} has no stale duplicate`).toBe(1);
     }
-    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary").toBe("openrouter:google/gemini-3.6-flash");
+    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary").toBe("openrouter:google/gemini-3.8-flash");
   });
 
   it("pins the per-run budget for the heavy model, replacing stale copies", () => {
