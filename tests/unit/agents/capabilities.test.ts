@@ -185,7 +185,6 @@ describe("HITL Security Invariant", () => {
       "draft_connection_note",
       "create_calendar_event",
       "schedule_task",
-      "record_event",
       "deliver_artifact",
       "browser",
       "synthesize_skill"

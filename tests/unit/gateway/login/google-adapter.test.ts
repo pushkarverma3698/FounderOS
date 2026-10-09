@@ -12,7 +12,7 @@ function deps(over: Partial<GoogleLoginDeps> = {}): GoogleLoginDeps & { files: M
   return {
     files,
     readClient: async () => client,
-    mailboxes: () => ["turicks", "personal", "naggar", ...[...files.keys()].flatMap((p) => /^\/acc\/([a-z-]+)\/gws\/credentials\.json$/.exec(p)?.[1] ?? []).filter((n) => !["turicks", "personal", "naggar"].includes(n))],
+    mailboxes: () => ["personal", ...[...files.keys()].flatMap((p) => /^\/acc\/([a-z-]+)\/gws\/credentials\.json$/.exec(p)?.[1] ?? []).filter((n) => n !== "personal")],
     profileDir: (a) => `/acc/${a}/gws`,
     runGws: async () => ({ ok: true, stdout: "", parsed: { emailAddress: "me@example.com" } }),
     doFetch: (async () => new Response(JSON.stringify({ refresh_token: "REFRESH-SECRET" }), { status: 200 })) as unknown as typeof fetch,
@@ -72,7 +72,7 @@ describe("google login adapter", () => {
     const by = Object.fromEntries(rows.map((r) => [r.target, r]));
     expect(by["turicks"]).toMatchObject({ ok: true, detail: "x@y.z" });
     expect(by["personal"]).toMatchObject({ ok: false, detail: expect.stringContaining("expired") });
-    expect(by["naggar"]).toMatchObject({ ok: false, detail: expect.stringContaining("not signed in") });
+    expect(by["naggar"]).toBeUndefined();
   });
 
   it("adds a new account under a chosen name, and lists it afterwards", async () => {
@@ -84,7 +84,7 @@ describe("google login adapter", () => {
     expect(r.ok).toBe(true);
     expect(r.html).toContain("/login google remove wife");
     expect(a.targets).toContain("wife");
-    expect((await a.status()).map((x) => x.target)).toEqual(["turicks", "personal", "naggar", "wife"]);
+    expect((await a.status()).map((x) => x.target)).toEqual(["personal", "wife"]);
   });
 
   it("refuses bad new names, and treats a built-in name as a renewal", () => {
@@ -94,15 +94,17 @@ describe("google login adapter", () => {
     expect(a.addProblem!("personal")).toBeUndefined();
   });
 
-  it("removes an added account but never a built-in one", async () => {
+  it("removes turicks like any added account, but never personal", async () => {
     const d = deps();
     d.files.set("/acc/wife/gws/credentials.json", "{}");
     const a = createGoogleAdapter(d);
-    expect((await a.remove!("turicks")).ok).toBe(false);
+    expect((await a.remove!("personal")).ok).toBe(false);
     expect(d.forget).not.toHaveBeenCalled();
     const r = await a.remove!("wife");
     expect(r.ok).toBe(true);
     expect(d.forget).toHaveBeenCalledWith("wife");
+    expect((await a.remove!("turicks")).ok).toBe(true);
+    expect(d.forget).toHaveBeenCalledWith("turicks");
     expect(a.targets).not.toContain("wife");
   });
 });

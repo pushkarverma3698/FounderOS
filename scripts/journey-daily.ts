@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Api, type TelegramClient } from "telegram";
-import { DEFAULT_ACCOUNT_KEY } from "../src/core/accounts.js";
+import { GOOGLE_BUILTIN_ACCOUNT } from "../src/core/accounts.js";
 import { DAILY_BUDGET_USD, TENANT } from "../src/core/config.js";
 import { closeDatabaseConnections, getDb } from "../src/db/client.js";
 import { journeyRuns } from "../src/db/journey-runs-schema.js";
@@ -50,7 +50,7 @@ const J5_TEXT = "check the journeys";
 
 const REPO = process.env["JOURNEY_WHERE_REPO"] ?? "pushkarverma3698/FounderOS";
 const WORK_ACCOUNT = process.env["JOURNEY_WORK_ACCOUNT"] ?? DEFAULT_WORK_ACCOUNT;
-const CALENDAR_ACCOUNT = process.env["JOURNEY_CALENDAR_ACCOUNT"] ?? DEFAULT_ACCOUNT_KEY;
+const CALENDAR_ACCOUNT = process.env["JOURNEY_CALENDAR_ACCOUNT"] ?? GOOGLE_BUILTIN_ACCOUNT;
 
 const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200);
 
@@ -85,9 +85,9 @@ async function journey(id: JourneyId, fn: () => Promise<JourneyResult>): Promise
 
 async function j1(client: TelegramClient, peer: ProbePeer): Promise<JourneyResult> {
   const reply = await ask(client, peer, "Anything important in my work inbox since yesterday?");
-  const subjects = await reads.inboxSubjects(WORK_ACCOUNT);
-  if ("error" in subjects) return { id: "J1", status: "red", detail: subjects.error };
-  return fromVerdict("J1", scoreInbox(reply, subjects));
+  const mails = await reads.inboxMails(WORK_ACCOUNT);
+  if ("error" in mails) return { id: "J1", status: "red", detail: mails.error };
+  return fromVerdict("J1", scoreInbox(reply, mails));
 }
 
 async function j2(client: TelegramClient, peer: ProbePeer): Promise<JourneyResult> {
@@ -98,9 +98,12 @@ async function j2(client: TelegramClient, peer: ProbePeer): Promise<JourneyResul
 }
 
 async function j3(client: TelegramClient, peer: ProbePeer): Promise<JourneyResult> {
+  // Snapshot GitHub BEFORE asking: the PR list moves while the bot answers (13 vs 14 open on 2026-10-09).
+  const snapshot = await reads.openPrs(REPO);
   const reply = await ask(client, peer, "Which FounderOS PRs are open, and is CI green on them?");
   const followUp = await ask(client, peer, "and the oldest one, what's blocking it?");
-  return fromVerdict("J3", scorePrs(reply, followUp, await reads.openPrs(REPO)));
+  // A PR in the snapshot that has closed since is not the bot's miss.
+  return fromVerdict("J3", scorePrs(reply, followUp, snapshot, await reads.openPrNumbers(REPO)));
 }
 
 /** Waits for the reminder row to fire (up to REMINDER_FIRE_LIMIT_MS after the ask), then asks for the list. */

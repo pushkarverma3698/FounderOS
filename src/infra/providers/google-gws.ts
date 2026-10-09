@@ -9,7 +9,7 @@ import { childLogger } from "../logger.js";
 import { runGws } from "../gws-runner.js";
 import { getGoogleAccount } from "../account-registry.js";
 import { addedMailboxDir } from "../google-mailboxes.js";
-import { isAccountKey } from "../../core/accounts.js";
+import { isBuiltinGoogleAccount } from "../../core/accounts.js";
 import { alertOnCredentialFailure, clearCredentialAlert } from "../provider-probes.js";
 import type { ToolResult } from "../../tools/index.js";
 import {
@@ -41,7 +41,7 @@ async function gwsOpts(
   input: { account_key?: string; department?: string },
 ): Promise<{ gwsProfileDir: string; accountKey: string } | { error: string }> {
   const explicit = input.account_key?.trim().toLowerCase();
-  if (explicit && !isAccountKey(explicit)) {
+  if (explicit && !isBuiltinGoogleAccount(explicit)) {
     const added = addedMailboxDir(explicit);
     return "error" in added ? added : { gwsProfileDir: added.dir, accountKey: explicit };
   }
