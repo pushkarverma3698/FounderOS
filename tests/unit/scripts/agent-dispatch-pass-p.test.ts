@@ -478,6 +478,30 @@ describe("Claude is unavailable: Antigravity writes the spec (on a model the exe
     expect(existsSync(join(sb.root, "home", ".claude", BLOCKED))).toBe(true);
   });
 
+  it("the real Claude limit message (exit 1, no Error: prefix) is a wall, not a spent attempt (#115 prod 10-09)", () => {
+    sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
+    const r = sb.tick({
+      claudeRc: 1,
+      claudeOut: "You've hit your weekly limit \u00b7 resets Oct 11, 12am (UTC)",
+      agyHook: writes(),
+      agyRc: 0,
+      env: {
+        ...sb.gitEnv(),
+        AGENT_PIPELINE_V2: "1",
+        AGENT_DISPATCH_PIPELINE_ROOT: process.cwd(),
+        AGENT_DISPATCH_SPEC_WORK: work,
+        FOUNDEROS_CONTRACTS_DIR: contracts,
+        AGENT_DISPATCH_SPEC_VITEST: fakeVitest,
+        FAKE_VITEST_LOG: join(sb.root, "fake-vitest.log"),
+      },
+    });
+    expect(r.status).toBe(0);
+    expect(attempts(1)).toBe(0);
+    expect(existsSync(join(sb.root, "home", ".claude", BLOCKED))).toBe(true);
+    expect(sb.agyRuns()).toBe(1);
+    expect(sb.labelsOf(1)).toContain(REVIEW);
+  });
+
   it("never uses an executor model for the spec: with no other candidate it waits, and no attempt is spent", () => {
     wallClaude();
     sb.addIssue({ number: 1, labels: [SPEC], body: specBody() });
