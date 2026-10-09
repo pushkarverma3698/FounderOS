@@ -22,6 +22,8 @@
  *   agent:review  → a PR exists; pr-brain gates it and re-dispatches findings
  *   agent:blocked → hit the attempt bound; needs a human
  *   agent:failed  → the run itself broke (workspace, no PR produced)
+ *   agent:spec / agent:spec-review → a spec card is out, waiting on the founder
+ *   agent:needs-brief → the issue body is not a complete brief; waiting on the founder
  *
  * Rendering is a PURE function over rows so the message is fixture-tested, and
  * the I/O half returns partial results rather than failing: one unreachable
@@ -39,7 +41,15 @@ import { collectReadyToMerge, type ReadyMergePr } from "./tasks-ready.js";
 export { isPrBrainReviewed, isGreenCI, type ReadyMergePr } from "./tasks-ready.js";
 
 /** The agent lifecycle labels, in the order work moves through them. */
-export const AGENT_STATES = ["ready", "working", "review", "blocked", "failed"] as const;
+export const AGENT_STATES = [
+  "ready",
+  "working",
+  "review",
+  "blocked",
+  "failed",
+  "spec",
+  "brief",
+] as const;
 export type AgentState = (typeof AGENT_STATES)[number];
 
 const STATE_ICON: Record<AgentState, string> = {
@@ -48,6 +58,8 @@ const STATE_ICON: Record<AgentState, string> = {
   review: "🔎",
   blocked: "🛑",
   failed: "⚠️",
+  spec: "📝",
+  brief: "❓",
 };
 
 const STATE_MEANING: Record<AgentState, string> = {
@@ -56,6 +68,20 @@ const STATE_MEANING: Record<AgentState, string> = {
   review: `PR open — ${REVIEWER} is reviewing it; anything it finds goes back to Antigravity`,
   blocked: "hit the attempt limit — this one needs you",
   failed: "the run itself broke before producing a PR",
+  spec: "a spec card is waiting for your approval (Approve / Change / Cancel)",
+  brief: "the issue is not a complete brief yet — this one needs you",
+};
+
+/** Label suffix after `agent:` → state. Two labels can mean the same state (spec, spec-review). */
+const LABEL_STATE: Readonly<Record<string, AgentState>> = {
+  ready: "ready",
+  working: "working",
+  review: "review",
+  blocked: "blocked",
+  failed: "failed",
+  spec: "spec",
+  "spec-review": "spec",
+  "needs-brief": "brief",
 };
 
 export interface TaskRow {
@@ -77,10 +103,14 @@ export interface TasksView {
 
 /** First agent:* label on the issue, or null when it carries none. */
 export function stateFromLabels(labels: readonly string[]): AgentState | null {
-  for (const state of AGENT_STATES) {
-    if (labels.some((l) => l.toLowerCase() === `agent:${state}`)) return state;
+  const found = new Set<AgentState>();
+  for (const label of labels) {
+    const lowered = label.toLowerCase();
+    if (!lowered.startsWith("agent:")) continue;
+    const state = LABEL_STATE[lowered.slice("agent:".length)];
+    if (state) found.add(state);
   }
-  return null;
+  return AGENT_STATES.find((s) => found.has(s)) ?? null;
 }
 
 /** "3m" · "2h 10m" · "4d". Short enough to sit at the end of a title line. */
@@ -117,7 +147,15 @@ export const MAX_RENDERED_ROWS = 18;
  * construction — `agent:ready` is the state that needs nothing from anybody, and
  * it is also the state that would fill the message first.
  */
-const ACTIONABILITY: readonly AgentState[] = ["blocked", "failed", "review", "working", "ready"];
+const ACTIONABILITY: readonly AgentState[] = [
+  "blocked",
+  "brief",
+  "spec",
+  "failed",
+  "review",
+  "working",
+  "ready",
+];
 
 export function selectRenderedRows(rows: readonly TaskRow[]): {
   shown: TaskRow[];
@@ -210,7 +248,7 @@ export function formatTasksMessage(view: TasksView): string {
   lines.push(
     "",
     "<i>Verdicts arrive here on their own. " +
-      "🛑 blocked is the only state waiting on you.</i>",
+      "🛑 blocked, ❓ brief and 📝 spec are the states waiting on you.</i>",
   );
   return lines.join("\n");
 }
@@ -245,11 +283,13 @@ export async function fetchDispatchTasks(
         return;
       }
       try {
-        const { data: issues } = await octokit.rest.issues.listForRepo({
+        // Every page. The first 50 open issues are the 50 NEWEST, and FounderOS carries far
+        // more than that, so an older agent issue was invisible (2026-10-09: #1004/#1005/#1030).
+        const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
           owner,
           repo,
           state: "open",
-          per_page: 50,
+          per_page: 100,
         });
         for (const issue of issues) {
           if (issue.pull_request) continue; // a PR is not a task; it is a task's output

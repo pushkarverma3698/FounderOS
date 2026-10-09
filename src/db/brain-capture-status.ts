@@ -32,9 +32,13 @@ export async function fetchCaptureStatus(timeZone: string): Promise<CaptureStatu
   };
 }
 
-/** One founder-readable line. The warning marker means no new Mac row for over two hours. */
-export function renderCaptureLine(status: CaptureStatus, now: Date): string {
-  if (!status.lastAt) return "Mac capture: no rows yet ⚠️ (run scripts/mac/install-brain-capture.sh on the Mac)";
+/**
+ * One founder-readable line, or null when the capture has never written a row: a fix that means running a script
+ * on the Mac is not something he can act on from Telegram (live QA 2026-10-09), so /where stays silent.
+ * The warning marker means no new Mac row for over two hours.
+ */
+export function renderCaptureLine(status: CaptureStatus, now: Date): string | null {
+  if (!status.lastAt) return null;
   const minutes = Math.max(0, Math.round((now.getTime() - status.lastAt.getTime()) / 60_000));
   const stale = now.getTime() - status.lastAt.getTime() > CAPTURE_STALE_MS;
   return `Mac capture: last ${minutes} min ago, ${status.rowsToday} rows today${stale ? " ⚠️" : ""}`;

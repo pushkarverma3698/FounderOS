@@ -1498,10 +1498,15 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       log "$repo_name#$pr verdict: $verdict"
       merge_or_card "$pr" "$head" "$head_ref" "$verdict"
 
-      notify "🧠 Gate done — ${repo_name}#${pr}
+      # A PR the review blocked gets a card that lists the blockers and offers Fix now / Close PR instead of the bare
+      # line below. If no card could be built or sent, the bare line still goes out.
+      bc_run "$pr" "$head" "$verdict"
+      if [[ "$BC_SENT" -ne 1 ]]; then
+        notify "🧠 Gate done — ${repo_name}#${pr}
 ${verdict}
 Merge: ${merge_result}
 $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
+      fi
     else
       if [[ -n "$outage" ]]; then
         # Not this PR's fault, and every remaining PR would fail the same way.

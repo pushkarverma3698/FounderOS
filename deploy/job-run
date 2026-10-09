@@ -4,6 +4,7 @@
 # fos-job.socket (deploy/systemd) starts one of these per connection. The bot writes ONE JSON line to the socket:
 #
 #   {"repo":"owner/name","issue":41,"stage":"spec"|"build"}
+#   {"repo":"owner/name","issue":41,"stage":"fix","head":"<sha>"}    the founder's "fix it" on a PR pr-brain blocked
 #   {"repo":"owner/name","stage":"promote","beta_sha":"<40 hex>"}   put beta on prod (deploy/promote-run), see below
 #
 # and this script owns the job from there to its end:
@@ -11,6 +12,8 @@
 #   spec   agent-dispatch --issue N --repo R --stage spec   Pass P writes the spec and sends it for approval
 #   build  agent-dispatch --issue N --repo R --stage build  the executor implements the issue and opens the PR,
 #          then pr-brain --repo <checkout> --pr <that PR>   the review, and the card the founder taps
+#   fix    agent-dispatch --issue N --repo R --stage fix --head SHA   the executor fixes every blocker on the PR's own
+#          branch, then pr-brain reviews the new head the way a build's PR is reviewed. SHA is the commit the founder was shown.
 #
 # The founder hears exactly ONE outcome. The card the run itself posts (the spec card, or pr-brain's review card)
 # is the outcome when there is one. When the run ends without it, whatever the reason (a non-zero exit, a silent
@@ -132,17 +135,19 @@ REPO="$(jq -r '.repo // empty' <<<"$LINE" 2>/dev/null)" || REPO=""
 ISSUE="$(jq -r '.issue // empty | tostring' <<<"$LINE" 2>/dev/null)" || ISSUE=""
 STAGE="$(jq -r '.stage // empty' <<<"$LINE" 2>/dev/null)" || STAGE=""
 BETA_SHA="$(jq -r '.beta_sha // empty' <<<"$LINE" 2>/dev/null)" || BETA_SHA=""
+HEAD_SHA="$(jq -r '.head // empty' <<<"$LINE" 2>/dev/null)" || HEAD_SHA=""
 BASE="$(jq -r '.base // empty' <<<"$LINE" 2>/dev/null)" || BASE=""
 DEPLOY="$(jq -r '.deploy // empty' <<<"$LINE" 2>/dev/null)" || DEPLOY=""
 # A promotion has no issue: it carries the beta commit the founder approved instead.
 if [[ "$STAGE" == promote ]]; then ISSUE="${BETA_SHA:0:7}"; fi
-if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$STAGE" =~ ^(spec|build|promote)$ ]] \
+if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ || ! "$STAGE" =~ ^(spec|build|fix|promote)$ ]] \
+  || [[ -n "$HEAD_SHA" && ( "$STAGE" != fix || ! "$HEAD_SHA" =~ ^[0-9a-f]{7,40}$ ) ]] \
   || [[ "$STAGE" == promote && ! "$BETA_SHA" =~ ^[0-9a-f]{40}$ ]] \
   || [[ -n "$BASE" && ! "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ -n "$DEPLOY" && ! "$DEPLOY" =~ ^(box|workflow)$ ]] \
   || [[ "$STAGE" != promote && ! "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
   _got="$(printf '%s' "$LINE" | cut -c1-200)"
   REPO="" ISSUE="" STAGE=""
-  fail 64 "not a valid job request (needs {repo: owner/name, issue: positive integer, stage: spec|build} or {repo, stage: promote, beta_sha: 40 hex}): ${_got}"
+  fail 64 "not a valid job request (needs {repo: owner/name, issue: positive integer, stage: spec|build|fix, head: a sha, with fix only} or {repo, stage: promote, beta_sha: 40 hex}): ${_got}"
 fi
 jlog "job: ${REPO}#${ISSUE} stage ${STAGE}"
 
@@ -199,7 +204,9 @@ export PR_BRAIN_MERGE="${PR_BRAIN_MERGE:-0}"
 
 # ------------------------------------------------------------------ the run
 PHASE="agent-dispatch (${STAGE})"
-run_logged "$DISPATCH" --issue "$ISSUE" --repo "$REPO" --stage "$STAGE" --wait-lock "$WAIT_LOCK_SEC"
+FIX_HEAD_ARGS=()
+[[ "$STAGE" == fix && -n "$HEAD_SHA" ]] && FIX_HEAD_ARGS=(--head "$HEAD_SHA")
+run_logged "$DISPATCH" --issue "$ISSUE" --repo "$REPO" --stage "$STAGE" ${FIX_HEAD_ARGS[@]+"${FIX_HEAD_ARGS[@]}"} --wait-lock "$WAIT_LOCK_SEC"
 rc=$?
 [[ "$rc" -eq 0 ]] || fail "$rc" "agent-dispatch exited ${rc} before the ${STAGE} stage finished"
 

@@ -161,14 +161,11 @@ export const searchMemoryTool = tool(
   },
 );
 
-// ── record_event (raw write — HITL gate lives in agent-tools.ts wrapper) ─────
+// ── record_event (episodic-memory write, no approval) ─────────────────────────
 
 /**
- * Raw event-write tool. Called AFTER approval from the agent-tools.ts wrapper.
- * Following the same pattern as emailTool / linkedinPostTool:
- *   agent-tools.ts wrapper → interrupt() approval → this tool executes the write.
- *
- * Tests invoke this tool directly (no interrupt needed, no graph context required).
+ * Event-write tool: a low-risk write into the founder's own log, so it needs no approval. The agent-tools wrapper
+ * (src/agents/agent-tools/memory.ts) exposes it to the workers. Tests invoke this tool directly.
  */
 export const recordEventTool = tool(
   async ({
@@ -215,10 +212,10 @@ export const recordEventTool = tool(
   {
     name: "record_event",
     description:
-      "Record a significant event to episodic memory so it can be recalled later. " +
-      "Use for: decisions made ('decided to use Stripe'), outcomes ('closed Acme deal for €12K'), " +
-      "tasks completed ('shipped Phase D'), or conversation highlights worth preserving. " +
-      "Requires founder approval before writing.",
+      "Record a note or a significant event to episodic memory so it can be recalled later. " +
+      "Use event_type 'note' when the founder says 'save a note' / 'remember that ...'. Otherwise: decisions made " +
+      "('decided to use Stripe'), outcomes ('closed Acme deal for €12K'), tasks completed ('shipped Phase D'), or " +
+      "conversation highlights worth preserving. Writes immediately; no approval card.",
     schema: z.object({
       title: z
         .string()
@@ -230,8 +227,8 @@ export const recordEventTool = tool(
         .array(z.string())
         .describe("Keyword tags for later retrieval — e.g. ['stripe', 'backend', 'alex']"),
       event_type: z
-        .enum(["conversation", "decision", "outcome", "task_completed"])
-        .describe("Category of event"),
+        .enum(["note", "conversation", "decision", "outcome", "task_completed"])
+        .describe("Category of event; 'note' for something the founder asked to save"),
       occurred_at: z
         .string()
         .optional()

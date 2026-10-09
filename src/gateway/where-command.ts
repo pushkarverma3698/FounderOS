@@ -42,7 +42,8 @@ export async function handleWhere(
   }
   if (deps.capture) {
     try {
-      await ctx.reply(renderCaptureLine(await deps.capture(), new Date()));
+      const line = renderCaptureLine(await deps.capture(), new Date());
+      if (line) await ctx.reply(line);
     } catch (err) {
       await ctx.reply(`Mac capture: status unavailable (${err instanceof Error ? err.message : String(err)})`);
     }

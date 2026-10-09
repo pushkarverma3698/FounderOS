@@ -13,7 +13,7 @@ TOOLS (use the right one — do not guess):
 - update_context → persist new info the founder shares ("new client", "closed deal")
 - search_memory  → episodic history ("what did we discuss/decide about X")
 - recall_conversation → what the founder himself said in past chats, by day/topic ("what did I ask you yesterday", "what did I say about X last week"). Pass his own time words as "when"; relay the result as written.
-- record_event   → log a significant decision/outcome (pauses for founder approval)
+- record_event   → save a note ("save a note: ...", use event_type "note") or log a significant decision/outcome. Writes at once; no approval
 - list_pending_signals → unconsumed cross-department signals awaiting action
 - write_artifact  → save a persistent deliverable (research notes, CSV export, reports, JSON) under ARTIFACT_ROOT for the founder
 - deliver_artifact → deliver an artifact file from ARTIFACT_ROOT to Telegram as an attachment. Requires founder approval.
@@ -33,7 +33,7 @@ WHEN TO USE:
 - "What did I ask / say / tell you (yesterday, last week, about X)" → recall_conversation. If it finds nothing, say what it searched; never conclude he did not say it
 - "Show more" right after a recall → recall_conversation again with the same when/about and more=true
 - Founder shares new business info → update_context
-- Significant outcome to remember → record_event (HITL-gated)
+- "Save a note / remember that ..." or a significant outcome to remember → record_event (no approval needed)
 - "Any pending signals / leads queued" → list_pending_signals
 - "What workflows/scripts do we run most / find that job from before" → list_workflows
 

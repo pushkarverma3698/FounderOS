@@ -26,6 +26,7 @@ import { join } from "node:path";
 import type { Octokit } from "octokit";
 import { REVIEWER } from "./dispatch-roles.js";
 import { fetchCrossRefPrs, findFixingPr } from "./existing-issue.js";
+import { blockerLines, blockersOf, latestVerdictForHead, nextPrBrainRun, type VerdictFacts } from "./pr-verdict-facts.js";
 
 export interface TaskComment {
   readonly body: string;
@@ -40,6 +41,10 @@ export interface TaskPr {
   readonly draft: boolean;
   readonly headSha: string;
   readonly baseRef: string;
+  /** The PR's own branch (`task/issue-N-...`). `baseRef` is where it merges, not where it lives. */
+  readonly headRef?: string;
+  /** pr-brain's typed verdict for the CURRENT head. null = none readable; absent = not fetched. */
+  readonly verdict?: VerdictFacts | null;
   readonly checks: { readonly passed: number; readonly failed: number; readonly pending: number };
   /** SHAs pr-brain stamped with `<!-- brain-reviewed: SHA -->`, oldest first. */
   readonly reviewedHeads: readonly string[];
@@ -94,15 +99,42 @@ function checksLine(c: TaskPr["checks"]): string {
   return `CI: ${c.passed}/${total} passed`;
 }
 
-function prLines(pr: TaskPr): string[] {
-  const lines = [`PR #${pr.number} → ${pr.baseRef} · ${checksLine(pr.checks)}`];
+type PrStage = "review" | "blocked" | "working";
+
+function prLines(pr: TaskPr, now: Date, stage: PrStage, quotaUntil: Date | null = null): string[] {
+  const where = pr.headRef ? `branch ${pr.headRef}, merges into ${pr.baseRef}` : `merges into ${pr.baseRef}`;
+  const lines = [`PR #${pr.number} · ${where} · ${checksLine(pr.checks)}`];
+  const reviews = new Set(pr.reviewedHeads).size;
   if (!pr.reviewedHeads.includes(pr.headSha)) {
-    lines.push(`Review: waiting for ${REVIEWER}'s review of the latest commit (it runs every 20 min).`);
-  } else if (pr.draft) {
     lines.push(
-      `${REVIEWER} reviewed the current head and left it as a draft (not cleared). Antigravity is sent back to fix it ` +
-        `automatically — round ${pr.attempts}/${MAX_ATTEMPTS}.`,
+      `Review: waiting for ${REVIEWER}'s review of the latest commit (it runs every 20 min, next about ${hhmm(nextPrBrainRun(now))}).`,
     );
+  } else if (pr.draft) {
+    const blockers = blockersOf(pr.verdict);
+    lines.push(`${REVIEWER} reviewed the current head (review ${reviews}) and left it as a draft (not cleared).`);
+    if (pr.verdict == null) {
+      lines.push(`Its verdict could not be read here: read the verdict on the PR itself.`);
+    } else {
+      lines.push(...blockerLines(pr.verdict));
+    }
+    if (stage === "working") {
+      lines.push(`Antigravity is on fix round ${pr.attempts} of ${MAX_ATTEMPTS}; ${REVIEWER} re-reviews the new commit when it lands.`);
+    } else if (stage === "review") {
+      lines.push(`Fix rounds used: ${pr.attempts} of ${MAX_ATTEMPTS}.`);
+      if (pr.attempts >= MAX_ATTEMPTS) {
+        lines.push("Nothing more happens automatically. Say “fix it” to start another fix round now (one tap).");
+      } else if (quotaUntil && quotaUntil > now) {
+        lines.push(`Next: the fix round starts after Antigravity's quota lifts at ${utc(quotaUntil)}.`);
+      } else {
+        lines.push(
+          `Next: agent-dispatch sends Antigravity back to fix ${blockers.length === 1 ? "it" : "these"} at its next run, ` +
+            `${hhmm(nextDispatcherRun(now))} (fix round ${pr.attempts + 1} of ${MAX_ATTEMPTS}); ${REVIEWER} then re-reviews the new commit within about 20 min.`,
+          "Say “fix it” to start that fix now instead (one tap).",
+        );
+      }
+    } else {
+      lines.push(`Fix rounds used: ${pr.attempts} of ${MAX_ATTEMPTS}.`);
+    }
   } else {
     lines.push(`${REVIEWER} reviewed the current head and cleared it (ready to merge).`);
   }
@@ -146,8 +178,8 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
   if (labels.has("agent:blocked")) {
     return [
       head,
-      `🛑 Stopped after ${MAX_ATTEMPTS} review→fix rounds — it needs your decision. Nothing more happens automatically.`,
-      ...(pr ? prLines(pr) : [issue.url]),
+      `🛑 Stopped after ${MAX_ATTEMPTS} review→fix rounds — it needs your decision. Nothing more happens automatically; say “fix it” to start another fix round on the same branch.`,
+      ...(pr ? prLines(pr, now, "blocked") : [issue.url]),
     ].join("\n");
   }
   if (labels.has("agent:failed")) {
@@ -161,12 +193,18 @@ export function describeTaskStatus(f: TaskFacts, now: Date): string {
     ].join("\n");
   }
   if (labels.has("agent:review") && pr) {
-    return [head, "👀 In review.", ...prLines(pr), notices].join("\n");
+    return [head, "👀 In review.", ...prLines(pr, now, "review", f.quotaUntil), notices].join("\n");
   }
   if (labels.has("agent:working")) {
     const claim = [...f.comments].reverse().map((c) => c.body.match(CLAIM)?.[1]).find(Boolean);
     const since = claim ? `claimed ${minutesSince(claim, now)} min ago` : "claimed";
-    return [head, `🔧 Antigravity is working on it — ${since}. A run is cut off at 30 min.`, notices, issue.url].join("\n");
+    return [
+      head,
+      `🔧 Antigravity is working on it — ${since}. A run is cut off at 30 min.`,
+      ...(pr && pr.state === "open" ? prLines(pr, now, "working") : []),
+      notices,
+      issue.url,
+    ].join("\n");
   }
   if (labels.has("agent:ready")) {
     const waiting = f.quotaUntil && f.quotaUntil > now
@@ -253,6 +291,8 @@ export async function fetchTaskFacts(
       draft: Boolean(p.draft),
       headSha: p.head.sha,
       baseRef: p.base.ref,
+      headRef: p.head.ref,
+      verdict: latestVerdictForHead(bodies, p.head.sha),
       checks: {
         passed: runs.filter((r) => r.status === "completed" && ["success", "skipped", "neutral"].includes(r.conclusion ?? "")).length,
         failed: runs.filter((r) => r.status === "completed" && !["success", "skipped", "neutral"].includes(r.conclusion ?? "")).length,
