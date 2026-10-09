@@ -64,4 +64,12 @@ export const COMMAND_GOLDEN_TASKS: GoldenTask[] = [
   notCmd("remind-call", "remind me to call the landlord at 3pm", "/remind's handler is a planner turn: routing to it loops (QA 2026-10-09); plan set_reminder", "admin"),
   notCmd("chat", "thanks, that was helpful", "small talk is a direct reply"),
   notCmd("research", "research what Stripe does and summarise it in two lines", "open research is a plan", "research"),
+  // 2026-10-09 live QA: news about Anthropic/Claude was answered with a coding-pipeline status for Oplify #115.
+  notCmd("news-anthropic", "what is the latest news on Anthropic Claude this week? 3 bullets", "outside-world news is research, never an Antigravity status", "research"),
+  {
+    ...notCmd("news-after-status", "any news on OpenAI today?", "a coding status earlier in the thread does not turn a general news question into a status reply", "research"),
+    priorTurns: [{ user: "where are we on oplify #115", reply: "Issue #115 is with Antigravity, claimed 1 min ago." }],
+    expectedTools: ["search_web"],
+    mustNotMention: ["antigravity", "#115"],
+  },
 ];

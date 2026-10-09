@@ -14,10 +14,13 @@ const shown = (items: readonly Item[], max: number): string[] => {
 };
 
 export function renderRepoSection(s: RepoSummary): string {
-  const prio = Object.entries(s.left.byPriority)
-    .sort(([a], [b]) => (a === "none" ? 1 : b === "none" ? -1 : a.localeCompare(b)))
-    .map(([k, v]) => `${esc(k)} ${v}`)
-    .join(", ");
+  // "none" is the bucket for issues with no priority label. It is never printed as a word: a repo that uses no
+  // priority labels gets no parenthesis (live QA 2026-10-09: "(none 38)"), a mixed one says "N unprioritised".
+  const { none: unprioritised = 0, ...ranked } = s.left.byPriority;
+  const prio = [
+    ...Object.entries(ranked).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${esc(k)} ${v}`),
+    ...(unprioritised > 0 && Object.keys(ranked).length > 0 ? [`${unprioritised} unprioritised`] : []),
+  ].join(", ");
   const lines = [
     `<b>${esc(s.slug)}</b>`,
     `Done (7d): ${s.done.count}`,

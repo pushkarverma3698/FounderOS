@@ -22,16 +22,17 @@ class NotifyError(RuntimeError):
     """Telegram refused the message, or no credentials were configured."""
 
 
-def send(text: str) -> None:
-    """Post one message to the founder's chat."""
+def send(text: str, reply_markup: dict | None = None) -> None:
+    """Post one message to the founder's chat, with inline buttons when given."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         raise NotifyError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must both be set")
 
-    payload = json.dumps(
-        {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    ).encode()
+    body: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if reply_markup:
+        body["reply_markup"] = reply_markup
+    payload = json.dumps(body).encode()
     request = urllib.request.Request(
         f"{TELEGRAM_API}/bot{token}/sendMessage",
         data=payload,
@@ -45,8 +46,17 @@ def send(text: str) -> None:
         raise NotifyError(f"could not reach Telegram: {err}") from err
 
 
+def queue_ready_keyboard() -> dict:
+    """The one action on the queue-ready message: the VPS bot's own /now "Top roles" button (`now:jobs`).
+
+    A shell command is not something the founder can run from the phone this is read on (live QA 2026-10-09), and
+    the bot already answers this callback by opening the compact brief, so the Mac sends no handler of its own.
+    """
+    return {"inline_keyboard": [[{"text": "📝 Top roles", "callback_data": "now:jobs"}]]}
+
+
 def queue_ready_message(count: int, top: list[str], fetch_failures: list[tuple[str, str]] = ()) -> str:
-    """What the founder reads when he opens the laptop.
+    """What the founder reads when he opens the laptop. It names the roles and carries no shell command.
 
     Names the first few roles rather than only counting them. "12 jobs ready" is
     a number he can defer; "12 ready — Adyen, Booking, Mollie" is a reason to
@@ -72,8 +82,7 @@ def queue_ready_message(count: int, top: list[str], fetch_failures: list[tuple[s
     )
     return (
         f"🎯 <b>{count} job{'s' if count != 1 else ''} ready to apply</b>\n"
-        f"{named}{more}{failure_block}\n\n"
-        "<code>cd ~/Projects/founderos/mac-client && .venv/bin/python -m mac_client.apply</code>"
+        f"{named}{more}{failure_block}"
     )
 
 
