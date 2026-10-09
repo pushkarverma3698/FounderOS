@@ -43,10 +43,12 @@ AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 # (the bot's /claude and /agy put one on the issue) and which one wrote a PR (the daemon puts it on both).
 # tests/unit/scripts/onboard-repo.test.ts fails when this list and the labels deploy/agent-dispatch and
 # deploy/lib/engine.sh use differ.
-LABELS=(agent:ready agent:working agent:review agent:failed agent:blocked agent:needs-brief engine:agy engine:claude)
+LABELS=(agent:ready agent:working agent:review agent:failed agent:blocked agent:needs-brief agent:spec agent:spec-review engine:agy engine:claude)
 
 label_color() {
   case "$1" in
+    agent:spec) echo 0E8A16 ;;
+    agent:spec-review) echo 5319E7 ;;
     agent:ready) echo 0E8A16 ;;
     agent:working) echo 1D76DB ;;
     agent:review) echo 5319E7 ;;
@@ -59,6 +61,8 @@ label_color() {
 }
 label_description() {
   case "$1" in
+    agent:spec) echo "Pipeline V2: ready to generate a spec" ;;
+    agent:spec-review) echo "Pipeline V2: spec generated, awaiting review" ;;
     agent:ready) echo "Ready for agent-dispatch to claim: an unattended Antigravity run starts" ;;
     agent:working) echo "Claimed: Antigravity is working on it" ;;
     agent:review) echo "A draft PR is open and pr-brain is reviewing it" ;;

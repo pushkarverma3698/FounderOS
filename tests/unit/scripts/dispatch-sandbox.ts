@@ -59,6 +59,8 @@ export const AGENT_LABELS = [
   "agent:failed",
   "agent:blocked",
   "agent:needs-brief",
+  "agent:spec",
+  "agent:spec-review",
 ] as const;
 
 /** The labels that name the coding CLI an issue or PR belongs to. A repo gets them from onboard-repo.sh, or lazily from the daemon. */

@@ -1000,6 +1000,14 @@ claim_and_implement() {
   case "$looked" in
     "contract "*) pipeline_spec="${looked#contract }" ;;
     "invalid "*) exec_refuse "$issue" "$title" "${looked#invalid }"; return 2 ;;
+    "none")
+      if [[ "$(issue_has_label "$issue" "security")" == "true" ]] || [[ "$(issue_has_label "$issue" "logic-heavy")" == "true" ]]; then
+        log "#${issue} is a security/logic-heavy issue with no approved spec — moving to agent:spec to enforce Pipeline V2"
+        gh issue edit "$issue" --repo "$REPO" --remove-label agent:ready --add-label agent:spec >/dev/null
+        gh issue comment "$issue" --repo "$REPO" --body "<!-- pass-p-enforced --> This issue is marked as \`security\` or \`logic-heavy\`. It cannot jump straight to code. agent-dispatch has moved it to \`agent:spec\` so that an explicit spec and locked test are generated and approved first." >/dev/null
+        return 3
+      fi
+      ;;
   esac
   if [[ -n "$pipeline_spec" ]]; then
     local why

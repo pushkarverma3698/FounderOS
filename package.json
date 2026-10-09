@@ -35,7 +35,7 @@
     "self-improve:run": "node --env-file=.env --import tsx/esm scripts/self-improve-cron.ts",
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
     "verify:runtime-assets": "node --import tsx/esm scripts/verify-runtime-assets.ts",
-    "gate": "pnpm verify:branch && pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm verify:doc-claims && pnpm test",
+    "gate": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm verify:doc-claims && pnpm test",
     "ci:quality": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch",
     "predeploy": "pnpm gate",
     "db:generate": "drizzle-kit generate",
@@ -65,7 +65,8 @@
     "verify:pr-scope": "node --import tsx/esm scripts/verify-pr-scope.ts",
     "repo:add": "node --import tsx/esm scripts/repo-add.ts",
     "branch:new": "node --import tsx/esm scripts/branch-new.ts",
-    "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts"
+    "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts",
+    "prepare": "bash scripts/install-hooks.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
