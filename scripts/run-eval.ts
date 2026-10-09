@@ -15,6 +15,7 @@ import { renderReport } from "../src/eval/report.js";
 import { makeKernelInvoker } from "../src/eval/kernel-invoker.js";
 import { buildProductionKernel } from "../src/gateway/kernel-boot.js";
 import { closeDatabaseConnections } from "../src/db/client.js";
+import { cancelPendingApprovals } from "../src/db/queries.js";
 
 /** Default suite unless `--commands` or `--suite <name>` is given. */
 function selectTasks(argv: string[]): GoldenTask[] {
@@ -32,7 +33,8 @@ async function main(): Promise<void> {
   // `pnpm eval -- --commands` runs only the plain-words → slash-command slice (model-pool gate).
   // `pnpm eval -- --suite understanding` runs only the multi-turn understanding set (AG-030).
   const tasks = selectTasks(process.argv);
-  const report = await runEval(tasks, makeKernelInvoker(kernel), { taskDelayMs: 500 });
+  // A gated tool leaves a pending hitl_approvals row that nothing answers; cancel it so /status never counts it (#1061).
+  const report = await runEval(tasks, makeKernelInvoker(kernel, { releaseThread: cancelPendingApprovals }), { taskDelayMs: 500 });
   const rendered = renderReport(report);
   console.log(rendered);
   const out = resolve("eval-report.md");
