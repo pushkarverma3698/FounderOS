@@ -200,13 +200,15 @@ export const deepResearch = tool(
 // ── crawl_site ────────────────────────────────────────────────────────────────
 
 export const crawlSiteTool = tool(
-  async ({ start_url, max_pages }) => {
+  async ({ start_url, max_pages }, config) => {
     const cap = Math.min(Math.max(max_pages ?? CRAWL_MAX_PAGES_DEFAULT, 1), CRAWL_MAX_PAGES_CEILING);
-    const res = await crawlSite(start_url, cap);
+    // The turn's abort signal: the deadline can only stop a tool that listens for it.
+    const signal = config?.signal;
+    const res = await crawlSite(start_url, cap, undefined, signal);
     if (!res.ok) {
       return `Crawl failed for ${start_url}: ${res.error}. (Set APIFY_TOKEN for the Apify website-content-crawler.)`;
     }
-    const chunks = await ingestResearch(res.data);
+    const chunks = await ingestResearch(res.data, signal);
 
     logResearchEvent(
       `Crawled site: ${start_url}`,
