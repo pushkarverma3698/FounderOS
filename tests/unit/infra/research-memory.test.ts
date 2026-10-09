@@ -82,4 +82,16 @@ describe("ingestResearch", () => {
 
     await expect(ingestResearch([page()])).resolves.toBe(0);
   });
+
+  it("stops between pages once the abort signal fires, so a cancelled turn does not keep embedding", async () => {
+    const ctl = new AbortController();
+    chunkText.mockReturnValue(["c"]);
+    embedTexts.mockImplementation(async () => {
+      ctl.abort();
+      return [[0.1]];
+    });
+    const n = await ingestResearch([page({ url: "https://a.com/1" }), page({ url: "https://a.com/2" })], ctl.signal);
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    expect(n).toBe(1);
+  });
 });
