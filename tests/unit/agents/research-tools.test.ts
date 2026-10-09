@@ -22,7 +22,7 @@ vi.mock("../../../src/tools/web-search.js", () => ({ webSearchTool: { execute: w
 vi.mock("../../../src/infra/research-memory.js", () => ({ getCachedScrape, setCachedScrape, ingestResearch }));
 vi.mock("../../../src/tools/memory.js", () => ({ recordEventTool: { invoke: recordInvoke } }));
 
-const { scrapeUrlTool, deepResearch, searchWeb } = await import("../../../src/agents/agent-tools/research.js");
+const { scrapeUrlTool, deepResearch, searchWeb, crawlSiteTool } = await import("../../../src/agents/agent-tools/research.js");
 
 const mkPage = (url: string) => ({ url, title: url, markdown: `body of ${url}`, retrieved_at: "2026-06-24T00:00:00.000Z" });
 
@@ -112,5 +112,15 @@ describe("scrape_url", () => {
     expect(setCachedScrape).toHaveBeenCalled();
     expect(ingestResearch).toHaveBeenCalled();
     expect(out).toContain("via apify");
+  });
+});
+
+describe("crawl_site", () => {
+  it("hands the turn's abort signal to the crawl and to the ingest", async () => {
+    const ctl = new AbortController();
+    crawlSite.mockResolvedValueOnce({ ok: true, source: "apify", data: [mkPage("https://a.com")] });
+    await crawlSiteTool.invoke({ start_url: "https://a.com", max_pages: 3 }, { signal: ctl.signal });
+    expect(crawlSite.mock.calls[0]?.[3]).toBe(ctl.signal);
+    expect(ingestResearch.mock.calls[0]?.[1]).toBe(ctl.signal);
   });
 });
