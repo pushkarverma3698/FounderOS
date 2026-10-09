@@ -65,18 +65,29 @@ export interface IntegrationAccount {
 export const DEPARTMENT_ACCOUNT_DEFAULTS: Readonly<
   Record<string, Partial<Record<Platform, AccountKey>>>
 > = {
-  sales: { google: "turicks", linkedin: "turicks" },
-  marketing: { google: "turicks", linkedin: "turicks", instagram: "turicks", facebook: "turicks" },
-  comms: { google: "turicks" },
+  sales: { google: "personal", linkedin: "turicks" },
+  marketing: { google: "personal", linkedin: "turicks", instagram: "turicks", facebook: "turicks" },
+  comms: { google: "personal" },
   jobhunt: { google: "personal", linkedin: "personal" },
   personal: { google: "personal", linkedin: "personal" },
   engineering: { github: "turicks" },
-  research: { google: "turicks" },
-  admin: { google: "turicks" },
+  research: { google: "personal" },
+  admin: { google: "personal" },
 };
 
 /** Global fallback when department has no mapping. */
 export const DEFAULT_ACCOUNT_KEY: AccountKey = "turicks";
+
+/**
+ * The only Google account that is built in and default for mail and calendar. Any other Google account
+ * (turicks, naggar, a name from `/login google add`) exists only once it has a signed-in credentials file and
+ * can be removed with `/login google remove <name>`.
+ */
+export const GOOGLE_BUILTIN_ACCOUNT: AccountKey = "personal";
+
+export function isBuiltinGoogleAccount(value: string): boolean {
+  return value === GOOGLE_BUILTIN_ACCOUNT;
+}
 
 /** Resolve account_key from department + platform + optional explicit override. */
 export function resolveAccountKey(
@@ -93,7 +104,7 @@ export function resolveAccountKey(
     return DEPARTMENT_ACCOUNT_DEFAULTS[dept]![platform]!;
   }
 
-  return DEFAULT_ACCOUNT_KEY;
+  return platform === "google" ? GOOGLE_BUILTIN_ACCOUNT : DEFAULT_ACCOUNT_KEY;
 }
 
 export function isAccountKey(value: string): value is AccountKey {

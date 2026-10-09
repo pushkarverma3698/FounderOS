@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Api, type TelegramClient } from "telegram";
-import { DEFAULT_ACCOUNT_KEY } from "../src/core/accounts.js";
+import { GOOGLE_BUILTIN_ACCOUNT } from "../src/core/accounts.js";
 import { DAILY_BUDGET_USD, TENANT } from "../src/core/config.js";
 import { closeDatabaseConnections, getDb } from "../src/db/client.js";
 import { journeyRuns } from "../src/db/journey-runs-schema.js";
@@ -50,7 +50,7 @@ const J5_TEXT = "check the journeys";
 
 const REPO = process.env["JOURNEY_WHERE_REPO"] ?? "pushkarverma3698/FounderOS";
 const WORK_ACCOUNT = process.env["JOURNEY_WORK_ACCOUNT"] ?? DEFAULT_WORK_ACCOUNT;
-const CALENDAR_ACCOUNT = process.env["JOURNEY_CALENDAR_ACCOUNT"] ?? DEFAULT_ACCOUNT_KEY;
+const CALENDAR_ACCOUNT = process.env["JOURNEY_CALENDAR_ACCOUNT"] ?? GOOGLE_BUILTIN_ACCOUNT;
 
 const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200);
 
