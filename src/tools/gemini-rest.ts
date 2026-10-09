@@ -56,7 +56,56 @@ function apiKey(): string {
 
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/** Map a Gemini model id to its OpenRouter slug. An id that already has a "vendor/" prefix passes through. */
+export function openRouterModel(model: string): string {
+  if (model.includes("/")) return model;
+  if (/^gemini-flash-latest$|^gemini-2\.5-flash$/.test(model)) return "google/gemini-2.5-flash";
+  return `google/${model}`;
+}
+
+/** Translate Gemini parts into OpenRouter chat content (text, image_url, input_audio). */
+export function toOpenRouterContent(parts: GeminiPart[]): Array<Record<string, unknown>> {
+  return parts.map((p) => {
+    if (p.text !== undefined) return { type: "text", text: p.text };
+    const mime = p.inlineData!.mimeType;
+    const data = p.inlineData!.data;
+    if (mime.startsWith("audio/")) {
+      const format = /mp3|mpeg/.test(mime) ? "mp3" : /ogg/.test(mime) ? "ogg" : "wav";
+      return { type: "input_audio", input_audio: { data, format } };
+    }
+    return { type: "image_url", image_url: { url: `data:${mime};base64,${data}` } };
+  });
+}
+
+/** Vision / audio-in / text through OpenRouter: the Google key is not needed, one billing pool. */
+async function callOpenRouter(opts: GeminiGenerateOptions, key: string): Promise<GeminiInlineResult> {
+  const res = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: openRouterModel(opts.model),
+      temperature: opts.temperature ?? 0,
+      ...(opts.responseMimeType === "application/json" ? { response_format: { type: "json_object" } } : {}),
+      messages: [{ role: "user", content: toOpenRouterContent(opts.parts) }],
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => ""); // allow-failopen: error body is diagnostic text only
+    throw new Error(`OpenRouter ${opts.model} HTTP ${res.status}: ${errBody.slice(0, 500)}`);
+  }
+  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
+  const text = (json.choices?.[0]?.message?.content ?? "").trim();
+  if (!text) throw new Error(`OpenRouter ${opts.model} returned an empty reply`);
+  return { text };
+}
+
 async function callOnce(opts: GeminiGenerateOptions): Promise<GeminiInlineResult> {
+  // Audio-out (TTS) needs Gemini's AUDIO modality; everything else goes through OpenRouter when its key is set.
+  const orKey = process.env["OPENROUTER_API_KEY"];
+  if (orKey && !opts.responseModalities) return callOpenRouter(opts, orKey);
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: opts.parts }],
     generationConfig: {
