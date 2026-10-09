@@ -35,6 +35,8 @@ import {
 import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { resolveEmailBody } from "../dictated-body.js";
+import { NO_ACTION_PREFIX } from "../tool-result.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 
 const log = childLogger({ module: "agent-tools:comms" });
@@ -118,19 +120,34 @@ export async function outboundQualityGate(
   };
 }
 
+/**
+ * Advice-only twin of outboundQualityGate for a body the founder wrote himself: the same two checks, but they only
+ * produce notes for the approval card and never block, count a retry, or change a word. Fail-open like the judge.
+ */
+export async function outboundAdvice(text: string, channel: Channel, tool?: string): Promise<string | undefined> {
+  const notes: string[] = [];
+  const brand = validateBrandVoice(text, channel);
+  if (!brand.valid) notes.push(...brand.violations);
+  const verdict = await judgeOutbound(text, channel, { tool });
+  if (verdict.verdict === "revise") notes.push(verdict.critique);
+  return notes.length > 0 ? `Editor notes (advice only; your wording is sent as written):\n${notes.join("\n")}` : undefined;
+}
+
 // ── Comms: send email (WRITE — requires approval) ─────────────────────────────
 
 /** Department-bound send_email — routing picks the correct Google account (ADR-036). */
 export function createSendEmailTool(department: string) {
   return tool(
-    async ({ to, subject, body, account_key }, config) => {
+    async ({ to, subject, body: modelBody, account_key }, config) => {
+    // The body the founder dictated is sent as he wrote it; the model's rewrite of it is discarded.
+    const { body, dictated } = resolveEmailBody(modelBody, String(config?.configurable?.["founder_text"] ?? ""));
     // G4: Postgres-backed daily send ceiling (enforced before HITL so we don't
     // waste an approval card on a quota-exceeded email). Limit is env-overridable.
     if (DAILY_EMAIL_LIMIT > 0) {
       const todayCount = await getDailyOutboundCount(TENANT, ["send_email"]);
       if (todayCount >= DAILY_EMAIL_LIMIT) {
         log.warn({ todayCount, limit: DAILY_EMAIL_LIMIT }, "Daily email quota reached — send blocked");
-        return `Daily email limit reached (${todayCount}/${DAILY_EMAIL_LIMIT} sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.`;
+        return `${NO_ACTION_PREFIX} Daily email limit reached (${todayCount}/${DAILY_EMAIL_LIMIT} sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.`;
       }
     }
 
@@ -139,16 +156,25 @@ export function createSendEmailTool(department: string) {
     // self-corrects with exact-delta guidance; past the cap we stop looping and
     // gate the closest draft (rule #16 — convergence lives in code, not the prompt).
     if (await hasRecentOutboundToRecipient(TENANT, "send_email", to)) {
-      return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
+      return `${NO_ACTION_PREFIX} Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
     }
 
-    const brand = await outboundQualityGate(body, "outreach", config, "send_email");
-    if (!brand.proceed) return `Revise before sending:\n${brand.fix}`;
+    // Founder-written body: critic and brand notes ride on the card as advice and never block (nothing is retried).
+    // Model-written body: the gate may send it back for a re-draft; a blocked send is "no action", never a completed one.
+    let brand: { proceed: boolean; fix?: string; warning?: string; retryKey: string };
+    if (dictated) {
+      brand = { proceed: true, retryKey: brandRetryKey(config?.configurable?.["thread_id"] as string | undefined, "outreach") };
+      const advice = await outboundAdvice(body, "outreach", "send_email");
+      if (advice) brand.warning = advice;
+    } else {
+      brand = await outboundQualityGate(body, "outreach", config, "send_email");
+      if (!brand.proceed) return `${NO_ACTION_PREFIX} the email was NOT sent. Revise before sending:\n${brand.fix}`;
+    }
 
     const rejected = await hitlGate({
       action: "send_email",
       title: `📧 Send email to ${to}${account_key ? ` from ${account_key}` : ""}?`,
-      summary: brand.warning ?? `Subject: ${subject}`,
+      summary: brand.warning ? `Subject: ${subject}\n${brand.warning}` : `Subject: ${subject}`,
       preview: body,
       args: { to, subject, body },
     }, config);
@@ -174,7 +200,7 @@ export function createSendEmailTool(department: string) {
 
     if (!res.success) return `Email send failed: ${res.error}`;
     const data = res.data as { skipped?: boolean } | undefined;
-    if (data?.skipped) return `This exact email was already sent earlier — not re-sent (idempotency).`;
+    if (data?.skipped) return `${NO_ACTION_PREFIX} This exact email was already sent earlier — not re-sent (idempotency).`;
     log.info({ to }, "Email sent via agent");
     return `✅ Email sent to ${to} (subject: "${subject}").`;
   },
