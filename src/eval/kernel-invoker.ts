@@ -83,68 +83,82 @@ function interruptedToolName(value: unknown): string | null {
   return null;
 }
 
-export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
+export interface KernelInvokerOptions {
+  /** Runs after every case. A gated tool pauses the eval thread and nothing answers it, so the caller cancels the
+   *  thread's pending hitl_approvals row here; otherwise it shows in the founder's /status (#1061). */
+  releaseThread?: (threadId: string) => Promise<unknown>;
+}
+
+export function makeKernelInvoker(kernel: CompiledKernel, opts: KernelInvokerOptions = {}): Invoker {
   return async function invoke(task: GoldenTask): Promise<Observation> {
     const threadId = `eval:${Date.now()}:${counter++}`;
-    // Match production's real recursion budget (src/gateway/kernel-run.ts et
-    // al. all pass this on every invoke/getState). Without it the eval ran at
-    // LangGraph's built-in default of 25, not this repo's configured 60 —
-    // the likely cause of 3 "Recursion limit of 25 reached" failures in the
-    // 2026-08-27 report (docs/EVAL-AUDIT-2026-08-28.md D5/LIMITATIONS.md B5).
-    const config = {
-      configurable: { thread_id: threadId },
-      recursionLimit: OFFICE_RECURSION_LIMIT,
-    };
     try {
-      await seedPriorTurns(kernel as unknown as SeedableKernel, config, threadId, task.priorTurns ?? []);
-      const res = await kernel.invoke(
-        {
-          turn: {
-            id: threadId,
-            chat_id: "eval",
-            received_at: new Date().toISOString(),
-            raw_input: task.input,
-          },
-        },
-        config,
-      );
-
-      const planSteps = res.mission.plan?.steps ?? [];
-      const route = (planSteps[0]?.worker ?? null) as Department | null;
-      const steps: PlanStepObservation[] = planSteps.map((s) => ({
-        worker: s.worker as Department,
-        objective: s.objective,
-      }));
-
-      const state = (await kernel.getState(config)) as {
-        tasks?: Array<{ interrupts?: Array<{ value: unknown }> }>;
-        values?: { step_receipts?: Record<string, Array<{ tool: string; ok: boolean }>> };
-      };
-      const pendingInterrupts = (state.tasks ?? []).flatMap((t) => t.interrupts ?? []);
-      const hadInterrupt = pendingInterrupts.length > 0;
-
-      const settledReceipts = res.results.flatMap((r) => ("tool_receipts" in r ? r.tool_receipts ?? [] : []));
-      // step_receipts is keyed by step_id and only reset by the NEXT turn's
-      // plan node, so within this one turn every entry belongs to a step of
-      // THIS run regardless of whether that step ended ok, failed, or paused.
-      const inFlightReceipts = Object.values(state.values?.step_receipts ?? {}).flat();
-      const interruptedTools = pendingInterrupts
-        .map((i) => interruptedToolName(i.value))
-        .filter((name): name is string => name !== null);
-
-      const toolCalls: ToolCallObservation[] = [
-        ...settledReceipts.map((r) => ({ tool: r.tool, ok: r.ok })),
-        ...inFlightReceipts.map((r) => ({ tool: r.tool, ok: r.ok })),
-        // Paused-on-approval is the CORRECT behaviour for a gated tool, not a
-        // failure — recorded ok:true so scoreToolSelection's name-presence
-        // check sees it as observed without asserting the send is confirmed.
-        ...interruptedTools.map((tool) => ({ tool, ok: true })),
-      ];
-      const tools = [...new Set(toolCalls.map((t) => t.tool))];
-
-      return { route, tools, hadInterrupt, steps, toolCalls, command: kernelCommand(res as never), reply: res.reply };
-    } catch (err) {
-      return { route: null, tools: [], hadInterrupt: false, error: (err as Error).message };
+      return await observe(kernel, task, threadId);
+    } finally {
+      await opts.releaseThread?.(threadId).catch(() => undefined); // allow-failopen: the case's result stands; /status also skips eval threads
     }
   };
+}
+
+async function observe(kernel: CompiledKernel, task: GoldenTask, threadId: string): Promise<Observation> {
+  // Match production's real recursion budget (src/gateway/kernel-run.ts et
+  // al. all pass this on every invoke/getState). Without it the eval ran at
+  // LangGraph's built-in default of 25, not this repo's configured 60 —
+  // the likely cause of 3 "Recursion limit of 25 reached" failures in the
+  // 2026-08-27 report (docs/EVAL-AUDIT-2026-08-28.md D5/LIMITATIONS.md B5).
+  const config = {
+    configurable: { thread_id: threadId },
+    recursionLimit: OFFICE_RECURSION_LIMIT,
+  };
+  try {
+    await seedPriorTurns(kernel as unknown as SeedableKernel, config, threadId, task.priorTurns ?? []);
+    const res = await kernel.invoke(
+      {
+        turn: {
+          id: threadId,
+          chat_id: "eval",
+          received_at: new Date().toISOString(),
+          raw_input: task.input,
+        },
+      },
+      config,
+    );
+
+    const planSteps = res.mission.plan?.steps ?? [];
+    const route = (planSteps[0]?.worker ?? null) as Department | null;
+    const steps: PlanStepObservation[] = planSteps.map((s) => ({
+      worker: s.worker as Department,
+      objective: s.objective,
+    }));
+
+    const state = (await kernel.getState(config)) as {
+      tasks?: Array<{ interrupts?: Array<{ value: unknown }> }>;
+      values?: { step_receipts?: Record<string, Array<{ tool: string; ok: boolean }>> };
+    };
+    const pendingInterrupts = (state.tasks ?? []).flatMap((t) => t.interrupts ?? []);
+    const hadInterrupt = pendingInterrupts.length > 0;
+
+    const settledReceipts = res.results.flatMap((r) => ("tool_receipts" in r ? r.tool_receipts ?? [] : []));
+    // step_receipts is keyed by step_id and only reset by the NEXT turn's
+    // plan node, so within this one turn every entry belongs to a step of
+    // THIS run regardless of whether that step ended ok, failed, or paused.
+    const inFlightReceipts = Object.values(state.values?.step_receipts ?? {}).flat();
+    const interruptedTools = pendingInterrupts
+      .map((i) => interruptedToolName(i.value))
+      .filter((name): name is string => name !== null);
+
+    const toolCalls: ToolCallObservation[] = [
+      ...settledReceipts.map((r) => ({ tool: r.tool, ok: r.ok })),
+      ...inFlightReceipts.map((r) => ({ tool: r.tool, ok: r.ok })),
+      // Paused-on-approval is the CORRECT behaviour for a gated tool, not a
+      // failure — recorded ok:true so scoreToolSelection's name-presence
+      // check sees it as observed without asserting the send is confirmed.
+      ...interruptedTools.map((tool) => ({ tool, ok: true })),
+    ];
+    const tools = [...new Set(toolCalls.map((t) => t.tool))];
+
+    return { route, tools, hadInterrupt, steps, toolCalls, command: kernelCommand(res as never), reply: res.reply };
+  } catch (err) {
+    return { route: null, tools: [], hadInterrupt: false, error: (err as Error).message };
+  }
 }

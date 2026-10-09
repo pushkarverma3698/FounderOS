@@ -51,9 +51,13 @@ export async function setCachedScrape(key: string, results: ScrapeResult[]): Pro
  * (delete prior chunks, re-insert) — re-scraping a URL refreshes, never duplicates.
  * Best-effort: returns the number of chunks written; 0 on any failure (logged).
  */
-export async function ingestResearch(pages: ScrapeResult[]): Promise<number> {
+export async function ingestResearch(pages: ScrapeResult[], signal?: AbortSignal): Promise<number> {
   let total = 0;
   for (const page of pages) {
+    if (signal?.aborted) {
+      log.warn({ ingested: total, pages: pages.length }, "research ingest stopped: the turn was aborted");
+      break;
+    }
     if (!page.markdown || page.markdown.trim().length === 0) continue;
     try {
       const chunks = chunkText(page.markdown);

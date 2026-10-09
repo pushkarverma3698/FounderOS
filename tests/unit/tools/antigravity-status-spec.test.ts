@@ -46,3 +46,33 @@ describe("describeTaskStatus: spec stages", () => {
     expect(describeTaskStatus(facts(["antigravity", "agent:spec-review", "agent:ready"]), NOW)).toMatch(/Queued/);
   });
 });
+
+describe("describeTaskStatus: a spec that is stuck says why", () => {
+  it("agent:spec while Claude Code's weekly limit holds: names the wall and the time, promises no card", () => {
+    const f = { ...facts(["antigravity", "agent:spec"]), claudeBlock: { kind: "quota" as const, until: new Date("2026-10-11T00:00:00Z") } };
+    const text = describeTaskStatus(f, NOW);
+    expect(text).toMatch(/Claude Code/);
+    expect(text).toMatch(/2026-10-11 00:00 UTC/);
+    expect(text).not.toMatch(/card will follow/i);
+  });
+
+  it("agent:spec while Claude Code's token is refused: says it needs a new login", () => {
+    const f = { ...facts(["antigravity", "agent:spec"]), claudeBlock: { kind: "auth" as const, until: null } };
+    expect(describeTaskStatus(f, NOW)).toMatch(/login|token/i);
+  });
+
+  it("agent:spec with failed attempts: shows the attempt count and the last problem", () => {
+    const f = {
+      ...facts(["antigravity", "agent:spec"]),
+      comments: [{ body: "<!-- pass-p-attempt: 2 --> attempt 2 of 3 did not produce a usable spec; trying again next tick:\n\nthe contract is not valid JSON", createdAt: "2026-10-06T09:55:00Z" }],
+    };
+    const text = describeTaskStatus(f, NOW);
+    expect(text).toMatch(/attempt 2 of 3/);
+    expect(text).toMatch(/not valid JSON/);
+  });
+
+  it("an expired quota wall is ignored", () => {
+    const f = { ...facts(["antigravity", "agent:spec"]), claudeBlock: { kind: "quota" as const, until: new Date("2026-10-05T00:00:00Z") } };
+    expect(describeTaskStatus(f, NOW)).toMatch(/being drafted/);
+  });
+});

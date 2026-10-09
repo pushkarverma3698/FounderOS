@@ -216,6 +216,14 @@ pass_p_issue_body() {
   as_claude_agent 'cd "$1" && exec </dev/null && unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN && timeout "$3" claude -p "$(cat "$1.prompt")" --model "$2" --dangerously-skip-permissions' \
     "$wd" "$PASS_P_MODEL" "$PASS_P_TIMEOUT_SEC" >"$tmp/run.log" 2>&1
   run_rc=$?
+  # A usage or auth wall is Claude Code's, not this spec's: claude exits 0 on a weekly limit, so read the text whatever the
+  # code. It records the wall, tells the founder once, and costs the issue no attempt (#1005, #1030: three spent on a limit).
+  local wall
+  wall="$(classify_agy_failure "$tmp/run.log")"
+  if [[ "$wall" == quota || "$wall" == auth ]]; then
+    claude_wall "$wall" "$tmp/run.log"
+    return 0
+  fi
   if [[ "$run_rc" -ne 0 ]]; then
     pass_p_reject "$issue" "the Claude run ended with exit ${run_rc}: $(tail -n 3 "$tmp/run.log" | tr '\n' ' ')"
     return 0
@@ -372,6 +380,8 @@ pass_p_run() {
   # A card at night would sit unseen, and the run that wrote it would have been paid for twice: wait for the morning.
   # A forced issue (a job the founder just asked for) is the exception: he is awake and waiting for its card.
   if [[ -z "$FORCE_ISSUE" ]] && tg_is_quiet 2>/dev/null; then log "pass P: Telegram quiet hours; no spec is written now"; return 0; fi
+  # The spec is written by Claude Code: while its wall holds, a run only burns an attempt on a limit message.
+  if claude_blocked; then log "pass P: Claude Code is blocked ($(claude_block_class)); no spec is written now"; return 0; fi
   local issue
   for issue in $(pass_p_pick); do
     [[ -n "$issue" ]] || continue
