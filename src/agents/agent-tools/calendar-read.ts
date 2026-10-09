@@ -53,7 +53,7 @@ export const listCalendarEvents = tool(
     schema: z.object({
       from: z.string().optional().nullable().describe("Start: YYYY-MM-DD (that day) or ISO 8601 datetime. Default: today."),
       days: z.number().optional().nullable().describe("How many days from the start, 1-31 (default 1)."),
-      account: z.string().optional().nullable().describe("Google account: turicks | personal | naggar | a name added with /login google add. Default: turicks."),
+      account: z.string().optional().nullable().describe("Google account: personal | a name added with /login google add (e.g. turicks, naggar if signed in). Default: personal."),
     }),
   },
 );
