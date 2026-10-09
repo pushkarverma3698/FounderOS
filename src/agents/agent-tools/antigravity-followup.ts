@@ -83,8 +83,11 @@ export const requeueAntigravityTask = tool(
       "Queue an EXISTING issue (requires founder approval) — for 'start work on #N', 'dispatch it again', " +
       "'retry #N', 'it hasn't been picked up, dispatch it'. Reads the issue first: if a merged PR already fixes it, " +
       "says so with the link and queues nothing. Re-opens a closed issue that never merged, clears agent:failed, " +
-      "sets agent:ready (agent:spec for an issue no agent has had, when the spec pipeline is on). Refuses while the " +
-      "task is working, in review, blocked or merged. Pass founder_request (his words, verbatim). " +
+      "sets agent:ready (agent:spec for an issue no agent has had, when the spec pipeline is on). When pr-brain " +
+      "BLOCKED the issue's PR, this is the tool for 'fix it' / 'dispatch agy to fix the issues in the same branch': one card " +
+      "lists every blocker, then the fix starts NOW on that PR's branch (no cron wait, no new issue). Refuses, with the real " +
+      "reason, only for a merged fix, a run claimed under 60 min ago, a PR pr-brain has not reviewed yet or one it cleared. " +
+      "Never tell the founder it is 'already working' unless the answer says a run claimed it. Pass founder_request (his words, verbatim). " +
       "Never use dispatch_antigravity_task to file a new issue for work that already has one.",
     schema: requeueSchema,
   },

@@ -40,6 +40,11 @@
 #                                   # as before. --wait-lock waits up to 3600s for a running tick instead of skipping. A forced
 #                                   # issue runs no sweep of other issues (release_stale_claims, redispatch_unresolved_reviews)
 #                                   # and no quiet-hours skip: the founder asked for it now.
+#   agent-dispatch --issue 115 --repo owner/name --stage fix --head <sha> --wait-lock 3600
+#                                   # the founder's "fix it" on a PR pr-brain blocked: Pass B's re-dispatch for THAT issue only,
+#                                   # now, on the PR's own branch, with every blocker in the prompt. The founder's decision lifts the
+#                                   # 3-attempt cap. --head is the commit he was shown: a PR that moved since is not fixed blind.
+#                                   # Same dispatch lock as the cron tick, so the two never fix one PR at once.
 #
 # Repos: DISPATCH_REPO_ALLOWLIST in src/tools/dispatch-repos.ts is the ONLY list, and this daemon asks it
 # (lib/dispatch-repos.sh runs scripts/print-dispatch-repos.ts in the deployed checkout). ISSUE_REPOS / ISSUE_REPO in
@@ -163,7 +168,8 @@ NEEDS_BRIEF_LABEL="agent:needs-brief"
 DRY_RUN=0
 LIST_ONLY=0
 FORCE_ISSUE=""
-FORCE_STAGE=""   # spec|build with --issue: which one stage of that issue to run (empty = both, the old behaviour)
+FORCE_STAGE=""   # spec|build|fix with --issue: which one stage of that issue to run (empty = both, the old behaviour)
+FORCE_HEAD=""    # fix only: the PR head the founder was shown when he asked for the fix
 
 TG_DAEMON_NAME="${TG_DAEMON_NAME:-agent-dispatch}"
 log() {
@@ -441,6 +447,7 @@ while [[ $# -gt 0 ]]; do
     --issue) FORCE_ISSUE="${2:-}"; shift 2 ;;
     --repo) FORCE_REPO="${2:-}"; shift 2 ;;
     --stage) FORCE_STAGE="${2:-}"; shift 2 ;;
+    --head) FORCE_HEAD="${2:-}"; shift 2 ;;
     --check-brief) CHECK_BRIEF=1; shift; if [[ $# -gt 0 && "$1" != --* ]]; then BRIEF_FILE="$1"; shift; fi ;;
     -h|--help) sed -n '3,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "agent-dispatch: unknown argument '$1' (try --help)" >&2; exit 2 ;;
@@ -454,9 +461,17 @@ if [[ "$CHECK_BRIEF" -eq 1 ]]; then
 fi
 
 case "$FORCE_STAGE" in
-  ""|spec|build) ;;
-  *) echo "agent-dispatch: --stage is spec or build, got '${FORCE_STAGE}'" >&2; exit 2 ;;
+  ""|spec|build|fix) ;;
+  *) echo "agent-dispatch: --stage is spec, build or fix, got '${FORCE_STAGE}'" >&2; exit 2 ;;
 esac
+if [[ "$FORCE_STAGE" == fix && -z "$FORCE_REPO" ]]; then
+  echo "agent-dispatch: --stage fix needs --repo (a bare issue number is ambiguous across repos)" >&2
+  exit 2
+fi
+if [[ -n "$FORCE_HEAD" && ( "$FORCE_STAGE" != fix || ! "$FORCE_HEAD" =~ ^[0-9a-f]{7,40}$ ) ]]; then
+  echo "agent-dispatch: --head is a commit sha (7-40 hex) and only goes with --stage fix" >&2
+  exit 2
+fi
 if [[ -n "$FORCE_STAGE" && -z "$FORCE_ISSUE" ]]; then
   echo "agent-dispatch: --stage needs --issue" >&2
   exit 2
@@ -1303,6 +1318,38 @@ nonblockers_count() { # nonblockers_count PR HEAD HEAD_REF
   return 0
 }
 
+# 1d. The BLOCKER findings of pr-brain's verdict for this head, as numbered text for the executor's prompt. Read from the
+#     typed verdict block (the LAST fenced json block whose head_sha is this head), never from prose; empty when there is
+#     none, in which case the prompt falls back to "read the review yourself". Every blocker is listed, none summarised.
+BLOCKER_TEXT=""
+blocker_text() { # blocker_text PR HEAD
+  BLOCKER_TEXT=""
+  local out
+  out=$(gh pr view "$1" --repo "$REPO" --json comments 2>/dev/null \
+    | jq -r --arg head "$2" '
+        [.comments[].body] as $b
+        | ([ $b[]
+             | [match("```json[^\\n]*\\n([\\s\\S]*?)```"; "g").captures[0].string] | last // empty
+             | try fromjson catch empty
+             | select(type == "object" and .version == 1 and .head_sha == $head and (.findings | type) == "array")
+           ] | last) as $v
+        | if $v == null then empty
+          else [$v.findings[] | select(.severity == "blocker")] | to_entries
+               | map("\(.key + 1). " + (if .value.file then "[\(.value.file)\(if .value.line then ":\(.value.line)" else "" end)] " else "" end)
+                     + .value.claim + (if .value.evidence then "  (evidence: \(.value.evidence))" else "" end))
+               | join("\n") end' 2>/dev/null) || return 0
+  BLOCKER_TEXT="$out"
+  return 0
+}
+
+# A founder-requested fix that could not run. He is told, at any hour (the leading warning sign is what tg-quiet lets through),
+# because the cron will not pick this up for him and a silent no-op is how "already working" got said when nothing was.
+fix_refused() { # fix_refused ISSUE PR REASON
+  log "fix refused for #${1}${2:+/PR #${2}}: ${3}"
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+  notify "⚠️ agent-dispatch: no fix started for ${REPO}#${1}: ${3}."
+}
+
 # 2. Re-dispatch: find PRs pr-brain reviewed and left uncleared (still draft after
 #    a brain-reviewed marker for the CURRENT head SHA — pr-brain's own vocabulary
 #    for "REVIEWED, left as draft — not cleared"). This is reading pr-brain's
@@ -1310,12 +1357,21 @@ nonblockers_count() { # nonblockers_count PR HEAD HEAD_REF
 #    changed and pr-brain's own idempotency check re-reviews it next tick with no
 #    help needed here.
 redispatch_unresolved_reviews() {
-  local issues; issues=$(gh issue list --repo "$REPO" --label agent:review --state open --json number --jq '.[].number')
+  # A founder-requested fix (--stage fix) is this same re-dispatch for ONE issue, now. The label sweep is replaced by the
+  # named issue; a refusal below is said out loud (fix_refused), because nobody else will tell him why nothing ran.
+  local forced=0 issues
+  if [[ "$FORCE_STAGE" == fix ]]; then
+    forced=1
+    issues="$FORCE_ISSUE"
+  else
+    issues=$(gh issue list --repo "$REPO" --label agent:review --state open --json number --jq '.[].number')
+  fi
   [[ -z "$issues" ]] && return 0
   while read -r issue; do
     [[ -z "$issue" ]] && continue
     local pr; pr=$(pr_for_issue "$issue")
     if [[ -z "$pr" ]]; then
+      if [[ "$forced" -eq 1 ]]; then fix_refused "$issue" "" "it has no open pull request, so there is no branch to fix"; continue; fi
       close_out_finished_review "$issue"
       continue
     fi
@@ -1323,6 +1379,16 @@ redispatch_unresolved_reviews() {
     local is_draft head_sha
     is_draft=$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq .isDraft)
     head_sha=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid)
+    if [[ "$forced" -eq 1 ]]; then
+      if [[ -n "$FORCE_HEAD" && "${head_sha:0:7}" != "${FORCE_HEAD:0:7}" ]]; then
+        fix_refused "$issue" "$pr" "PR #${pr} moved since you asked (you saw ${FORCE_HEAD:0:7}, it is at ${head_sha:0:7}). Nothing was fixed; pr-brain reviews the new head and the next card lists what is still blocked"
+        continue
+      fi
+      if [[ "$is_draft" != "true" ]]; then
+        fix_refused "$issue" "$pr" "PR #${pr} is not a draft: pr-brain cleared it, so there is no blocker to fix"
+        continue
+      fi
+    fi
     # A PR that is not a draft was cleared (PASS). It is the executor's again only for ONE pass over the review's
     # non-blocking findings, and only while required CI is not red. This never touches the PASS: no label, no draft.
     local mode=review
@@ -1343,7 +1409,14 @@ redispatch_unresolved_reviews() {
       | jq -r --arg m "<!-- brain-reviewed: ${head_sha}" '[.comments[].body | select(contains($m))] | length')
     local trigger="reviewed at ${head_sha:0:8} and left draft"
     [[ "$mode" == nonblockers ]] && trigger="passed review at ${head_sha:0:8} with ${NB_COUNT} non-blocking finding(s)"
-    if [[ "${reviewed_this_head:-0}" -eq 0 ]]; then
+    if [[ "${reviewed_this_head:-0}" -eq 0 && "$forced" -eq 1 ]]; then
+      required_ci_state "$pr" "$REPO"
+      if [[ "$CI_STATE" != red ]]; then
+        fix_refused "$issue" "$pr" "pr-brain has not reviewed ${head_sha:0:7} yet, so there is no verdict to fix. Its next run reviews it and the card lists the blockers"
+        continue
+      fi
+      trigger="required CI is red at ${head_sha:0:8} (${CI_DETAIL})"
+    elif [[ "${reviewed_this_head:-0}" -eq 0 ]]; then
       # Not reviewed at this head. pr-brain spends no review on a head whose REQUIRED CI is red (a review cannot
       # clear it), so nothing will ever stamp it, and without this the executor would never hear that its PR fails
       # its own checks. The red check is the signal; the brief is the failing check (see checks_state below).
@@ -1359,7 +1432,8 @@ redispatch_unresolved_reviews() {
 
     # A PASS is never turned into a block: at the cap the non-blocking pass is simply not sent.
     [[ "$mode" == nonblockers && "$attempts" -ge "$MAX_ATTEMPTS" ]] && continue
-    if [[ "$attempts" -ge "$MAX_ATTEMPTS" ]]; then
+    # The cap bounds the unattended loop. A founder who asks for another fix has decided: his run is counted, not refused.
+    if [[ "$attempts" -ge "$MAX_ATTEMPTS" && "$forced" -eq 0 ]]; then
       if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY RUN would mark #${issue}/PR #${pr} agent:blocked (attempts=${attempts})"
         continue
@@ -1388,6 +1462,7 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
+    [[ "$forced" -eq 1 ]] && trigger="${trigger}, and the founder asked for the fix"
     log "PR #${pr} ${trigger} — re-dispatching ${ename} (attempt $((attempts + 1)))"
     local checks_state; checks_state=$(gh pr checks "$pr" --repo "$REPO" --json state --jq \
       'if any(.[]; .state=="FAILURE") then "ci_failed" else "ci_ok_or_pending" end' 2>/dev/null || echo "ci_ok_or_pending")
@@ -1416,11 +1491,20 @@ redispatch_unresolved_reviews() {
         echo "${UNTRUSTED_GH_NOTE}"
       } >"$prompt_file"
     else
+      blocker_text "$pr" "$head_sha"
       {
         echo "PR #${pr} in ${REPO} was reviewed by pr-brain (the independent reviewer) and left as a draft, not cleared. Read the"
         echo "review comments via 'gh pr view ${pr} --json comments' yourself — do not assume what they say."
-        echo "Address any BLOCKER finding, re-run the verify commands from the original issue, then push to the"
-        echo "existing branch ${branch}. Do not open a new PR. Do not merge."
+        if [[ -n "$BLOCKER_TEXT" ]]; then
+          echo "Its verdict for ${head_sha:0:8} lists these BLOCKERS. Fix every blocker, one by one: a blocker left behind fails the next review."
+          echo "$BLOCKER_TEXT"
+          echo "Check each against the repo's own tooling (package.json scripts, the existing test files) before you change anything,"
+          echo "and do not add a new test framework or a second test runner."
+        else
+          echo "Address any BLOCKER finding."
+        fi
+        echo "Re-run the verify commands from the original issue, then push to the existing branch ${branch}. Do not open a new PR."
+        echo "Do not merge."
         echo "${UNTRUSTED_GH_NOTE}"
       } >"$prompt_file"
     fi
@@ -1474,6 +1558,13 @@ redispatch_unresolved_reviews() {
       fi
     fi
     rm -f "$prompt_file" "$agy_log"
+
+    # The founder reopened a PR that had hit the cap (agent:blocked): it is in the review loop again, so the board and the
+    # next pr-brain pass see it as in review, not as stopped. Done after the run, so a wall that did nothing changes nothing.
+    if [[ "$forced" -eq 1 ]]; then
+      gh issue edit "$issue" --repo "$REPO" --remove-label agent:blocked --add-label agent:review >/dev/null 2>&1 || true
+      gh pr edit "$pr" --repo "$REPO" --remove-label agent:blocked >/dev/null 2>&1 || true
+    fi
 
     if [[ "$mode" == nonblockers ]]; then
       # One comment carries both the counted attempt and the once-only stamp, so a half-written pair cannot loop.
@@ -1532,8 +1623,8 @@ run_tick() {
     # calling convention) skips nothing, unchanged from before.
     if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
       log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
-    elif [[ "$FORCE_STAGE" == spec ]]; then
-      log "forced issue #$FORCE_ISSUE, stage spec — no claim in $REPO"
+    elif [[ "$FORCE_STAGE" == spec || "$FORCE_STAGE" == fix ]]; then
+      log "forced issue #$FORCE_ISSUE, stage ${FORCE_STAGE} — no claim in $REPO"
     elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
       brief_checks=0
       candidates="$(pick_ready_issues)"
@@ -1560,9 +1651,13 @@ run_tick() {
       release_stale_claims
       # A wall the claim just hit is already on disk, so engine_ready keeps this pass off that CLI.
       redispatch_unresolved_reviews
+    elif [[ "$FORCE_STAGE" == fix && "$REPO" == "$FORCE_REPO" ]]; then
+      # The one exception: the founder's fix IS the re-dispatch for that issue, so it runs the same function (same engine
+      # wall checks, same attempt comment) on the named issue only.
+      redispatch_unresolved_reviews
     fi
     # Flag off: returns at once. Flag on: at most one new coding ask gets its spec written and sent for approval.
-    if [[ "$FORCE_STAGE" != build ]]; then
+    if [[ "$FORCE_STAGE" != build && "$FORCE_STAGE" != fix ]]; then
       if [[ -z "$FORCE_REPO" || "$REPO" == "$FORCE_REPO" ]]; then pass_p_run; fi
     fi
   done
