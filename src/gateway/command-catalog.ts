@@ -14,8 +14,13 @@
 import type { CommandCatalogEntry } from "../kernel/index.js";
 import { COMMAND_MENU } from "./command-menu.js";
 
-/** Typed-only: /reset wipes the thread, /start is the welcome screen. Plain words never reach them. */
-export const NEVER_FROM_PLAIN_WORDS: ReadonlySet<string> = new Set(["reset", "start"]);
+/**
+ * Typed-only: /reset wipes the thread, /start is the welcome screen. Plain words never reach them.
+ * /remind is here for the opposite reason: its handler IS a kernel turn ("Remind me ..." -> admin set_reminder),
+ * so the planner routing "remind me in 3 minutes" to /remind re-entered the planner, which offered the same
+ * card again, forever, with no reminders row (live QA 2026-10-09). The planner plans set_reminder directly.
+ */
+export const NEVER_FROM_PLAIN_WORDS: ReadonlySet<string> = new Set(["reset", "start", "remind"]);
 
 /** Commands that only read: they run the moment the planner picks them. */
 export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
