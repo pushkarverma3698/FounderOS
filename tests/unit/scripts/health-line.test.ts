@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { healthLine, OPENROUTER_MIN_USD, parseClaudePing, type HealthReads } from "../../../scripts/lib/health-line.js";
+import { CLAUDE_PROBE_CMD, gwsErrorLine, healthLine, OPENROUTER_MIN_USD, parseClaudePing, type HealthReads } from "../../../scripts/lib/health-line.js";
 
 const CLAUDE_OK = JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "ok" });
 const CLAUDE_LIMITED = JSON.stringify({
@@ -108,5 +108,23 @@ describe("healthLine", () => {
     const h = healthLine(r);
     expect(h.ok).toBe(true);
     expect(h.lines.join("\n")).toContain("pr-brain.off");
+  });
+});
+
+describe("gwsErrorLine", () => {
+  it("skips the keyring banner and prints the line that carries the error", () => {
+    const raw = "Using keyring backend: keyring\nerror[auth]: Authentication failed: Failed to get token: Server error: invalid_grant: Bad Request";
+    expect(gwsErrorLine(raw)).toContain("invalid_grant");
+    expect(gwsErrorLine(raw)).not.toContain("keyring");
+  });
+  it("falls back to the first non-banner line, then the banner itself", () => {
+    expect(gwsErrorLine("Using keyring backend: keyring\nETIMEDOUT")).toBe("ETIMEDOUT");
+    expect(gwsErrorLine("Using keyring backend: keyring")).toBe("Using keyring backend: keyring");
+  });
+});
+
+describe("CLAUDE_PROBE_CMD", () => {
+  it("reads stdin from /dev/null so claude -p does not warn about missing stdin data", () => {
+    expect(CLAUDE_PROBE_CMD).toMatch(/claude -p ok .*< \/dev\/null/);
   });
 });

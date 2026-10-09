@@ -35,7 +35,7 @@ import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 import { answerSelfKnowledge } from "./self-knowledge.js";
 import { screenBlockFor, type ScreenSource } from "./screen.js";
 import { recentActivityBlockFor, type RecentActivitySource } from "./recent-activity.js";
-import { inFlightBlockFor, type InFlightSource } from "./in-flight.js";
+import { inFlightBlockFor, inFlightState, type InFlightSource } from "./in-flight.js";
 import { stripFalsePromises } from "./promise-guard.js";
 import { commandHistoryReply, needsTapFor } from "./command-tap.js";
 
@@ -314,7 +314,10 @@ export function makePlanNode(
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
-          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock()), inFlightBlockFor(inFlight, config?.configurable?.["thread_id"], clock())];
+          const inFlightBlock = inFlightBlockFor(inFlight, config?.configurable?.["thread_id"], clock());
+          // The trace field that proves live whether the block was built (kernel-run.ts wires traceNote to trace.event).
+          void inFlightBlock.then((b) => (config?.configurable?.["traceNote"] as ((d: Record<string, unknown>) => void) | undefined)?.({ inFlight: inFlightState(b) }));
+          const dataBlocks = [screenBlockFor(screen, config?.configurable?.["thread_id"], clock()), recentActivityBlockFor(recentActivity, config?.configurable?.["thread_id"], clock()), inFlightBlock];
           const base: BaseMessage[] = [
             new SystemMessage([systemPrompt, plannerNowLine(clock), ...(await Promise.all(dataBlocks))].filter(Boolean).join("\n\n")),
             ...historyMessages(conversation),

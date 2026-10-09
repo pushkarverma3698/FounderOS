@@ -165,13 +165,16 @@ retire_kick_cron
 
 # 5b. The morning journey run (AG-051). One line runs scripts/journey-daily.ts at 02:30 UTC (08:00 IST): J1-J5, journey B
 # and C inline, journey A's last result, the health line, one Telegram message. The hand-installed journey-where (B) and
-# journey-jobs-group (C) lines are removed because the morning run covers them; journey A keeps its own 3-day line.
+# journey-jobs-group (C) lines are removed because the morning run covers them. Journey A runs from its own line, daily
+# at 01:30 UTC, so the morning run scores a result under an hour old; it replaces the old 3-day line, which let a 48 h
+# result score green (#1058). A's run is bounded by JOURNEY_CODING_LIMIT_MIN (45) and ends before 02:30.
 # Same safety as the kick cron: the new crontab is read back, and the old one restored if any kept line did not survive.
 JOURNEY_CRON_LINE='30 2 * * * cd /opt/founderos && PATH=/usr/local/bin:/usr/bin:/bin node --import tsx/esm --env-file=.env scripts/journey-daily.ts >> $HOME/.claude/journey-daily.log 2>&1'
+JOURNEY_A_CRON_LINE='30 1 * * * cd /opt/founderos && PATH=/usr/local/bin:/usr/bin:/bin node --import tsx/esm --env-file=.env scripts/journey-coding.ts >> $HOME/.claude/journey-a.log 2>&1'
 JOURNEY_CRON_NOTE=""
 ensure_journey_cron() {
   local cron current wanted after line removed
-  local pattern='^[^#]*scripts/journey-(where|jobs-group|daily)\.ts'
+  local pattern='^[^#]*scripts/journey-(where|jobs-group|daily|coding)\.ts'
   if [[ -n "${SYNC_DAEMONS_JOURNEY_CRONTAB:-}" ]]; then
     cron="$SYNC_DAEMONS_JOURNEY_CRONTAB"
   else
@@ -186,12 +189,13 @@ ensure_journey_cron() {
   command -v "$cron" >/dev/null 2>&1 || return 0
   current="$("$cron" -l 2>/dev/null)" || current=""
   wanted="$(printf '%s\n' "$current" | grep -Ev "$pattern" | grep -v '^$')"
-  wanted="$(printf '%s\n%s' "$wanted" "$JOURNEY_CRON_LINE" | grep -v '^$')"
+  wanted="$(printf '%s\n%s\n%s' "$wanted" "$JOURNEY_A_CRON_LINE" "$JOURNEY_CRON_LINE" | grep -v '^$')"
   if [[ "$wanted" == "$(printf '%s\n' "$current" | grep -v '^$')" ]]; then
     JOURNEY_CRON_NOTE="journey cron already installed"
     return 0
   fi
-  removed="$(printf '%s\n' "$current" | grep -Ec '^[^#]*scripts/journey-(where|jobs-group)\.ts')"
+  # Old lines removed: B, C, and any A line that is not the daily one.
+  removed="$(printf '%s\n' "$current" | grep -E '^[^#]*scripts/journey-(where|jobs-group|coding)\.ts' | grep -cvxF -- "$JOURNEY_A_CRON_LINE" || true)"
   if ! printf '%s\n' "$wanted" | "$cron" - 2>/dev/null; then
     fail "could not install the journey cron"
   fi
@@ -204,11 +208,12 @@ ensure_journey_cron() {
     fi
   done <<<"$wanted"
   if [[ "$(grep -cxF -- "$JOURNEY_CRON_LINE" <<<"$after")" != 1 ]] \
+    || [[ "$(grep -cE '^[^#]*scripts/journey-coding\.ts' <<<"$after")" != 1 ]] \
     || grep -Eq '^[^#]*scripts/journey-(where|jobs-group)\.ts' <<<"$after"; then
     printf '%s\n' "$current" | "$cron" - 2>/dev/null
-    fail "the journey cron did not read back as exactly one daily line with no B/C lines; the old crontab was restored"
+    fail "the journey cron did not read back as one daily line, one journey A line and no B/C lines; the old crontab was restored"
   fi
-  JOURNEY_CRON_NOTE="journey cron installed: scripts/journey-daily.ts at 02:30 UTC (08:00 IST), $removed old journey lines removed"
+  JOURNEY_CRON_NOTE="journey cron installed: scripts/journey-coding.ts at 01:30 UTC, scripts/journey-daily.ts at 02:30 UTC (08:00 IST), $removed old journey lines removed"
 }
 ensure_journey_cron
 [[ -z "$JOURNEY_CRON_NOTE" ]] || echo "sync-daemons: $JOURNEY_CRON_NOTE"
