@@ -47,10 +47,10 @@ afterEach(() => {
 
 describe("MODEL_MAX_OUTPUT_TOKENS on every model", () => {
   const ids = [
-    "openrouter:google/gemini-3.6-flash",
+    "openrouter:google/gemini-3.8-flash",
     "anthropic:claude-sonnet-5-5",
-    "google-genai:gemini-3.6-flash",
-    "google-vertexai:gemini-3.6-flash",
+    "google-genai:gemini-3.8-flash",
+    "google-vertexai:gemini-3.8-flash",
     "openai:gpt-5-mini",
     "omnirouter:some-model",
   ];
@@ -61,7 +61,7 @@ describe("MODEL_MAX_OUTPUT_TOKENS on every model", () => {
   });
 
   it("honours an override", () => {
-    process.env["AGENT_MODEL"] = "openrouter:google/gemini-3.6-flash";
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-3.8-flash";
     process.env["MODEL_MAX_OUTPUT_TOKENS"] = "2048";
     expect(capOf(getModel())).toBe(2048);
   });

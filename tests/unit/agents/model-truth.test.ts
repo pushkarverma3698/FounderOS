@@ -3,7 +3,7 @@
  * answered the stage, not the primary model the run was constructed with.
  *
  * Prod 2026-10-07: WORKER_AGENT_MODEL=openrouter:inclusionai/ling-3.0-flash, yet
- * all 311 rows said google-genai:gemini-3.6-flash. Cause: enforceRunBudget() is
+ * all 311 rows said google-genai:gemini-3.8-flash. Cause: enforceRunBudget() is
  * built with AGENT_MODEL, and handleLLMEnd only used it as a fallback when the
  * response carried no model under the keys `model` / `model_id`. Providers do not
  * report it there (OpenAI-compatible: generationInfo.model_name; Gemini: nothing),
@@ -28,7 +28,7 @@ const { withCostIdentity } = await import("../../../src/gateway/kernel-boot.js")
 const { getWorkerModel } = await import("../../../src/agents/model.js");
 const truth = await import("../../../src/agents/model-truth.js");
 
-const PRIMARY = "google-genai:gemini-3.6-flash";
+const PRIMARY = "google-genai:gemini-3.8-flash";
 const LING = "openrouter:inclusionai/ling-3.0-flash";
 type Bindable = Parameters<typeof withCostIdentity>[0];
 

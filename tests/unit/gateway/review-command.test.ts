@@ -23,7 +23,7 @@ const WRITTEN = 1791118800; // epoch seconds the daemons last wrote their files
 const FIVE_MIN_LATER = (WRITTEN + 300) * 1000;
 
 const PR_BRAIN_FILE = [`written=${WRITTEN}`, "engine=agy", "reviewers=claude-sonnet-5-5-medium gemini-3.1-pro-high", "merge=0"].join("\n");
-const DISPATCH_FILE = [`written=${WRITTEN}`, "agy_model=gemini-3.6-flash-medium", "claude_model=sonnet"].join("\n");
+const DISPATCH_FILE = [`written=${WRITTEN}`, "agy_model=gemini-3.8-flash-medium", "claude_model=sonnet"].join("\n");
 
 type Files = { "pr-brain"?: string | null | Error; "agent-dispatch"?: string | null | Error };
 const LIVE_FILES: Files = { "pr-brain": PR_BRAIN_FILE, "agent-dispatch": DISPATCH_FILE };
@@ -71,7 +71,7 @@ describe("readReviewSetup — the models are what the daemons reported, not a gu
     expect(readReviewSetup(PR_BRAIN_FILE, DISPATCH_FILE)).toEqual({
       reviewers: ["claude-sonnet-5-5-medium", "gemini-3.1-pro-high"],
       merges: false,
-      agyModel: "gemini-3.6-flash-medium",
+      agyModel: "gemini-3.8-flash-medium",
       claudeModel: "sonnet",
       reviewerReportedAt: WRITTEN * 1000,
       writerReportedAt: WRITTEN * 1000,
@@ -113,7 +113,7 @@ describe("/review with no argument", () => {
     expect(r).toContain("Automatic PR review is ON");
     expect(r).toContain("Reviewer: claude-sonnet-5-5-medium, then gemini-3.1-pro-high");
     expect(r).toContain("never merges: you merge");
-    expect(r).toContain("Writer for /task: Google Antigravity on gemini-3.6-flash-medium");
+    expect(r).toContain("Writer for /task: Google Antigravity on gemini-3.8-flash-medium");
     expect(r).toContain("/review off");
     expect(f.state.writes).toEqual([]);
   });
@@ -159,7 +159,7 @@ describe("/review with no argument", () => {
     await handleReview(ctx, fakeSwitch(false, "ok", { "pr-brain": new Error("EACCES: permission denied"), "agent-dispatch": DISPATCH_FILE }).deps);
     expect(replies[0]).toContain("Automatic PR review is ON");
     expect(replies[0]).toContain("Could not read ~/.claude/pr-brain.effective: EACCES: permission denied");
-    expect(replies[0]).toContain("Writer for /task: Google Antigravity on gemini-3.6-flash-medium");
+    expect(replies[0]).toContain("Writer for /task: Google Antigravity on gemini-3.8-flash-medium");
   });
 });
 

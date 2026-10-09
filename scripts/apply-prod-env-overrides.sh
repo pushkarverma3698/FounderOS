@@ -126,8 +126,8 @@ fi
 # 2026-09-17: gemini-flash-latest (→ gemini-3.5-flash) is STILL the 2026-07-13
 # failure — live-probed today, 2/2 calls returned 503 "high demand", not a
 # one-off. gemini-2.5-flash is fully retired (404: "no longer available to new
-# users"; Google's own error names gemini-3.6-flash as the replacement).
-# Pinned AGENT_MODEL directly to gemini-3.6-flash instead of the rolling alias —
+# users"; Google's own error names gemini-3.8-flash as the replacement).
+# Pinned AGENT_MODEL directly to gemini-3.8-flash instead of the rolling alias —
 # live-probed 2/2 success, ~1-2s — so a future Google-side alias move can't
 # silently reintroduce the 2026-07-13 storm again. AGENT_FALLBACK_MODELS is
 # untouched: gemini-3.1-flash-lite still live-probes 200 today, so the existing
@@ -140,7 +140,7 @@ fi
 # (checked against /api/v1/models) — dropped from the chain. Per-role pools and the
 # worker primary come from the measured bench in docs/sessions/2026-10-04-model-pools.md:
 # workers + synthesizer on ling-3.0-flash (30x cheaper per call, same valid-args score),
-# planner primary UNCHANGED (gemini-3.6-flash is the only 36/36 model). Free models are
+# planner primary UNCHANGED (gemini-3.8-flash is the only 36/36 model). Free models are
 # fallbacks only. Planner primary review is due about 2026-10-11 (deepseek-v4.1-flash).
 # 2026-10-08: the AI Studio key's prepaid credit ran out (every google-genai call
 # returns 402), and the 10-07 chat audit found 2 of 10 founder asks answered right.
@@ -152,13 +152,13 @@ fi
 # on Sonnet (about 12K tokens a call). Golden set before/after: docs/sessions/2026-10-08-heavy-model-live-run.md.
 # 2026-10-08 (AG-050): Sonnet moved the golden set from 53% to 53% at about $0.33 a turn, so
 # the defaults go back to cheap models. The AI Studio key still returns 402 (probed at build
-# time), so all three go through OpenRouter: planner gemini-3.6-flash, workers ling-3.0-flash,
+# time), so all three go through OpenRouter: planner gemini-3.8-flash, workers ling-3.0-flash,
 # judge gemini-3.1-flash-lite (a different model from the drafter). Every fallback list is the
 # free Nemotron slug only (founder rule: no paid fallback; tests/unit/agents/model-output-cap.test.ts
 # fails on any slug without :free). Every model also carries MODEL_MAX_OUTPUT_TOKENS (default
 # 4096, src/core/model-output-cap.ts), so OpenRouter stops reserving a 65K output window.
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS|RUN_BUDGET_USD|RUN_BUDGET_TOKENS)=' .env > .env.patched || true
-primary_model=openrouter:google/gemini-3.6-flash
+primary_model=openrouter:google/gemini-3.8-flash
 worker_model=openrouter:inclusionai/ling-3.0-flash
 # SONNET_TRIAL: uncomment the next line to go back to Sonnet on planner and workers.
 # primary_model=openrouter:anthropic/claude-sonnet-5.5; worker_model=openrouter:anthropic/claude-sonnet-5.5

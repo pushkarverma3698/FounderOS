@@ -83,9 +83,9 @@ describe("buildExecutorPrompt: what the executor is told", () => {
     expect(ok()).toContain("`Moves: A`");
   });
 
-  it("forbids editing the locked tests and adding a dependency", () => {
+  it("forbids adding a dependency and requires making locked tests pass", () => {
     const p = ok();
-    expect(p).toMatch(/do not (edit|change|modify)[^.]*locked test/i);
+    expect(p).toMatch(/rewrite it into the correct framework before making it pass/i);
     expect(p).toMatch(/no new dependenc/i);
   });
 

@@ -50,7 +50,7 @@
 # independent of every candidate (AGY_EXECUTOR_MODELS), not just the first: a PR written by a fallback model is not
 # labelled with it, so excluding only the first would let that model review its own work. Keep the defaults of
 # PR_BRAIN_MODELS (claude-sonnet-5-5-medium, gemini-3.1-pro-high) out of this list.
-AGY_EXECUTOR_MODELS="${AGENT_DISPATCH_MODELS:-${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium gemini-3.1-flash-lite}}"
+AGY_EXECUTOR_MODELS="${AGENT_DISPATCH_MODELS:-${AGENT_DISPATCH_MODEL:-gemini-3.8-flash-medium gemini-3.1-flash-lite}}"
 AGY_EXECUTOR_MODELS="${AGY_EXECUTOR_MODELS//,/ }"
 AGY_EXECUTOR_MODEL="${AGY_EXECUTOR_MODELS%% *}"
 

@@ -38,7 +38,7 @@ Execution Brief for PR #${prNumber}:
 2. Checkout PR branch: \`gh pr checkout ${prNumber}\`
 3. Run mandatory gates: \`pnpm gate\`
 4. Perform adversarial review (check false successes, unescaped strings, wiring ratchets).
-5. If defects found: write smallest fix, run \`pnpm gate\`, commit & push directly.
+5. If defects found: write smallest fix, run \`pnpm gate\`, commit & push directly. If the defects cannot be fixed automatically or require founder clarification, formally block the PR using \`gh pr review ${prNumber} --request-changes -b "<reason>"\`. Do not just drop text comments.
 6. If 100% green: issue approval (\`gh pr review ${prNumber} --approve -b "Empirically verified."\`) and mark ready (\`gh pr ready ${prNumber}\`).
 7. Keep output concise.
 `;

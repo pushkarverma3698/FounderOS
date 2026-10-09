@@ -171,6 +171,7 @@ pass_p_prompt() {
   cat <<PROMPT
 You are writing a specification and ONE failing test for a coding task. You are NOT implementing it.
 This directory is a read-only copy of the repository at the commit the task starts from. Read whatever you need.
+Before writing the locked test, you MUST read docs/antigravity/STANDARDS.md (if it exists) to use the correct testing framework for this repository. If the standards state "Use native node --test", do NOT use Vitest.
 
 Write exactly these files and nothing else:
   1. .spec-out/contract.json
@@ -189,8 +190,7 @@ contract.json is one JSON object with exactly these keys:
   limits           optional {"files": n, "lines": n, "deleted_lines": n}; only ever smaller than the defaults (10 / 400 / 150)
 
 The test must FAIL on the code as it is now and PASS once the behaviour is as the founder asked. It must run offline,
-with no network and no paid call. Put it under tests/unit/ and name it *.test.ts. Run it before you stop:
-  node_modules/.bin/vitest run --cache=false <your test file>
+with no network and no paid call. Put it under tests/unit/ and name it *.test.ts. Run it before you stop using the testing framework mandated by docs/antigravity/STANDARDS.md.
 It must FAIL now. The dispatcher runs it the same way, and a spec whose test already passes is never shown to the founder.
 If the behaviour the founder describes is already there, say so in current_behavior.text, cite the lines that show it,
 and still write the test that checks it.

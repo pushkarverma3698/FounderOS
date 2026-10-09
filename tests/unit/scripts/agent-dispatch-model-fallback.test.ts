@@ -90,7 +90,7 @@ describe("agent-dispatch: executor model candidates", () => {
   it("the default list starts with the current executor model", () => {
     sb.tick({ agyOut: "Error: boom" });
 
-    expect(sb.agyModels()[0]).toBe("gemini-3.6-flash-medium");
+    expect(sb.agyModels()[0]).toBe("gemini-3.8-flash-medium");
   });
 
   it("a working first model is the only one run", () => {
