@@ -230,6 +230,47 @@ describe("deploy/job-run: a spec", () => {
   });
 });
 
+describe("deploy/job-run: a fix", () => {
+  const HEAD = "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff";
+  const fixLine = (extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({ repo: REPO, issue: 41, stage: "fix", head: HEAD, ...extra }) + "\n";
+
+  it("runs agent-dispatch at stage fix with the head the founder saw, then pr-brain on the same PR", () => {
+    const r = run({ stdin: fixLine(), prs: [goodPr], marker: true });
+
+    expect(r.status).toBe(0);
+    expect(r.calls.find((c) => c.startsWith("agent-dispatch"))).toMatch(
+      new RegExp(`--issue 41 --repo ${REPO} --stage fix --head ${HEAD} --wait-lock 3600`),
+    );
+    expect(r.calls.find((c) => c.startsWith("pr-brain"))).toMatch(/--pr 77 /);
+    expect(r.sent).toEqual([]);
+  });
+
+  it("rejects a head that is not a commit sha: runs nothing, tells the founder once", () => {
+    const r = run({ stdin: fixLine({ head: "main; rm -rf /" }) });
+
+    expect(r.status).not.toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("agent-dispatch") || c.startsWith("pr-brain"))).toEqual([]);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0]).toMatch(/not a valid job request/);
+  });
+
+  it("a head on a build request is rejected: only a fix carries one", () => {
+    const r = run({ stdin: JSON.stringify({ repo: REPO, issue: 41, stage: "build", head: HEAD }) + "\n" });
+
+    expect(r.status).not.toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("agent-dispatch"))).toEqual([]);
+  });
+
+  it("a fix that ends with no review of the PR is a failure message, not silence", () => {
+    const r = run({ stdin: fixLine(), prs: [goodPr], marker: false });
+
+    expect(r.status).not.toBe(0);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0]).toMatch(/stage fix/);
+  });
+});
+
 describe("deploy/job-run: what the founder reads", () => {
   it("never leaks a secret from the log tail", () => {
     const r = run({ dispatchRc: 1, dispatchOut: `boom GOOGLE_GENERATIVE_AI_API_KEY=AIzaSyD-abcdefghijklmnopqrstuvwxyz0123` });

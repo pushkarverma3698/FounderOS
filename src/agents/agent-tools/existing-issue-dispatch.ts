@@ -19,6 +19,7 @@ import { filedLabels } from "../../tools/dispatch-spec-intake.js";
 import { existingIssueAsk, readableIssueBody, withFounderAsk } from "../../tools/existing-issue.js";
 import { NO_ACTION_PREFIX } from "../tool-result.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { blockedPrFix, claimAgeMinutes, fixBlockedPr, openPrWaitReason, WORKING_LEASE_MIN } from "./blocked-pr-fix.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { childLogger } from "../../infra/logger.js";
@@ -43,8 +44,11 @@ export async function target(repoArg: string | null | undefined): Promise<Target
   }
 }
 
-/** Why this issue must not be queued now, or null. */
-export function refusal(facts: TaskFacts): string | null {
+/**
+ * Why this issue must not be queued now, or null. Each reason is what GitHub shows, never a guess: "already working"
+ * was said about Oplify #115 on 2026-10-09 while nothing ran. A PR pr-brain blocked never gets here (it is fixed instead).
+ */
+export function refusal(facts: TaskFacts, now: Date = new Date()): string | null {
   const n = facts.issue.number;
   const labels = new Set(facts.issue.labels);
   if (facts.pr?.merged) {
@@ -53,8 +57,19 @@ export function refusal(facts: TaskFacts): string | null {
   }
   if (labels.has(LABEL_SPEC)) return `Not queued again: #${n}'s spec is being drafted.`;
   if (labels.has(LABEL_SPEC_REVIEW)) return `Not queued again: #${n}'s spec is waiting for your approval in Telegram.`;
-  if (labels.has("agent:working") || labels.has("agent:review") || facts.pr?.state === "open") {
-    return "Not re-queued: it is already in progress, and a second run would race the first.";
+  if (labels.has("agent:working")) {
+    const age = claimAgeMinutes(facts, now);
+    if (age === null) {
+      return `Not re-queued: #${n} is labelled agent:working but no claim is recorded on it, so I cannot tell whether a run is live. Check ${facts.issue.url}.`;
+    }
+    if (age < WORKING_LEASE_MIN) {
+      return `Not re-queued: Antigravity claimed it ${age} min ago and a run is cut off at 30 min. A second run would race it; ask again after that.`;
+    }
+  }
+  const waiting = openPrWaitReason(facts);
+  if (waiting) return `Not re-queued: ${waiting}`;
+  if (labels.has("agent:review") && !facts.pr) {
+    return `Not re-queued: #${n} is labelled agent:review but no PR is linked to it. Check ${facts.issue.url}.`;
   }
   if (labels.has("agent:blocked")) {
     return "Not re-queued: it stopped after 3 review→fix rounds on an open PR. It needs your decision on that PR — a fresh run would start over on top of it.";
@@ -66,7 +81,8 @@ export function refusal(facts: TaskFacts): string | null {
 const neverRan = (labels: readonly string[]): boolean =>
   labels.every((l) => !l.startsWith("agent:") || l === "agent:needs-brief");
 
-const STALE_LABELS = ["agent:failed", "agent:blocked", "agent:needs-brief"] as const;
+// agent:working and agent:review are only reached here when no run is live (see refusal) and no open PR waits on a decision.
+const STALE_LABELS = ["agent:failed", "agent:blocked", "agent:needs-brief", "agent:working", "agent:review"] as const;
 
 export interface QueueOptions {
   /** The founder's words, verbatim. Required when the issue goes to the spec pipeline (agent:spec). */
@@ -88,6 +104,13 @@ export async function queueExistingIssue(t: Target, n: number, opts: QueueOption
   }
   if (facts.issue.isPull) return `❌ #${n} on ${t.slug} is a pull request, not an issue. Nothing was filed.`;
   const status = describeTaskStatus(facts, new Date());
+
+  // A PR pr-brain blocked is waiting for exactly this decision: fix it now, on its own branch, with every blocker.
+  const fix = blockedPrFix(facts);
+  if (fix) {
+    const req = { slug: t.slug, issueNumber: n, repoArg: opts.repoArg, founderRequest: opts.founderRequest, action: opts.action };
+    return fixBlockedPr(fix, req, facts, status, config);
+  }
 
   const refused = refusal(facts);
   if (refused) return `${NO_ACTION_PREFIX} ${refused}\n\n${status}`;

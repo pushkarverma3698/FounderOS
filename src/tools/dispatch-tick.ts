@@ -22,8 +22,9 @@
  * `sudo -n -u antigravity` works exactly as it does for cron. The bot reaches it the way it already
  * reaches /run/agy-login.sock. Nothing in this file may start a process (a test enforces it).
  *
- * `stage` is `spec` for an `agent:spec` issue (Pass P writes the spec) and `build` for an `agent:ready`
- * one (the executor implements it, then pr-brain reviews the PR).
+ * `stage` is `spec` for an `agent:spec` issue (Pass P writes the spec), `build` for an `agent:ready`
+ * one (the executor implements it, then pr-brain reviews the PR) and `fix` for a PR pr-brain blocked (the executor fixes
+ * every blocker on the PR's branch, then pr-brain reviews the new head; the line also carries `head`, see startFixJob).
  *
  * Why it lives at the tool layer and not in the /task handler: a gateway turn returns as soon as the
  * HITL approval card is posted (src/gateway/kernel-run.ts), which is minutes to hours BEFORE the issue
@@ -40,7 +41,7 @@ import { promoteRequestLine, validatePromoteRequest } from "./promote-plan.js";
 
 const log = childLogger({ module: "tool:dispatch-tick" });
 
-export type JobStage = "spec" | "build";
+export type JobStage = "spec" | "build" | "fix";
 
 export type StartJobResult = { status: "inert" } | { status: "started" } | { status: "failed"; reason: string };
 
@@ -50,6 +51,7 @@ export type JobSender = (socketPath: string, line: string) => Promise<void>;
 const DEFAULT_JOB_SOCKET = "/run/fos-job.sock";
 const SEND_TIMEOUT_MS = 5_000;
 const REPO_RE = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+const SHA_RE = /^[0-9a-f]{7,40}$/;
 
 /** The socket `fos-job.socket` listens on (deploy/systemd/fos-job.socket). */
 export function jobSocketPath(): string {
@@ -57,8 +59,8 @@ export function jobSocketPath(): string {
 }
 
 /** The request line `deploy/job-run` validates. The repo is carried by name: a bare number is ambiguous across repos. */
-export function jobRequestLine(issueNumber: number, repo: string, stage: JobStage): string {
-  return `${JSON.stringify({ repo: repo.trim(), issue: issueNumber, stage })}\n`;
+export function jobRequestLine(issueNumber: number, repo: string, stage: JobStage, head?: string): string {
+  return `${JSON.stringify({ repo: repo.trim(), issue: issueNumber, stage, ...(head ? { head } : {}) })}\n`;
 }
 
 /** What to tell the founder, in the chat that asked for the job, when it could not be started. */
@@ -99,6 +101,7 @@ export async function startDispatchJob(
   repo: string,
   stage: JobStage,
   send: JobSender = socketSender,
+  head?: string,
 ): Promise<StartJobResult> {
   if (!process.env["AGENT_DISPATCH_BIN"]?.trim()) return { status: "inert" };
 
@@ -114,7 +117,7 @@ export async function startDispatchJob(
 
   const socketPath = jobSocketPath();
   try {
-    await send(socketPath, jobRequestLine(issueNumber, repoSlug, stage));
+    await send(socketPath, jobRequestLine(issueNumber, repoSlug, stage, head));
     log.info({ socketPath, issueNumber, repo: repoSlug, stage }, "handed the job to fos-job");
     return { status: "started" };
   } catch (err) {
@@ -122,6 +125,21 @@ export async function startDispatchJob(
     log.warn({ socketPath, issueNumber, repo: repoSlug, stage, err: reason }, "could not start the job");
     return { status: "failed", reason };
   }
+}
+
+/**
+ * Start the founder's "fix it" on a PR pr-brain blocked: the executor fixes every blocker on the PR's own branch, then
+ * pr-brain reviews the new head. `head` is the PR commit he was shown; the job refuses to fix a head that moved since.
+ * Same socket and same dispatch lock as the cron's own re-dispatch (deploy/agent-dispatch): the two never fix one PR at once.
+ */
+export async function startFixJob(issueNumber: number, repo: string, head: string, send: JobSender = socketSender): Promise<StartJobResult> {
+  if (!process.env["AGENT_DISPATCH_BIN"]?.trim()) return { status: "inert" };
+  const sha = head.trim().toLowerCase();
+  if (!SHA_RE.test(sha)) {
+    log.warn({ issueNumber, head }, "refusing to start a fix for a malformed head sha");
+    return { status: "failed", reason: `invalid head sha "${head.trim()}"` };
+  }
+  return startDispatchJob(issueNumber, repo, "fix", send, sha);
 }
 
 /**

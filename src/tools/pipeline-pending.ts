@@ -9,8 +9,8 @@
  *    names a file under <contracts dir>/pending/ that holds what the founder was shown. Tapping reads the file,
  *    never the callback data, so a forged or stale tap cannot change what is approved or merged.
  *
- * Two kinds: "spec" (a contract waiting for approval, written by Pass P) and "merge" (evidence and review for one PR
- * head, written when the evidence card goes out). A tap CLAIMS the record by renaming it, which is atomic: of two
+ * Three kinds: "spec" (a contract waiting for approval, written by Pass P), "merge" (evidence and review for one PR
+ * head, written when the evidence card goes out) and "fix" (a PR pr-brain blocked, written when the blocked card goes out). A tap CLAIMS the record by renaming it, which is atomic: of two
  * taps (a double tap, or two deliveries of one tap) exactly one gets the record. A transient failure after the claim
  * calls releasePending so the founder can tap again; a finished action leaves the claimed file as its trace.
  *
@@ -92,11 +92,28 @@ export const PendingMergeSchema = z
     }
   });
 
-export const PendingRecordSchema = z.union([PendingSpecSchema, PendingMergeSchema]);
+/** A PR pr-brain blocked, for the head the founder was shown: what [Fix now] and [Close PR] act on. */
+export const PendingFixSchema = z
+  .object({
+    kind: z.literal("fix"),
+    nonce: Nonce,
+    repo: Repo,
+    pr: z.number().int().positive(),
+    /** Absent when the PR's branch is not task/issue-N: there is nothing to dispatch, only Close PR is offered. */
+    issue: z.number().int().positive().optional(),
+    head: Sha,
+    branch: z.string().min(1).max(200),
+    blockers: z.number().int().positive(),
+    created_at: Iso,
+  })
+  .strict();
+
+export const PendingRecordSchema = z.union([PendingSpecSchema, PendingMergeSchema, PendingFixSchema]);
 
 export type PendingSpec = z.infer<typeof PendingSpecSchema>;
 export type PendingMerge = z.infer<typeof PendingMergeSchema>;
-export type PendingRecord = PendingSpec | PendingMerge;
+export type PendingFix = z.infer<typeof PendingFixSchema>;
+export type PendingRecord = PendingSpec | PendingMerge | PendingFix;
 
 export type PendingErrorCode = "not_found" | "invalid" | "exists" | "io" | "bad_key";
 export type PendingResult<T> = { ok: true; value: T } | { ok: false; code: PendingErrorCode; error: string };
