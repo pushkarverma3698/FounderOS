@@ -37,12 +37,13 @@ Decisions taken with the founder (AskUserQuestion, 2026-10-10):
 - [x] `deploy/opendots/install.sh`: builds app, browser, supervisor, and `opendots-computer-turicks:1`
       (OpenBot + claude 2.1.287 + agy + gh + run-bg), starts on 127.0.0.1:4310. Ran clean 2026-10-10.
 - [x] Tailscale 1.104.1 installed on the VPS; `tailscale up --hostname=turicks-dots` waits on the founder's login.
-- [ ] Founder: CopilotKit key (see README). Without it the app stays in its setup state.
-- [ ] Founder: Tailscale login on VPS and phone; `tailscale serve` gives the HTTPS URL; set `APP_ORIGIN`.
+- [x] CopilotKit Intelligence key in `.env` (founder logged in 2026-10-10); setup reports nothing missing.
+- [x] Tailscale: `https://turicks-dots.taile5afc3.ts.net` (tailnet only), `APP_ORIGIN` set.
 
 ## Phase 2: agents
-- [ ] Chief of Staff Dot: plans the day, delegates, no shell.
-- [ ] Engineer Dot: computer with shell; `claude` and `agy` logged in once inside its computer.
+- [x] Chief of Staff Dot: plans the day, writes "Task:" pages for the Engineer, no computer (`setup-dots.sh`). Live turn answered.
+- [x] Engineer Dot: computer with shell; agy logged in and proven through a chat turn via `run-bg`.
+- [ ] Engineer: `claude` login (founder's `claude setup-token`) and `gh auth` for PRs.
 - [ ] One more specialist only after the first two are used daily (RAM limit above).
 
 ## Phase 3: jobs standalone (separate session)
