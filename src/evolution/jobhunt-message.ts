@@ -6,35 +6,28 @@
  * break the send silently, and they are only testable if nothing here touches the
  * network.
  *
- * The first line is ALWAYS one of the plan's three (C3), so a founder who reads
- * nothing else still learns what happened:
+ * The first line is ALWAYS one of these, so a founder who reads nothing else still
+ * learns what happened:
  *
- *   Jobhunt check: filed #N <title>
+ *   Jobhunt check: N finding(s) for you
  *   Jobhunt check: nothing new
  *   Jobhunt check: check failed: <reason>
  *
- * plus two states the plan did not name but the loop can be in: skipped because the
- * founder halted FounderOS, and filing switched off by its kill switch. Each is a
- * distinct line, because folding either into "nothing new" would be the
- * silent-looks-healthy failure the whole file exists to prevent.
- *
- * Decision findings never became issues, so this message is the only place they
- * reach the founder. They are printed in full with their own evidence and a command
- * to run, split across messages rather than truncated (CLAUDE.md #26).
+ * Findings are printed in full with their own evidence and a next step, split across
+ * messages rather than truncated (CLAUDE.md #26). No GitHub issue is filed (2026-10-10).
  */
 
 import { esc, splitForTelegram } from "../tools/jobhunt/telegram-format.js";
-import type { DispatchOutcome } from "./dispatch-findings.js";
-import { renderIssueTitle } from "./issue-body.js";
-import { ADAPTER_SILENT_MIN_SWEEP_RUNS, CANDIDATE_NOT_ACTING_WINDOW_DAYS } from "./analyzers/jobhunt.js";
+import { ADAPTER_SILENT_MIN_SWEEP_RUNS, ADAPTER_SOURCE_PATHS, CANDIDATE_NOT_ACTING_WINDOW_DAYS } from "./analyzers/jobhunt.js";
 import type { JobhuntCoverage } from "./analyzers/jobhunt.js";
 import type { QuietDecision } from "./jobhunt-notify-state.js";
 import type { Finding } from "./types.js";
 
-/** Every state the daily check can end in. `halted` is the check's own; the rest are the loop's. */
+/** Every state the daily check can end in. */
 export type JobhuntCheckOutcome =
-  | DispatchOutcome
-  | { readonly state: "halted"; readonly reason: string; readonly engagedAt: string };
+  /** The analyzer ran; `told` findings are printed in full below the head line. */
+  | { readonly state: "checked"; readonly told: number }
+  | { readonly state: "failed"; readonly reason: string };
 
 export interface JobhuntCheckReport {
   readonly outcome: JobhuntCheckOutcome;
@@ -48,7 +41,7 @@ export interface JobhuntCheckReport {
 
 /**
  * The chat commands for one candidate. The `wife_` aliases are bound in
- * src/gateway/telegram.ts; a test reads that file so this cannot name a command
+ * src/jobs/bot.ts; a test checks them against the ☰ menu so this cannot name a command
  * that does not exist.
  */
 const COMMANDS: Readonly<Record<string, { readonly today: string; readonly jobs: string; readonly applied: string }>> = {
@@ -58,6 +51,19 @@ const OWN_COMMANDS = { today: "/today", jobs: "/jobs", applied: "/applied N" } a
 
 /** What to DO about a decision. The evidence above it says what was found; this says the next move. */
 function decisionAction(finding: Finding): string {
+  const platform = finding.subject.split(" ")[0] ?? finding.subject;
+  if (finding.kind === "adapter-silent") {
+    return (
+      `Code fix: the ${platform} adapter stored nothing. Read ${ADAPTER_SOURCE_PATHS[platform] ?? "src/tools/jobhunt/adapters/"} ` +
+      `against one live board from the evidence and add a fixture test that fails first.`
+    );
+  }
+  if (finding.kind === "apply-link-unrecognised") {
+    return (
+      `Code fix: getApplyUrl in src/tools/jobhunt/apply-packet.ts returns null for ${platform}'s own URLs above. ` +
+      `Pin each sample URL in a test, then teach it the form URL.`
+    );
+  }
   const c = COMMANDS[finding.subject] ?? OWN_COMMANDS;
   if (finding.kind === "candidate-not-acting") {
     return (
@@ -76,7 +82,7 @@ function decisionAction(finding: Finding): string {
 function decisionBlock(due: readonly Finding[]): string[] {
   if (due.length === 0) return [];
   return [
-    "<b>Decisions for you</b> <i>(Telegram only: no issue is filed for these, because they are not code)</i>",
+    "<b>Findings for you</b>",
     ...due.map(
       (f, i) =>
         `${i + 1}. <b>${esc(f.kind)}</b> · <code>${esc(f.subject)}</code>\n${esc(f.evidence)}\n→ ${esc(decisionAction(f))}`,
@@ -121,43 +127,13 @@ function coverageBlock(coverage: JobhuntCoverage | null): string[] {
 /** The head of the message: the plan's first line, then what follows from it. */
 function headBlock(outcome: JobhuntCheckOutcome): string[] {
   switch (outcome.state) {
-    case "filed":
-      return [
-        `<b>${esc(`Jobhunt check: filed #${outcome.issueNumber} ${renderIssueTitle(outcome.finding)}`)}</b>\n` +
-          `<a href="${esc(outcome.url)}">Open the issue</a> · ${esc(outcome.finding.severity)}`,
-        esc(outcome.finding.evidence),
-        [
-          "<b>What happens next, without you:</b>",
-          "1. <code>agent-dispatch</code> claims it within 15 min and Antigravity implements it in an isolated workspace.",
-          "2. A <b>draft</b> PR opens against <code>beta</code>.",
-          "3. <code>pr-brain</code> reviews it within 20 min and approves, fixes, or requests changes.",
-          "",
-          `<b>You only act at the merge.</b> To stop it now: <code>gh issue edit ${outcome.issueNumber} --remove-label agent:ready</code>`,
-        ].join("\n"),
-      ];
-    case "all-filed":
-      return [
-        "<b>Jobhunt check: nothing new</b>\n" +
-          `${outcome.dispatchableCount} finding(s) that could become an issue already have one, open or closed, so none was filed. ` +
-          "See them: <code>gh issue list --label evolution:auto --state all</code>",
-      ];
-    case "nothing-dispatchable":
-      return ["<b>Jobhunt check: nothing new</b>\nNothing to file today."];
-    case "disabled":
-      return [
-        "<b>Jobhunt check: filing is switched off (SELF_IMPROVE_DISPATCH_ENABLED=false)</b>\n" +
-          "No issue was filed. Remove that line from <code>.env</code> and restart to turn it back on.",
-      ];
-    case "halted":
-      return [
-        "<b>Jobhunt check: skipped: FounderOS is halted</b>\n" +
-          `Reason: <i>${esc(outcome.reason)}</i> (engaged ${esc(outcome.engagedAt)}). Nothing was read, filed or reported. ` +
-          "Send <code>/resume</code> to re-enable; the check runs again tomorrow at 09:30.",
-      ];
+    case "checked":
+      if (outcome.told === 0) return ["<b>Jobhunt check: nothing new</b>"];
+      return [`<b>Jobhunt check: ${outcome.told} finding${outcome.told === 1 ? "" : "s"} for you</b>`];
     case "failed":
       return [
         `<b>${esc(`Jobhunt check: check failed: ${outcome.reason}`)}</b>\n` +
-          "Nothing was filed, and this is not a clean result: the check did not finish, so nobody has looked at today's data. " +
+          "This is not a clean result: the check did not finish, so nobody has looked at today's data. " +
           "It runs again tomorrow at 09:30.",
       ];
   }

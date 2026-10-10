@@ -46,7 +46,7 @@ import { inScope } from "../tools/jobhunt/brief-queue.js";
 import { refreshLiveness } from "../tools/jobhunt/liveness-refresh.js";
 import { lastFreshView } from "../db/job-heartbeat-queries.js";
 import { childLogger } from "../infra/logger.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:jobhunt-view" });
 

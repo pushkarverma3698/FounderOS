@@ -42,9 +42,9 @@ describe("B7 — all three read verbs are advertised", () => {
 });
 
 describe("B7 — the English surface is discoverable", () => {
-  it("gives real example sentences, not the word 'natural language'", () => {
-    expect(help).toContain("tashi's jobs");
-    expect(help).toContain("tashi's last 2 days jobs founded");
+  it("promises no English sentences: since 2026-10-10 the jobs bot answers commands only", () => {
+    expect(help).not.toContain("tashi's jobs");
+    expect(help).not.toMatch(/natural language|plain English/i);
   });
 
   it("defines posted vs found, the one distinction that will surprise him", () => {

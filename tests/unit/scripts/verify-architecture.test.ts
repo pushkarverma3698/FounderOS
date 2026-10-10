@@ -9,11 +9,11 @@ import {
   importsOf,
   resolveImport,
   ruleGatewayImports,
-  ruleKernelPurity,
   ruleFailOpenCatch,
   ruleLocBudget,
   ruleRegexRouting,
   ruleOrphanSubsystem,
+  packageEntrypoints,
   checkRatchet,
   LOC_BUDGET,
 } from "../../../scripts/verify-architecture.js";
@@ -41,32 +41,17 @@ describe("R1 gateway-imports", () => {
     expect(ruleGatewayImports(files).violations).toHaveLength(1);
   });
 
-  it("allows gateway-internal and src/index.ts imports", () => {
+  it("allows gateway-internal imports and the src/jobs composition root", () => {
     const files = [
-      f("src/gateway/telegram.ts", `import { x } from "./office-run.js";`),
-      f("src/index.ts", `import { startBot } from "./gateway/telegram.js";`),
+      f("src/gateway/jobhunt-view.ts", `import { x } from "./chat-access.js";`),
+      f("src/jobs/bot.ts", `import { handleDraft } from "../gateway/jobhunt-commands.js";`),
     ];
     expect(ruleGatewayImports(files).violations).toHaveLength(0);
   });
-});
 
-describe("R2 kernel-purity", () => {
-  it("flags kernel importing gateway or agents", () => {
-    const files = [
-      f("src/kernel/graph.ts", `import { g } from "../gateway/format.js";`),
-      f("src/kernel/worker.ts", `import { p } from "../agents/system-prompts.js";`),
-    ];
-    expect(ruleKernelPurity(files).violations).toHaveLength(2);
-  });
-
-  it("allows kernel → core/db/infra/tools/kernel", () => {
-    const files = [
-      f(
-        "src/kernel/graph.ts",
-        `import { c } from "./contracts.js";\nimport { db } from "../db/client.js";\nimport { t } from "../infra/trace.js";\nimport { tool } from "../tools/index.js";\nimport { env } from "../core/config.js";`,
-      ),
-    ];
-    expect(ruleKernelPurity(files).violations).toHaveLength(0);
+  it("src/index.ts is no longer exempt: the old root is a tombstone", () => {
+    const files = [f("src/index.ts", `import { startBot } from "./gateway/telegram.js";`)];
+    expect(ruleGatewayImports(files).violations).toHaveLength(1);
   });
 });
 
@@ -147,6 +132,25 @@ describe("R7 orphan-subsystem", () => {
 
   it("does not treat top-level src files as subsystems", () => {
     expect(flagged([entry, kernel])).toEqual([]);
+  });
+
+  it("clears the subsystem that holds a package.json entrypoint, and only that one", () => {
+    const files = [f("src/jobs/main.ts", `import { b } from "./bot.js";`), f("src/ghost/index.ts", `export const a = 1;`)];
+    expect(ruleOrphanSubsystem(files, [], ["src/jobs/main.ts"]).violations.map((v) => v.file)).toEqual(["src/ghost/"]);
+  });
+});
+
+describe("packageEntrypoints", () => {
+  it("reads src/ entries from package.json scripts, built or not", () => {
+    const pkg = JSON.stringify({
+      scripts: {
+        start: "node --env-file=.env dist/src/jobs/main.js",
+        dev: "node --import tsx/esm --watch src/jobs/main.ts",
+        hub: "node --import tsx/esm src/mcp/hub.ts",
+        lint: "tsc --noEmit",
+      },
+    });
+    expect(packageEntrypoints(pkg).sort()).toEqual(["src/jobs/main.ts", "src/mcp/hub.ts"]);
   });
 });
 

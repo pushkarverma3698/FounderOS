@@ -27,7 +27,6 @@ import { readFullCvText } from "../career.js";
 import { TRACK_PRIORITY } from "./tracks.js";
 import { getProfile, DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import { extractSkillTerms } from "./skills.js";
-import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:cv_gaps" });
 
@@ -230,7 +229,8 @@ export function formatGapReport(
   return `${header}\n${basis}\n\n${sections.join("\n\n")}`;
 }
 
-export const cvGapsTool: UnifiedTool = {
+/** `cv_gaps` in the tool-result shape the scripts read. */
+export const cvGapsTool = {
   name: "cv_gaps",
   description:
     "Compare the CV against what the screened job market actually asks for. Reports " +
@@ -263,7 +263,7 @@ export const cvGapsTool: UnifiedTool = {
     required: [],
   },
 
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>): Promise<{ success: boolean; data?: unknown; error?: string }> {
     const out = await computeGaps(args);
     return out.ok
       ? { success: true, data: formatGapReport(out.report, { track: out.track, cvPath: out.cvPath }) }

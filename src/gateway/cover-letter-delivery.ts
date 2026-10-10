@@ -12,7 +12,7 @@ import { buildCoverLetter, type CoverLetterModel } from "../tools/jobhunt/cover-
 import { invokeWorkerWithFallbacks } from "../agents/worker-invoke.js";
 import { uploadFile } from "../infra/storage/s3-client.js";
 import { DEFAULT_PROFILE_ID } from "../tools/jobhunt/profile-config.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 import { childLogger } from "../infra/logger.js";
 import type { JobApplication } from "../db/schema.js";
 

@@ -22,7 +22,7 @@ import { parseBriefRequest, type BriefVerb } from "../tools/jobhunt/brief-resolv
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import type { JobApplication } from "../db/schema.js";
 import { childLogger } from "../infra/logger.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:jobhunt-compact" });
 

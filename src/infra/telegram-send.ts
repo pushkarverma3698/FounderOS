@@ -12,6 +12,7 @@
 
 import { Bot, InputFile } from "grammy";
 import { env } from "../core/config.js";
+import { resolveJobsBotToken } from "./jobs-bot-token.js";
 import { childLogger } from "./logger.js";
 import { installScreenCapture } from "./screen-log.js";
 
@@ -22,7 +23,7 @@ let _bot: Bot | undefined;
 /** Lazy api-only bot singleton (constructed from the validated token). Its sends go to the screen log. */
 function api() {
   if (!_bot) {
-    _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+    _bot = new Bot(resolveJobsBotToken().token);
     installScreenCapture(_bot.api, "bot");
   }
   return _bot.api;
