@@ -49,10 +49,10 @@ index db9fb2a..a27926e 100644
  export class ApiError extends Error {
    constructor(
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
-index 6191cc7..3b81ffe 100644
+index 6191cc7..d24ad04 100644
 --- a/src/server/dot-agent.ts
 +++ b/src/server/dot-agent.ts
-@@ -24,12 +24,56 @@ import { WorkspaceStore } from './workspace.js';
+@@ -24,12 +24,96 @@ import { WorkspaceStore } from './workspace.js';
  import type { PlatformConfig } from './platform-config.js';
  import { browserResponse } from './research.js';
  import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
@@ -67,11 +67,24 @@ index 6191cc7..3b81ffe 100644
 +const TURN_TIME_LIMIT_MS = 15 * 60_000;
 +// turicks: was 2200. Coding replies (a file in one tool call, plus reasoning) need far more.
 +const MAX_COMPLETION_TOKENS = 16000;
-+type ModelChunk = { choices?: { finish_reason?: string | null }[] };
++type ModelChunk = {
++  choices?: {
++    finish_reason?: string | null;
++    native_finish_reason?: string | null;
++    delta?: {
++      tool_calls?: { index: number; function?: { arguments?: string } }[];
++    };
++  }[];
++  usage?: { completion_tokens?: number } | null;
++};
++// OpenRouter keeps finish_reason "tool_calls" for a tool call cut off at the cap; the provider's
++// own reason survives only in native_finish_reason (live, 10-10: gpt-6-luna, gemini-3.8-flash).
++const CUT_OFF_REASONS = new Set(['length', 'max_output_tokens', 'MAX_TOKENS']);
 +type AdapterChunk = { type: string; runId?: string; model?: string };
 +// turicks: a reply cut off at the output limit must fail the turn. Upstream reports it as finished (and
 +// renames `length` to `tool_calls` when a tool call was open, which then runs with `{}` arguments).
-+// A RUN_ERROR stops TanStack's loop before the tool phase, and a failed shift retries.
++// Signals: a cut-off finish or native reason, the whole output budget used, or tool arguments that
++// do not parse (any model). A RUN_ERROR stops TanStack's loop before the tool phase, and a failed shift retries.
 +function failCutOffReplies(adapter: object) {
 +  const target = adapter as {
 +    processStreamChunks(
@@ -82,16 +95,43 @@ index 6191cc7..3b81ffe 100644
 +  const upstream = target.processStreamChunks.bind(adapter);
 +  target.processStreamChunks = async function* (stream, ...rest) {
 +    let cutOff = false;
++    const args = new Map<number, string>();
 +    const watched = (async function* () {
 +      for await (const chunk of stream) {
-+        if (chunk.choices?.some((c) => c.finish_reason === 'length'))
++        for (const choice of chunk.choices ?? []) {
++          if (
++            CUT_OFF_REASONS.has(choice.finish_reason ?? '') ||
++            CUT_OFF_REASONS.has(choice.native_finish_reason ?? '')
++          )
++            cutOff = true;
++          for (const call of choice.delta?.tool_calls ?? [])
++            args.set(
++              call.index,
++              (args.get(call.index) ?? '') + (call.function?.arguments ?? ''),
++            );
++        }
++        if ((chunk.usage?.completion_tokens ?? 0) >= MAX_COMPLETION_TOKENS)
 +          cutOff = true;
 +        yield chunk;
 +      }
 +    })();
++    const unparseable = () =>
++      [...args.values()].some((raw) => {
++        if (!raw) return false;
++        try {
++          JSON.parse(raw);
++          return false;
++        } catch {
++          return true;
++        }
++      });
 +    for await (const event of upstream(watched, ...rest)) {
-+      if (cutOff && event.type === EventType.RUN_FINISHED) {
-+        const message = "The model's reply was cut off at the output limit.";
++      const broken =
++        event.type === EventType.RUN_FINISHED && !cutOff && unparseable();
++      if (event.type === EventType.RUN_FINISHED && (cutOff || broken)) {
++        const message = cutOff
++          ? "The model's reply was cut off at the output limit."
++          : 'The model sent a tool call with incomplete arguments, so it was not run.';
 +        yield {
 +          type: EventType.RUN_ERROR,
 +          runId: event.runId,
@@ -110,7 +150,7 @@ index 6191cc7..3b81ffe 100644
  export class DotAgent extends AbstractAgent {
    private inner?: BuiltInAgent;
    private controller?: AbortController;
-@@ -310,6 +354,7 @@ export class DotAgent extends AbstractAgent {
+@@ -310,6 +394,7 @@ export class DotAgent extends AbstractAgent {
            api: 'chat-completions',
            maxRetries: 1,
          });
@@ -118,7 +158,7 @@ index 6191cc7..3b81ffe 100644
          const serverTools = [
            ...tools,
            ...pageTools(pages),
-@@ -333,7 +378,7 @@ export class DotAgent extends AbstractAgent {
+@@ -333,7 +418,7 @@ export class DotAgent extends AbstractAgent {
              const converted = convertInputToTanStackAI({
                ...ctx.input,
                // Match BuiltInAgent's default trust boundary for client messages.
@@ -127,7 +167,7 @@ index 6191cc7..3b81ffe 100644
                  (message) =>
                    message.role !== 'system' && message.role !== 'developer',
                ),
-@@ -351,12 +396,8 @@ export class DotAgent extends AbstractAgent {
+@@ -351,12 +436,8 @@ export class DotAgent extends AbstractAgent {
                abortController: ctx.abortController,
                threadId: ctx.input.threadId,
                runId: ctx.input.runId,
@@ -270,10 +310,10 @@ index 444b21c..090b7f9 100644
        expect.arrayContaining([
 diff --git a/tests/turicks.test.ts b/tests/turicks.test.ts
 new file mode 100644
-index 0000000..1ef6ce0
+index 0000000..a0a749f
 --- /dev/null
 +++ b/tests/turicks.test.ts
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,347 @@
 +// turicks: the engineering team's shifts are recurring tasks. They must survive a failed or interrupted
 +// run, and each shift sends only its own turn (its state lives in GitHub, not in chat history).
 +import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -457,6 +497,141 @@ index 0000000..1ef6ce0
 +    const events = await failedRun(dotAgent.run(input));
 +    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
 +    expect(network).toHaveBeenCalledTimes(1);
++  });
++});
++
++// OpenRouter reports a tool call cut off at the cap as finish_reason "tool_calls"; only
++// native_finish_reason, the token count and the unparseable arguments show it (live, 10-10).
++function openRouterToolCall(
++  args: string,
++  native: string,
++  completionTokens: number,
++) {
++  const chunk = (choice: Record<string, unknown>, extra = {}) =>
++    `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'openai/gpt-6-luna', choices: [{ index: 0, ...choice }], ...extra })}\n\n`;
++  return new Response(
++    chunk({
++      delta: {
++        role: 'assistant',
++        tool_calls: [
++          {
++            index: 0,
++            id: 'write',
++            type: 'function',
++            function: { name: 'create_space_page', arguments: args },
++          },
++        ],
++      },
++      finish_reason: null,
++    }) +
++      chunk({
++        delta: {},
++        finish_reason: 'tool_calls',
++        native_finish_reason: native,
++      }) +
++      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'openai/gpt-6-luna', choices: [], usage: { prompt_tokens: 10, completion_tokens: completionTokens, total_tokens: 10 + completionTokens } })}\n\n` +
++      'data: [DONE]\n\n',
++    { headers: { 'Content-Type': 'text/event-stream' } },
++  );
++}
++
++describe('output limit as OpenRouter reports it', () => {
++  function agent() {
++    const store = fixture();
++    const workspace = new WorkspaceStore(':memory:', 'owner');
++    workspaces.push(workspace);
++    const dot = workspace.dots()[0];
++    workspace.bindThread('thread', dot.id, 'Shift');
++    return new DotAgent(
++      store,
++      workspace,
++      {
++        intelligenceKey: 'fixture',
++        apiKey: 'fixture',
++        model: 'custom-model',
++        baseUrl: 'https://unused.invalid/v1',
++        runtimeUrl: '',
++        voiceName: 'marin',
++        slackUsers: [],
++      },
++      dot.id,
++    );
++  }
++  const input: RunAgentInput = {
++    threadId: 'thread',
++    runId: 'run',
++    state: {},
++    context: [],
++    messages: [{ id: 'user', role: 'user', content: 'Write the file.' }],
++    tools: [],
++    forwardedProps: {},
++  };
++  async function run(response: Response) {
++    const network = vi
++      .spyOn(globalThis, 'fetch')
++      .mockResolvedValueOnce(response);
++    const events: { type: EventType }[] = [];
++    const outcome = await lastValueFrom(
++      agent()
++        .run(input)
++        .pipe(tap((event) => events.push(event))),
++    ).then(
++      () => 'finished',
++      (error: Error) => error.message,
++    );
++    return { outcome, events, calls: network.mock.calls.length };
++  }
++  it('fails a "tool_calls" finish whose native reason is the token limit', async () => {
++    const r = await run(
++      openRouterToolCall(
++        '{"title":"Notes","content":"# Not',
++        'max_output_tokens',
++        2200,
++      ),
++    );
++    expect(r.outcome).toBe(
++      "The model's reply was cut off at the output limit.",
++    );
++    expect(r.events.map((e) => e.type)).not.toContain(EventType.RUN_FINISHED);
++    expect(r.calls).toBe(1);
++  });
++  it('fails a reply that used the whole output budget', async () => {
++    const r = await run(
++      openRouterToolCall(
++        '{"title":"Notes","content":"# Notes"}',
++        'completed',
++        16000,
++      ),
++    );
++    expect(r.outcome).toBe(
++      "The model's reply was cut off at the output limit.",
++    );
++  });
++  it('never runs a tool call whose arguments do not parse', async () => {
++    const r = await run(
++      openRouterToolCall('{"title":"Notes","content":"# Not', 'completed', 900),
++    );
++    expect(r.outcome).toBe(
++      'The model sent a tool call with incomplete arguments, so it was not run.',
++    );
++    expect(r.calls).toBe(1);
++  });
++  it('still runs a complete tool call', async () => {
++    const network = vi
++      .spyOn(globalThis, 'fetch')
++      .mockResolvedValueOnce(
++        openRouterToolCall(
++          '{"title":"Notes","content":"# Notes"}',
++          'completed',
++          900,
++        ),
++      )
++      .mockResolvedValueOnce(
++        completion({ role: 'assistant', content: 'Saved.' }),
++      );
++    const events = await lastValueFrom(agent().run(input).pipe(toArray()));
++    expect(events.map((e) => e.type)).toContain(EventType.RUN_FINISHED);
++    expect(network).toHaveBeenCalledTimes(2);
 +  });
 +});
 +

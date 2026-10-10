@@ -44,6 +44,9 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 - Output limit: a model reply may be 16,000 tokens (reasoning included). A reply that hits the limit ends the turn
   as failed with "The model's reply was cut off at the output limit." A cut-off tool call is never run, and a
   shift retries one interval later. Upstream's 2,200 cut coding replies off mid-file and still reported "completed".
+  OpenRouter reports a cut-off tool call as `finish_reason "tool_calls"`, so the patch also checks
+  `native_finish_reason` (`max_output_tokens`, `MAX_TOKENS`), the whole budget used, and tool arguments that do not
+  parse.
 - Dot instructions (system prompts), max 2000 characters each (the script refuses longer). For a quick try, edit in the app: "…" next to the Dot,
   then "Role instructions". To keep a change, edit `CHIEF`, `TEAM`, `ARCHITECT`, `BUILDER` or `REVIEWER` in `setup-dots.sh`, copy it to
   `/opt/opendots/deploy/`, and run `ssh founderos-vps 'bash /opt/opendots/deploy/setup-dots.sh'`. That script overwrites
