@@ -166,7 +166,7 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 **Current state, stated exactly:** rules 1–5 are at **zero**. Rules 6 and 7 are **not** —
 `loc-budget: 6` and `fail-open-catch: 11` are pinned debt that CI forbids from growing.
 Both are named file-by-file in [LIMITATIONS.md](docs/LIMITATIONS.md), because a ratchet you
-describe as "all zeros" when it isn't isn't a ratchet, it's a slogan.
+describe as "all zeros" when it isn't a ratchet, it's a slogan.
 
 An eighth gate, [`verify-doc-claims.ts`](scripts/verify-doc-claims.ts), applies the same idea to
 this documentation: it measures the repo and fails the build if a number in the README or the
