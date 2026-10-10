@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# dot-login: sign the Engineer's computer in and out of claude, agy and gh from the chat.
+#   dot-login status
+#   dot-login <claude|agy|gh> start [email]     print a sign-in link (gh: a one-time code for github.com/login/device)
+#   dot-login <claude|agy> finish <code|url>    the code the sign-in page showed, or that page's whole URL
+#   dot-login gh finish                         once the code was approved on GitHub
+#   dot-login <claude|agy|gh> logout
+# Each login waits in a tmux session (login-<tool>) between chat turns, because a shell command is cut at 70 s.
+# A new login is proved with a real call before it replaces the old one. Tokens are never printed.
+set -uo pipefail
+W=${HOME:-/workspace} # the Dot shell sets HOME=/workspace
+T=$W/tmp/login
+CLAUDE_TOKEN=$W/.claude-token
+AGY_TOKEN=.gemini/antigravity-cli/antigravity-oauth-token
+mkdir -p "$T" && chmod 700 "$T"
+
+die() { echo "$*" >&2; exit 1; }
+pane() { tmux capture-pane -p -J -S - -t "login-$1" 2>/dev/null; }
+alive() { tmux has-session -t "login-$1" 2>/dev/null; }
+stop() { tmux kill-session -t "login-$1" 2>/dev/null; rm -rf -- "${T:?}/$1"; }
+wait_for() { # <tool> <regex> <seconds>
+  local i
+  for ((i = 0; i < $3; i++)); do pane "$1" | grep -qE "$2" && return 0; alive "$1" || return 1; sleep 1; done
+  return 1
+}
+enter() { tmux send-keys -t "login-$1" Enter; }
+typein() { tmux send-keys -t "login-$1" -l "$2"; sleep 0.3; enter "$1"; }
+param() { # <url> <name>: one query parameter, URL-decoded
+  local q=${1#*\?} v
+  v=$(tr '&#' '\n\n' <<<"$q" | sed -n "s/^$2=//p" | head -1)
+  v=${v//+/ }
+  printf '%b' "${v//%/\\x}"
+}
+hint() { [[ -n ${1:-} ]] && printf '&login_hint=%s' "$(jq -rn --arg e "$1" '$e|@uri')"; }
+
+claude_ok() { # [token]: one real call; with no token it uses the stored one
+  (cd "$W/tmp" && CLAUDE_CODE_OAUTH_TOKEN=${1:-} timeout 40 claude -p "reply with the single word ok" --max-turns 1 </dev/null 2>&1) |
+    tail -1 | grep -qi '^ok'
+}
+agy_ok() { (cd "$W/tmp" && HOME=${1:-$W} timeout 30 agy models </dev/null >/dev/null 2>&1); }
+gh_user() { gh api user -q .login 2>/dev/null; }
+
+status() {
+  local d=""
+  [[ -s $CLAUDE_TOKEN ]] && d=" (token saved $(sed -n 2p "$CLAUDE_TOKEN"))"
+  if claude_ok; then echo "claude: logged in$d, test call answered"; else echo "claude: NOT logged in$d"; fi
+  if agy_ok; then echo "agy:    logged in, agy models answered"; else echo "agy:    NOT logged in"; fi
+  local u; u=$(gh_user)
+  if [[ -n $u ]]; then echo "gh:     logged in as $u"; else echo "gh:     NOT logged in"; fi
+  for t in claude agy gh; do alive "$t" && echo "($t: a sign-in is waiting for its code)"; done
+  return 0
+}
+
+claude_start() {
+  stop claude; mkdir -p "$T/claude"
+  # setup-token in a scratch HOME: the current login keeps working until the new token is proved.
+  tmux new-session -d -s login-claude -x 500 -y 50 "HOME=$T/claude IS_SANDBOX=1 claude-bin setup-token"
+  wait_for claude 'https://claude\.(com|ai)/[^ ]*oauth/authorize' 30 || { stop claude; die "claude printed no sign-in link; try again"; }
+  local url; url=$(pane claude | grep -oE 'https://claude\.(com|ai)/[^ ]*oauth/authorize[^ ]*' | head -1)
+  echo "Open this link${1:+, sign in as $1}, approve, then paste back the code the page shows (or the page's URL). Valid about 10 minutes:"
+  echo "$url$(hint "${1:-}")"
+}
+
+claude_finish() {
+  local in=${1:-} token code
+  [[ -n $in ]] || die "usage: dot-login claude finish <code|url>"
+  if [[ $in == sk-ant-* ]]; then
+    token=${in//[[:space:]]/}
+  else
+    alive claude || die "no claude sign-in is waiting; run: dot-login claude start [email]"
+    code=$in
+    [[ $in == http* ]] && code="$(param "$in" code)#$(param "$in" state)"
+    typein claude "${code//[[:space:]]/}"
+    wait_for claude 'sk-ant-[A-Za-z0-9_-]{20,}|OAuth error|Invalid code|Token exchange failed' 30
+    # The token can be hard-wrapped onto the next line: join a following line that is only token characters.
+    token=$(pane claude | awk 'f && /^[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*$/ {gsub(/[[:space:]]/, ""); t = t $0; next}
+      f {exit} match($0, /sk-ant-[A-Za-z0-9_-]+/) {t = substr($0, RSTART, RLENGTH); f = 1} END {print t}')
+    stop claude
+    [[ -n $token ]] || die "claude did not accept that code (expired, used, or cut short). Run dot-login claude start again."
+  fi
+  claude_ok "$token" || die "the new claude token failed its test call; the old login is untouched"
+  [[ -f $CLAUDE_TOKEN ]] && cp -p "$CLAUDE_TOKEN" "$CLAUDE_TOKEN.bak"
+  (umask 077; printf '%s\n%s\n' "$token" "$(date +%F)" > "$CLAUDE_TOKEN")
+  claude_ok || { [[ -f $CLAUDE_TOKEN.bak ]] && mv "$CLAUDE_TOKEN.bak" "$CLAUDE_TOKEN"; die "installed token failed; previous one restored"; }
+  echo "claude: logged in, test call answered (token valid 1 year; revoke old ones at claude.ai > Settings > Claude Code)"
+}
+
+claude_logout() {
+  stop claude
+  rm -f -- "$CLAUDE_TOKEN" "$CLAUDE_TOKEN.bak"
+  (cd "$W/tmp" && HOME=$W claude-bin auth logout </dev/null >/dev/null 2>&1)
+  if claude_ok; then die "token deleted but claude still answers: another login is active"; fi
+  echo "claude: signed out on this computer (the token still exists at Anthropic until revoked at claude.ai > Settings > Claude Code)"
+}
+
+agy_start() {
+  stop agy; mkdir -p "$T/agy"
+  # agy only offers its sign-in menu when that HOME has no login, so it signs in to a scratch HOME first.
+  tmux new-session -d -s login-agy -x 500 -y 60 "HOME=$T/agy TERM=xterm-256color agy"
+  wait_for agy 'Google OAuth' 30 || { stop agy; die "agy showed no sign-in menu; try again"; }
+  enter agy
+  wait_for agy 'authorization code' 20 || { stop agy; die "agy printed no sign-in link; try again"; }
+  local url; url=$(pane agy | awk '/https:\/\/accounts\.google\.com/{on=1} /If you aren/{on=0} on' | tr -d '[:space:]')
+  echo "Open this link${1:+, choose $1}, approve, then paste back the authorization code the page shows (or the page's URL):"
+  echo "$url$(hint "${1:-}")"
+}
+
+agy_finish() {
+  local in=${1:-} code i
+  [[ -n $in ]] || die "usage: dot-login agy finish <code|url>"
+  alive agy || die "no agy sign-in is waiting; run: dot-login agy start [email]"
+  code=$in
+  [[ $in == http* ]] && code=$(param "$in" code)
+  typein agy "${code//[[:space:]]/}"
+  for ((i = 0; i < 40; i++)); do [[ -s $T/agy/$AGY_TOKEN ]] && break; sleep 1; done
+  [[ -s $T/agy/$AGY_TOKEN ]] || { stop agy; die "agy did not accept that code (expired, used, or wrong). Run dot-login agy start again."; }
+  tmux kill-session -t login-agy 2>/dev/null
+  agy_ok "$T/agy" || { stop agy; die "the new agy login failed agy models; the old login is untouched"; }
+  mkdir -p "$(dirname "$W/$AGY_TOKEN")"
+  [[ -f $W/$AGY_TOKEN ]] && cp -p "$W/$AGY_TOKEN" "$W/$AGY_TOKEN.bak"
+  cp "$T/agy/$AGY_TOKEN" "$W/$AGY_TOKEN" && chmod 600 "$W/$AGY_TOKEN"
+  stop agy
+  agy_ok || { [[ -f $W/$AGY_TOKEN.bak ]] && mv "$W/$AGY_TOKEN.bak" "$W/$AGY_TOKEN"; die "installed agy login failed; previous one restored"; }
+  echo "agy: logged in, agy models answered"
+}
+
+agy_logout() {
+  stop agy
+  rm -f -- "$W/$AGY_TOKEN" "$W/$AGY_TOKEN.bak"
+  if agy_ok; then die "login file deleted but agy still answers: another login is active"; fi
+  echo "agy: signed out on this computer"
+}
+
+gh_start() {
+  stop gh
+  tmux new-session -d -s login-gh -x 300 -y 40 "gh auth login --web -h github.com -p https"
+  # gh asks "Authenticate Git" only when git is not yet set up to use it.
+  wait_for gh 'Authenticate Git|one-time code' 20 && ! pane gh | grep -q 'one-time code' && enter gh
+  wait_for gh 'one-time code' 20 || { stop gh; die "gh printed no one-time code; try again"; }
+  local code; code=$(pane gh | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}' | tail -1)
+  enter gh # past "Press Enter to open github.com"; gh then waits for the approval
+  echo "Open https://github.com/login/device${1:+, signed in to GitHub as $1}, type the code $code and approve. Then tell me it's done (valid 15 minutes)."
+}
+
+gh_finish() {
+  alive gh || { [[ -n $(gh_user) ]] && { echo "gh: logged in as $(gh_user)"; return; }; die "no gh sign-in is waiting; run: dot-login gh start"; }
+  wait_for gh 'Logged in as' 30 || die "GitHub has not approved the code yet; approve it, then run dot-login gh finish again"
+  stop gh
+  echo "gh: logged in as $(gh_user)"
+}
+
+gh_logout() {
+  stop gh
+  local u; u=$(gh_user)
+  [[ -n $u ]] || { echo "gh: already signed out"; return; }
+  gh auth logout -h github.com -u "$u" >/dev/null 2>&1
+  [[ -z $(gh_user) ]] || die "gh still answers after logging $u out: another account is active (run dot-login gh logout again)"
+  echo "gh: $u signed out on this computer"
+}
+
+case "${1:-status}:${2:-}" in
+  status:*) status ;;
+  claude:start | agy:start | gh:start) "${1}_start" "${3:-}" ;;
+  claude:finish | agy:finish | gh:finish) "${1}_finish" "${3:-}" ;;
+  claude:logout | agy:logout | gh:logout) "${1}_logout" ;;
+  *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

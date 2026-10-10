@@ -31,7 +31,7 @@ compose build computer-image computer-supervisor app browser
 ctx=$(mktemp -d "$ROOT/computer-ctx.XXXXXX")
 trap 'rm -rf "$ctx"' EXIT
 sudo -n cp "$AGY_SRC" "$ctx/agy" && sudo -n chown "$(id -u):$(id -g)" "$ctx/agy"
-cp "$HERE/run-bg" "$ctx/run-bg" && chmod +x "$ctx/agy" "$ctx/run-bg"
+cp "$HERE/run-bg" "$HERE/dot-login" "$ctx/" && chmod +x "$ctx/agy" "$ctx/run-bg" "$ctx/dot-login"
 docker build -q -t opendots-computer-turicks:1 -f "$HERE/computer.Dockerfile" "$ctx"
 
 compose up -d app browser computer-supervisor

@@ -13,12 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 # agy has no public package; install.sh copies the VPS's working binary into the build context.
 COPY agy /usr/local/bin/agy
 COPY run-bg /usr/local/bin/run-bg
+COPY dot-login /usr/local/bin/dot-login
 
 # The Dot's shell is non-interactive, so no profile file is sourced: a wrapper hands claude the
 # `claude setup-token` token that seed-cli-logins.sh stores on the persistent volume.
 RUN ln -s "$(readlink -f /usr/local/bin/claude)" /usr/local/bin/claude-bin && rm /usr/local/bin/claude \
   && printf '%s\n' '#!/bin/sh' \
-     't=/workspace/.claude-token' \
+     't=${HOME:-/workspace}/.claude-token' \
      '[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN' \
      'export IS_SANDBOX=1' 'exec /usr/local/bin/claude-bin "$@"' > /usr/local/bin/claude \
   && chmod 755 /usr/local/bin/claude

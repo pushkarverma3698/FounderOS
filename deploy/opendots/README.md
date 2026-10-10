@@ -10,7 +10,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `computer.Dockerfile` | Agent computer image |
 | `compose.turicks.yml` | Points the supervisor at that image |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg status <name>` |
-| `seed-cli-logins.sh` | Log one Dot's computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
+| `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
+| `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
 ## Founder steps, once
 1. Tailscale: open the login URL printed by `sudo tailscale up --hostname=turicks-dots` on the VPS, and
