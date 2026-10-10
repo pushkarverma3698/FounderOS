@@ -1,0 +1,246 @@
+diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
+index 6191cc7..913f063 100644
+--- a/src/server/dot-agent.ts
++++ b/src/server/dot-agent.ts
+@@ -24,12 +24,14 @@ import { WorkspaceStore } from './workspace.js';
+ import type { PlatformConfig } from './platform-config.js';
+ import { browserResponse } from './research.js';
+ import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
++import { currentScheduledTurn } from '../shared/scheduled-message.js';
+ const channelError = () => ({
+   type: EventType.RUN_ERROR,
+   message:
+     'OpenDots could not complete this request. Please check the app and try again.',
+ });
+-const TURN_TIME_LIMIT_MS = 90_000;
++// turicks: coding turns wait on claude runs (run-bg wait), so a turn may take minutes.
++const TURN_TIME_LIMIT_MS = 15 * 60_000;
+ export class DotAgent extends AbstractAgent {
+   private inner?: BuiltInAgent;
+   private controller?: AbortController;
+@@ -333,7 +335,7 @@ export class DotAgent extends AbstractAgent {
+             const converted = convertInputToTanStackAI({
+               ...ctx.input,
+               // Match BuiltInAgent's default trust boundary for client messages.
+-              messages: ctx.input.messages.filter(
++              messages: currentScheduledTurn(ctx.input.messages).filter(
+                 (message) =>
+                   message.role !== 'system' && message.role !== 'developer',
+               ),
+@@ -352,11 +354,7 @@ export class DotAgent extends AbstractAgent {
+               threadId: ctx.input.threadId,
+               runId: ctx.input.runId,
+               modelOptions: { max_completion_tokens: 2200 },
+-              agentLoopStrategy: maxIterations(
+-                dot.skillDeliveryEnabled && conversation.learningContainerId
+-                  ? 10
+-                  : 5,
+-              ),
++              agentLoopStrategy: maxIterations(150), // turicks: was 5 (10 with skills). Hitting it ends the turn silently as "completed"; a coding shift needs 40+ steps
+               tools: [
+                 ...tanstackTools(serverTools),
+                 ...connected,
+diff --git a/src/server/runner.ts b/src/server/runner.ts
+index e5a047e..666b9d7 100644
+--- a/src/server/runner.ts
++++ b/src/server/runner.ts
+@@ -68,9 +68,9 @@ export class Runner {
+     const timeout = setTimeout(
+       () =>
+         controller.abort(
+-          new Error('Research exceeded the 90 second time limit.'),
++          new Error('Research exceeded the 15 minute time limit.'),
+         ),
+-      90_000,
++      15 * 60_000, // turicks: was 90 s; tasks run the same Dot turn as chat, which may wait on a claude run
+     );
+     try {
+       const settings = this.store.settings();
+diff --git a/src/server/store.ts b/src/server/store.ts
+index 032cb06..bddb904 100644
+--- a/src/server/store.ts
++++ b/src/server/store.ts
+@@ -146,6 +146,10 @@ export class Store {
+       )
+       .run(taskId, runId, text, Date.now());
+   }
++  // turicks: recurring tasks retry after their interval; one-off tasks still wait for the owner.
++  private retryAt(task: Task, now: number) {
++    return task.intervalSeconds ? now + task.intervalSeconds * 1000 : null;
++  }
+   private invalidate(task: Task, status: string, reason: string) {
+     const now = Date.now();
+     if (task.lease)
+@@ -156,9 +160,15 @@ export class Store {
+         .run(now, reason, task.lease);
+     this.db
+       .prepare(
+-        'UPDATE tasks SET status=?, lease=NULL, leaseUntil=NULL, updatedAt=?, error=? WHERE id=?',
++        'UPDATE tasks SET status=?, lease=NULL, leaseUntil=NULL, updatedAt=?, error=?, nextRunAt=? WHERE id=?',
+       )
+-      .run(status, now, status === 'interrupted' ? reason : null, task.id);
++      .run(
++        status,
++        now,
++        status === 'interrupted' ? reason : null,
++        status === 'interrupted' ? this.retryAt(task, now) : null,
++        task.id,
++      );
+     this.event(task.id, task.lease, reason);
+   }
+   action(id: string, action: Action): Task | undefined {
+@@ -219,7 +229,8 @@ export class Store {
+         );
+       const task = this.db
+         .prepare(
+-          "SELECT * FROM tasks WHERE status='queued' OR (status='completed' AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 1",
++          // turicks: a recurring task also comes back after a failed or interrupted run.
++          "SELECT * FROM tasks WHERE status='queued' OR (status IN ('completed','failed','interrupted') AND nextRunAt IS NOT NULL AND nextRunAt<=?) ORDER BY createdAt LIMIT 1",
+         )
+         .get(now) as unknown as Task | undefined;
+       if (!task) return null;
+@@ -284,9 +295,9 @@ export class Store {
+         .run(now, error, claim.lease);
+       this.db
+         .prepare(
+-          "UPDATE tasks SET status='failed', lease=NULL, leaseUntil=NULL, error=?, updatedAt=? WHERE id=?",
++          "UPDATE tasks SET status='failed', lease=NULL, leaseUntil=NULL, error=?, updatedAt=?, nextRunAt=? WHERE id=?",
+         )
+-        .run(error, now, claim.id);
++        .run(error, now, this.retryAt(this.task(claim.id)!, now), claim.id);
+       this.event(claim.id, claim.lease, error);
+     });
+   }
+diff --git a/src/shared/scheduled-message.ts b/src/shared/scheduled-message.ts
+index 22beba0..24e3182 100644
+--- a/src/shared/scheduled-message.ts
++++ b/src/shared/scheduled-message.ts
+@@ -16,3 +16,14 @@ export function isScheduledTaskMessage(
+     metadata.opendotsSource === 'scheduled_task'
+   );
+ }
++
++// turicks: a scheduled shift keeps its state in GitHub and its computer, not in chat history. Send only
++// its own turn, so a shift costs the same however long its conversation gets.
++export function currentScheduledTurn<
++  M extends Pick<Message, 'id' | 'role' | 'metadata'>,
++>(messages: M[]): M[] {
++  const last = messages.findLastIndex((message) => message.role === 'user');
++  return last > 0 && isScheduledTaskMessage(messages[last])
++    ? messages.slice(last)
++    : messages;
++}
+diff --git a/tests/dot-agent-channel.test.ts b/tests/dot-agent-channel.test.ts
+index 1c64b97..58a284b 100644
+--- a/tests/dot-agent-channel.test.ts
++++ b/tests/dot-agent-channel.test.ts
+@@ -241,7 +241,8 @@ it.each(['abort', 'timeout'])(
+         messageId: 'answer',
+         delta: 'private answer',
+       });
+-      if (reason === 'timeout') await vi.advanceTimersByTimeAsync(90000);
++      if (reason === 'timeout')
++        await vi.advanceTimersByTimeAsync(15 * 60_000); // turicks: limit raised from 90 s;
+       else f.agent.abortRun();
+       stream.next({
+         type: EventType.RUN_FINISHED,
+diff --git a/tests/tanstack-agent.test.ts b/tests/tanstack-agent.test.ts
+index 444b21c..f717fc8 100644
+--- a/tests/tanstack-agent.test.ts
++++ b/tests/tanstack-agent.test.ts
+@@ -344,7 +344,7 @@ it('reports a turn that hits the time limit as a RUN_ERROR instead of ending sil
+         }),
+     );
+     const finished = lastValueFrom(f.agent.run(f.input).pipe(toArray()));
+-    await vi.advanceTimersByTimeAsync(90_001);
++    await vi.advanceTimersByTimeAsync(15 * 60_000 + 1); // turicks: limit raised from 90 s;
+     const events = await finished;
+     expect(events).toEqual(
+       expect.arrayContaining([
+diff --git a/tests/turicks.test.ts b/tests/turicks.test.ts
+new file mode 100644
+index 0000000..d2d9ac1
+--- /dev/null
++++ b/tests/turicks.test.ts
+@@ -0,0 +1,81 @@
++// turicks: the engineering team's shifts are recurring tasks. They must survive a failed or interrupted
++// run, and each shift sends only its own turn (its state lives in GitHub, not in chat history).
++import { afterEach, describe, expect, it } from 'vitest';
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { Store } from '../src/server/store.js';
++import {
++  currentScheduledTurn,
++  scheduledTaskMessagePrefix,
++} from '../src/shared/scheduled-message.js';
++
++const open: { store: Store; dir: string }[] = [];
++function fixture() {
++  const dir = mkdtempSync(join(tmpdir(), 'opendots-'));
++  const store = new Store(join(dir, 'test.sqlite'));
++  open.push({ store, dir });
++  return store;
++}
++afterEach(() =>
++  open.splice(0).forEach(({ store, dir }) => {
++    store.close();
++    rmSync(dir, { recursive: true, force: true });
++  }),
++);
++
++describe('recurring shifts', () => {
++  it('stay on schedule after a failed or interrupted run', () => {
++    const store = fixture();
++    const task = store.createTask('Builder shift', 60);
++    const now = Date.now();
++    store.fail(store.claim(now)!, 'Intelligence runtime returned HTTP 502.');
++    expect(store.task(task.id)?.status).toBe('failed');
++    expect(store.claim(now + 30_000)).toBeNull();
++    const retry = store.claim(now + 120_000)!;
++    expect(retry.id).toBe(task.id);
++    store.interrupt(retry, 'Server stopped during this run.');
++    expect(store.task(task.id)?.status).toBe('interrupted');
++    expect(store.claim(Date.now() + 30_000)).toBeNull();
++    expect(store.claim(Date.now() + 120_000)?.id).toBe(task.id);
++  });
++  it('still stop when paused, and one-off tasks still wait for the owner', () => {
++    const store = fixture();
++    const shift = store.createTask('Reviewer shift', 60);
++    store.claim(Date.now());
++    store.action(shift.id, 'pause');
++    expect(store.claim(Date.now() + 120_000)).toBeNull();
++    const once = store.createTask('One-off research');
++    store.fail(store.claim(Date.now())!, 'Model error');
++    expect(store.claim(Date.now() + 3_600_000)).toBeNull();
++    expect(store.task(once.id)?.status).toBe('failed');
++  });
++});
++
++describe('currentScheduledTurn', () => {
++  const user = (id: string) => ({ id, role: 'user' as const, content: id });
++  const reply = (id: string) => ({
++    id,
++    role: 'assistant' as const,
++    content: id,
++  });
++  it('keeps only the latest scheduled shift and what follows it', () => {
++    const shift = `${scheduledTaskMessagePrefix}2`;
++    const messages = [
++      user(`${scheduledTaskMessagePrefix}1`),
++      reply('a'),
++      user('founder asks something'),
++      reply('b'),
++      user(shift),
++    ];
++    expect(currentScheduledTurn(messages).map((m) => m.id)).toEqual([shift]);
++  });
++  it('leaves a normal chat turn with its full history', () => {
++    const messages = [
++      user(`${scheduledTaskMessagePrefix}1`),
++      reply('a'),
++      user('hi'),
++    ];
++    expect(currentScheduledTurn(messages)).toBe(messages);
++  });
++});

@@ -11,9 +11,11 @@ AGY_SRC=${AGY_SRC:-/home/antigravity/.local/bin/agy}
 
 [[ -d $APP/.git ]] || git clone -q https://github.com/CopilotKit/OpenDots.git "$APP"
 git -C "$APP" fetch -q origin && git -C "$APP" checkout -q -f "$OPENDOTS_REV"
-# Our one change to OpenDots: a chat turn or task may wait on a claude run (15 min and 40 tool steps instead of 90 s and 5).
-# checkout -f dropped the previous copy, so this re-applies cleanly; it fails loudly if upstream code moved.
-git -C "$APP" apply "$HERE/opendots-turn-limits.patch"
+# Our OpenDots changes (README): 15-min turns and tasks, recurring tasks survive a failed or interrupted run,
+# scheduled runs send only their own turn. checkout -f dropped the previous copy (the new test file is untracked,
+# so remove it), so this re-applies cleanly; it fails loudly if upstream code moved.
+rm -f "$APP/tests/turicks.test.ts"
+git -C "$APP" apply "$HERE/opendots-turicks.patch"
 
 if [[ ! -f $APP/.env ]]; then
   cp "$APP/.env.example" "$APP/.env"

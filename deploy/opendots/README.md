@@ -10,7 +10,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `computer.Dockerfile` | Agent computer image |
 | `compose.turicks.yml` | Points the supervisor at that image |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
-| `opendots-turn-limits.patch` | Our one OpenDots change, applied by `install.sh`: a chat turn may last 15 min and 40 tool steps (upstream: 90 s, 5), so a Dot can wait for a claude run inside one reply |
+| `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min and 150 tool steps (upstream: 90 s, 5); a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn |
 | `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused 15-min shift tasks. Idempotent |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
@@ -51,9 +51,10 @@ OpenDots' own scheduler runs one "shift" task per Dot every 15 minutes, and each
 - **Give them work:** ask the Architect in chat, or open an issue labelled `agent:plan` in a repo listed in
   `TEAM_REPOS` (default `pushkarverma3698/opendots-sandbox`). Add repos with
   `TEAM_REPOS="owner/a owner/b" bash /opt/opendots/deploy/setup-dots.sh`.
-- **Your part:** merge PRs labelled `agent:approved`, answer `agent:blocked` items (comment, then swap
-  `agent:blocked` for the queue label to resume), and close issues the agents mark `agent:in-pr` after their
-  PR merges into a non-default branch (the Builder also does this on a later shift).
+- **Your part:** tell the Chief of Staff which `agent:approved` PR to merge (it merges, then closes the issue
+  with a link to the PR), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
+  `agent:blocked` for the queue label). Issues marked `agent:in-pr` whose PR merged into a non-default branch are
+  closed by the Builder on a later shift.
 - **Start / stop:** shifts are created paused. Start each in the app (Tasks → Run) or
   `POST /api/tasks/<id>/actions {"action":"run"}`. Kill switch: pause the three tasks (pausing also stops a running
   shift).
@@ -72,10 +73,11 @@ OpenDots' own scheduler runs one "shift" task per Dot every 15 minutes, and each
 Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `changes`, `approved`, `blocked`.
 A shift first resumes its own claimed item (branch, open PR, `run-bg list`) before taking new work.
 
-**Scheduler behaviour (read in OpenDots source, pinned `625452e`):** one task runs at a time. A recurring task
-schedules its next run only after a *completed* run; a failed or interrupted run stops the schedule until
-someone presses Run. Changing a task's settings or pausing it interrupts the running shift. Every shift runs in
-the same "Shift" conversation, so that thread keeps growing.
+**Scheduler behaviour (read in OpenDots source, pinned `625452e`, plus our patch):** one task runs at a time.
+Upstream, a recurring task schedules its next run only after a *completed* run; with the patch it also comes
+back one interval after a failed or interrupted run. Changing a task's settings or pausing it interrupts the
+running shift. Every shift posts into the same "Shift" conversation, but the model gets only the current
+shift's turn, so a shift costs the same however long that thread gets.
 
 **Security limit (known, accepted for the sandbox):** the computers run repo code (tests, scripts) as root,
 and that code can read every login in the computer: on 2026-10-10 `/workspace/.claude-token` and the gh login
