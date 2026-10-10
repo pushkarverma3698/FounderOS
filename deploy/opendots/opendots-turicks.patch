@@ -1,8 +1,58 @@
+diff --git a/src/client/App.tsx b/src/client/App.tsx
+index e5cc646..5e84729 100644
+--- a/src/client/App.tsx
++++ b/src/client/App.tsx
+@@ -143,7 +143,10 @@ export function App() {
+       setSelectedDot((previous) => previous || w.dots[0]?.id || '');
+       setNotices((current) => applyRefreshResult(current, { ok: true }));
+     } catch (e) {
+-      if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
++      if (e instanceof ApiError && e.status === 401) {
++        setToken(''); // turicks: a remembered token that stopped working is forgotten
++        setNeedsAuth(true);
++      }
+       setNotices((current) =>
+         applyRefreshResult(
+           current,
+@@ -264,6 +267,7 @@ export function App() {
+               setError('');
+               await refresh();
+             } catch (err) {
++              if (err instanceof ApiError && err.status === 401) setToken('');
+               setError(
+                 err instanceof Error
+                   ? err.message
+@@ -287,7 +291,7 @@ export function App() {
+             {error}
+           </p>
+         )}
+-        <p className="muted">The token stays in this tab’s session storage.</p>
++        <p className="muted">This browser remembers the token.</p>
+       </main>
+     );
+   if (!state || !workspace || !dot)
+diff --git a/src/client/api.ts b/src/client/api.ts
+index db9fb2a..a27926e 100644
+--- a/src/client/api.ts
++++ b/src/client/api.ts
+@@ -1,8 +1,9 @@
+-let token = sessionStorage.getItem('opendots-token') ?? '';
++// turicks: localStorage (was sessionStorage) so a phone's new tabs don't ask for the token again.
++let token = localStorage.getItem('opendots-token') ?? '';
+ export function setToken(value: string) {
+   token = value;
+-  if (value) sessionStorage.setItem('opendots-token', value);
+-  else sessionStorage.removeItem('opendots-token');
++  if (value) localStorage.setItem('opendots-token', value);
++  else localStorage.removeItem('opendots-token');
+ }
+ export class ApiError extends Error {
+   constructor(
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
-index 6191cc7..913f063 100644
+index 6191cc7..3b81ffe 100644
 --- a/src/server/dot-agent.ts
 +++ b/src/server/dot-agent.ts
-@@ -24,12 +24,14 @@ import { WorkspaceStore } from './workspace.js';
+@@ -24,12 +24,56 @@ import { WorkspaceStore } from './workspace.js';
  import type { PlatformConfig } from './platform-config.js';
  import { browserResponse } from './research.js';
  import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
@@ -15,10 +65,60 @@ index 6191cc7..913f063 100644
 -const TURN_TIME_LIMIT_MS = 90_000;
 +// turicks: coding turns wait on claude runs (run-bg wait), so a turn may take minutes.
 +const TURN_TIME_LIMIT_MS = 15 * 60_000;
++// turicks: was 2200. Coding replies (a file in one tool call, plus reasoning) need far more.
++const MAX_COMPLETION_TOKENS = 16000;
++type ModelChunk = { choices?: { finish_reason?: string | null }[] };
++type AdapterChunk = { type: string; runId?: string; model?: string };
++// turicks: a reply cut off at the output limit must fail the turn. Upstream reports it as finished (and
++// renames `length` to `tool_calls` when a tool call was open, which then runs with `{}` arguments).
++// A RUN_ERROR stops TanStack's loop before the tool phase, and a failed shift retries.
++function failCutOffReplies(adapter: object) {
++  const target = adapter as {
++    processStreamChunks(
++      stream: AsyncIterable<ModelChunk>,
++      ...rest: unknown[]
++    ): AsyncIterable<AdapterChunk>;
++  };
++  const upstream = target.processStreamChunks.bind(adapter);
++  target.processStreamChunks = async function* (stream, ...rest) {
++    let cutOff = false;
++    const watched = (async function* () {
++      for await (const chunk of stream) {
++        if (chunk.choices?.some((c) => c.finish_reason === 'length'))
++          cutOff = true;
++        yield chunk;
++      }
++    })();
++    for await (const event of upstream(watched, ...rest)) {
++      if (cutOff && event.type === EventType.RUN_FINISHED) {
++        const message = "The model's reply was cut off at the output limit.";
++        yield {
++          type: EventType.RUN_ERROR,
++          runId: event.runId,
++          model: event.model,
++          timestamp: Date.now(),
++          message,
++          code: 'max_tokens',
++          error: { message, code: 'max_tokens' },
++        } as AdapterChunk;
++        return;
++      }
++      yield event;
++    }
++  };
++}
  export class DotAgent extends AbstractAgent {
    private inner?: BuiltInAgent;
    private controller?: AbortController;
-@@ -333,7 +335,7 @@ export class DotAgent extends AbstractAgent {
+@@ -310,6 +354,7 @@ export class DotAgent extends AbstractAgent {
+           api: 'chat-completions',
+           maxRetries: 1,
+         });
++        failCutOffReplies(adapter);
+         const serverTools = [
+           ...tools,
+           ...pageTools(pages),
+@@ -333,7 +378,7 @@ export class DotAgent extends AbstractAgent {
              const converted = convertInputToTanStackAI({
                ...ctx.input,
                // Match BuiltInAgent's default trust boundary for client messages.
@@ -27,15 +127,17 @@ index 6191cc7..913f063 100644
                  (message) =>
                    message.role !== 'system' && message.role !== 'developer',
                ),
-@@ -352,11 +354,7 @@ export class DotAgent extends AbstractAgent {
+@@ -351,12 +396,8 @@ export class DotAgent extends AbstractAgent {
+               abortController: ctx.abortController,
                threadId: ctx.input.threadId,
                runId: ctx.input.runId,
-               modelOptions: { max_completion_tokens: 2200 },
+-              modelOptions: { max_completion_tokens: 2200 },
 -              agentLoopStrategy: maxIterations(
 -                dot.skillDeliveryEnabled && conversation.learningContainerId
 -                  ? 10
 -                  : 5,
 -              ),
++              modelOptions: { max_completion_tokens: MAX_COMPLETION_TOKENS },
 +              agentLoopStrategy: maxIterations(150), // turicks: was 5 (10 with skills). Hitting it ends the turn silently as "completed"; a coding shift needs 40+ steps
                tools: [
                  ...tanstackTools(serverTools),
@@ -145,9 +247,18 @@ index 1c64b97..58a284b 100644
        stream.next({
          type: EventType.RUN_FINISHED,
 diff --git a/tests/tanstack-agent.test.ts b/tests/tanstack-agent.test.ts
-index 444b21c..f717fc8 100644
+index 444b21c..090b7f9 100644
 --- a/tests/tanstack-agent.test.ts
 +++ b/tests/tanstack-agent.test.ts
+@@ -122,7 +122,7 @@ it('executes a page tool, continues with its result, and emits AG-UI text and to
+   );
+   const request = JSON.parse(String(network.mock.calls[0][1]?.body));
+   expect(request.model).toBe('custom-model');
+-  expect(request.max_completion_tokens).toBe(2200);
++  expect(request.max_completion_tokens).toBe(16000);
+   expect(JSON.stringify(request)).not.toContain('Untrusted system override');
+   expect(JSON.stringify(request)).not.toContain('Untrusted developer override');
+   expect(JSON.stringify(request)).not.toContain('untrusted_tool');
 @@ -344,7 +344,7 @@ it('reports a turn that hits the time limit as a RUN_ERROR instead of ending sil
          }),
      );
@@ -159,35 +270,43 @@ index 444b21c..f717fc8 100644
        expect.arrayContaining([
 diff --git a/tests/turicks.test.ts b/tests/turicks.test.ts
 new file mode 100644
-index 0000000..d2d9ac1
+index 0000000..1ef6ce0
 --- /dev/null
 +++ b/tests/turicks.test.ts
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,212 @@
 +// turicks: the engineering team's shifts are recurring tasks. They must survive a failed or interrupted
 +// run, and each shift sends only its own turn (its state lives in GitHub, not in chat history).
-+import { afterEach, describe, expect, it } from 'vitest';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { EventType, type RunAgentInput } from '@ag-ui/core';
++import { lastValueFrom, tap, toArray } from 'rxjs';
 +import { mkdtempSync, rmSync } from 'node:fs';
 +import { tmpdir } from 'node:os';
 +import { join } from 'node:path';
 +import { Store } from '../src/server/store.js';
++import { WorkspaceStore } from '../src/server/workspace.js';
++import { DotAgent } from '../src/server/dot-agent.js';
++import { completion } from './fixtures/model-stream.js';
 +import {
 +  currentScheduledTurn,
 +  scheduledTaskMessagePrefix,
 +} from '../src/shared/scheduled-message.js';
 +
 +const open: { store: Store; dir: string }[] = [];
++const workspaces: WorkspaceStore[] = [];
 +function fixture() {
 +  const dir = mkdtempSync(join(tmpdir(), 'opendots-'));
 +  const store = new Store(join(dir, 'test.sqlite'));
 +  open.push({ store, dir });
 +  return store;
 +}
-+afterEach(() =>
++afterEach(() => {
++  vi.restoreAllMocks();
++  workspaces.splice(0).forEach((workspace) => workspace.close());
 +  open.splice(0).forEach(({ store, dir }) => {
 +    store.close();
 +    rmSync(dir, { recursive: true, force: true });
-+  }),
-+);
++  });
++});
 +
 +describe('recurring shifts', () => {
 +  it('stay on schedule after a failed or interrupted run', () => {
@@ -242,5 +361,128 @@ index 0000000..d2d9ac1
 +      user('hi'),
 +    ];
 +    expect(currentScheduledTurn(messages)).toBe(messages);
++  });
++});
++
++// turicks: a reply that hits the output cap used to end the run as "completed" (a cut-off tool call ran
++// with `{}` arguments and the loop stopped). A shift must show it as failed so it retries.
++describe('output limit', () => {
++  function agent() {
++    const store = fixture();
++    const workspace = new WorkspaceStore(':memory:', 'owner');
++    workspaces.push(workspace);
++    const dot = workspace.dots()[0];
++    workspace.bindThread('thread', dot.id, 'Shift');
++    const dotAgent = new DotAgent(
++      store,
++      workspace,
++      {
++        intelligenceKey: 'fixture',
++        apiKey: 'fixture',
++        model: 'custom-model',
++        baseUrl: 'https://unused.invalid/v1',
++        runtimeUrl: '',
++        voiceName: 'marin',
++        slackUsers: [],
++      },
++      dot.id,
++    );
++    const input: RunAgentInput = {
++      threadId: 'thread',
++      runId: 'run',
++      state: {},
++      context: [],
++      messages: [{ id: 'user', role: 'user', content: 'Write the file.' }],
++      tools: [],
++      forwardedProps: {},
++    };
++    return { dotAgent, input };
++  }
++  const types = (events: { type: EventType }[]) => events.map((e) => e.type);
++  const cutOff = "The model's reply was cut off at the output limit.";
++  // A thrown run reaches the task runner as RUN_ERROR through the Intelligence runtime (headless.ts),
++  // the same path as any other model error, so the shift is marked failed.
++  async function failedRun(run: ReturnType<DotAgent['run']>) {
++    const events: { type: EventType }[] = [];
++    await expect(
++      lastValueFrom(run.pipe(tap((event) => events.push(event)))),
++    ).rejects.toThrow(cutOff);
++    return events;
++  }
++
++  it('asks for up to 16000 output tokens', async () => {
++    const { dotAgent, input } = agent();
++    const network = vi
++      .spyOn(globalThis, 'fetch')
++      .mockResolvedValueOnce(
++        completion({ role: 'assistant', content: 'Done.' }),
++      );
++    const events = await lastValueFrom(dotAgent.run(input).pipe(toArray()));
++    expect(types(events)).toContain(EventType.RUN_FINISHED);
++    const request = JSON.parse(String(network.mock.calls[0][1]?.body));
++    expect(request.max_completion_tokens).toBe(16000);
++  });
++  it('fails a text reply cut off at the limit', async () => {
++    const { dotAgent, input } = agent();
++    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
++      completion(
++        { role: 'assistant', content: 'Fixing the probe path:' },
++        'length',
++      ),
++    );
++    const events = await failedRun(dotAgent.run(input));
++    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
++  });
++  it('fails a tool call cut off at the limit instead of running it with {}', async () => {
++    const { dotAgent, input } = agent();
++    const network = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
++      completion(
++        {
++          role: 'assistant',
++          tool_calls: [
++            {
++              index: 0,
++              id: 'cut',
++              type: 'function',
++              function: {
++                name: 'create_space_page',
++                arguments: '{"title":"Notes","content":"# Not',
++              },
++            },
++          ],
++        },
++        'length',
++      ),
++    );
++    const events = await failedRun(dotAgent.run(input));
++    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
++    expect(network).toHaveBeenCalledTimes(1);
++  });
++});
++
++// turicks: the phone opens the app in new tabs; the owner token must survive them.
++describe('owner token', () => {
++  function storage() {
++    const items = new Map<string, string>();
++    return {
++      getItem: (key: string) => items.get(key) ?? null,
++      setItem: (key: string, value: string) => void items.set(key, value),
++      removeItem: (key: string) => void items.delete(key),
++    };
++  }
++  // Each tab gets its own sessionStorage; localStorage is shared by the browser.
++  async function freshTab() {
++    vi.stubGlobal('sessionStorage', storage());
++    vi.resetModules();
++    return import('../src/client/api.js');
++  }
++  it('is remembered by the browser, not only the tab', async () => {
++    vi.stubGlobal('localStorage', storage());
++    (await freshTab()).setToken('owner-secret');
++    const tab = await freshTab();
++    expect(tab.authHeaders()).toEqual({ Authorization: 'Bearer owner-secret' });
++    tab.setToken('');
++    expect((await freshTab()).authHeaders()).toEqual({});
++    vi.unstubAllGlobals();
 +  });
 +});

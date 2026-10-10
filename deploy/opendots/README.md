@@ -10,7 +10,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `computer.Dockerfile` | Agent computer image |
 | `compose.turicks.yml` | Points the supervisor at that image |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
-| `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min and 150 tool steps (upstream: 90 s, 5); a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn |
+| `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min and 150 tool steps (upstream: 90 s, 5); a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
 | `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused 15-min shift tasks. Idempotent |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
@@ -22,7 +22,10 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 2. CopilotKit key, on the laptop:
    `git clone https://github.com/CopilotKit/OpenDots.git /tmp/od && cd /tmp/od && cp .env.example .env && npx copilotkit@latest login && npx copilotkit@latest project select`.
    Copy the `CPK_INTELLIGENCE_API_KEY=` and `CPK_TELEMETRY_ID=` lines into `/opt/opendots/app/.env`.
-3. Owner token for the phone login: `ssh founderos-vps 'grep ^OWNER_TOKEN= /opt/opendots/app/.env'`.
+3. Owner token for the phone login: `ssh founderos-vps 'grep ^OWNER_TOKEN= /opt/opendots/app/.env'`. Move it
+   to the phone through a password manager and paste it once: the browser remembers it (a token the server
+   rejects is forgotten and the unlock screen comes back). The phone reaches the app only on the tailnet, so set
+   Tailscale on the phone to Always-on VPN; when the phone drops off the tailnet the link stops loading.
 4. Claude login for the Builder Dot: run `claude setup-token` on the laptop and keep the `sk-ant-...` token
    for the seed step below. The VPS has no claude login to reuse.
 
@@ -36,6 +39,11 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 ## Operating
 - Status: `cd /opt/opendots/app && docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml ps`
 - Model: `OPENAI_MODEL` in `.env` (OpenRouter, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`), then rerun `install.sh`.
+  The model is jev-router, which picks a model and reasoning effort per request, so it can't be pinned. Some of its
+  picks need OpenRouter's 18+ confirmation (OpenRouter → Settings → Preferences); without it those turns fail with a 403.
+- Output limit: a model reply may be 16,000 tokens (reasoning included). A reply that hits the limit ends the turn
+  as failed with "The model's reply was cut off at the output limit." A cut-off tool call is never run, and a
+  shift retries one interval later. Upstream's 2,200 cut coding replies off mid-file and still reported "completed".
 - Dot instructions (system prompts), max 2000 characters each (the script refuses longer). For a quick try, edit in the app: "…" next to the Dot,
   then "Role instructions". To keep a change, edit `CHIEF`, `TEAM`, `ARCHITECT`, `BUILDER` or `REVIEWER` in `setup-dots.sh`, copy it to
   `/opt/opendots/deploy/`, and run `ssh founderos-vps 'bash /opt/opendots/deploy/setup-dots.sh'`. That script overwrites
