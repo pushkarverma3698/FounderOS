@@ -1,5 +1,5 @@
 /**
- * Unit tests — /draft and /ask.
+ * Unit tests — /draft.
  *
  * These close the loop the brief opens. Before them, every row ended in
  * "→ /draft 1" and the gateway dropped it: `if (text.startsWith("/")) return;`
@@ -14,13 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { parseRowArg, unresolvedMessage } from "../../../src/gateway/jobhunt-commands.js";
-import {
-  draftInstruction,
-  askInstruction,
-} from "../../../src/gateway/jobhunt-instructions.js";
-import { unknownCommandReply } from "../../../src/gateway/commands.js";
-import { threadIdFor } from "../../../src/gateway/kernel-run.js";
-import { ARTIFACT_ROOT } from "../../../src/core/config.js";
+import { ARTIFACT_ROOT, TENANT } from "../../../src/core/config.js";
 import type { JobApplication } from "../../../src/db/schema.js";
 
 const ROW = {
@@ -72,87 +66,9 @@ describe("unresolvedMessage", () => {
   });
 });
 
-describe("draftInstruction", () => {
-  it("carries the posting body, not just the title", () => {
-    const out = draftInstruction(ROW);
-    expect(out).toContain("Aquablu B.V");
-    expect(out).toContain("Embedded Software Engineer");
-    expect(out).toContain("embedded Linux");
-  });
-
-  it("orders read_cv first and forbids sending", () => {
-    const out = draftInstruction(ROW);
-    expect(out).toContain("read_cv");
-    expect(out).toMatch(/Do NOT send/i);
-  });
-
-  it("survives a row with no description or url", () => {
-    const bare = { ...ROW, description: null, url: null } as unknown as JobApplication;
-    expect(() => draftInstruction(bare)).not.toThrow();
-    expect(draftInstruction(bare)).not.toContain("URL:");
-  });
-});
-
-describe("askInstruction", () => {
-  it("targets the unresolved gate rather than the role in general", () => {
-    const out = askInstruction(ROW);
-    expect(out).toContain("Partner permit: free access");
-    expect(out).toMatch(/do not ask about the role in general/i);
-    expect(out).toMatch(/Do NOT send/i);
-  });
-
-  it("sends ONLY the unresolved check to the model, never the passing ones", () => {
-    // The 2026-08-01 defect. This pasted every gate — passing ones included —
-    // under the heading "What is unresolved", so the model wrote a generic
-    // question. The founder gets one message to an employer; spending it on a
-    // check that already passed wastes it.
-    const row = {
-      ...ROW,
-      gate_json: JSON.stringify([
-        { gate: "Sponsor", status: "pass", evidence: "Exact register match." },
-        { gate: "Salary", status: "flag", evidence: "No salary stated in the ad." },
-        { gate: "Language", status: "pass", evidence: "No Dutch requirement found." },
-      ]),
-    } as unknown as JobApplication;
-
-    const out = askInstruction(row);
-    const unresolved = out.slice(out.indexOf("UNRESOLVED"), out.indexOf("ALREADY SETTLED"));
-
-    expect(unresolved).toContain("No salary stated");
-    expect(unresolved).not.toContain("Exact register match");
-    expect(unresolved).not.toContain("No Dutch requirement");
-    // The passing checks are still supplied — as context, clearly fenced off.
-    expect(out).toMatch(/ALREADY SETTLED[\s\S]*Exact register match/);
-    expect(out).toMatch(/do NOT ask about these/i);
-  });
-
-  it("admits it cannot tell which check passed on a pre-gate_json row", () => {
-    // Every production row on 2026-08-01 predates the column, so every check on
-    // them reads as unresolved. Handing the model three checks and calling all
-    // three open — without saying we don't actually know — would reproduce the
-    // exact defect this change closes, one layer down.
-    const out = askInstruction(ROW);
-    expect(out).toContain("Partner permit");
-    expect(out).toContain("cannot tell which of these");
-    expect(out).not.toContain("ALREADY SETTLED");
-  });
-});
-
-describe("unknownCommandReply", () => {
-  it("names the command that did not exist", () => {
-    expect(unknownCommandReply("/draaft 1")).toContain("/draaft");
-  });
-
-  it("points at a way forward instead of just refusing", () => {
-    const out = unknownCommandReply("/nope");
-    expect(out).toContain("/commands");
-    expect(out).toMatch(/plain English/i);
-  });
-});
-
 describe("handleDraft (resolution path)", () => {
   const chatId = 424242;
-  const artifactDir = path.join(ARTIFACT_ROOT, threadIdFor(chatId).replace(/[^a-zA-Z0-9_.-]/g, "_"));
+  const artifactDir = path.join(ARTIFACT_ROOT, `${TENANT}:${chatId}`.replace(/[^a-zA-Z0-9_.-]/g, "_"));
 
   beforeEach(() => vi.resetModules());
   afterEach(async () => {
@@ -212,15 +128,11 @@ describe("handleDraft (resolution path)", () => {
     }));
 
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
-    const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
     const replyWithDocument = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "2", chat: { id: chatId }, reply, replyWithDocument } as never, { runKernelText });
+    await handleDraft({ match: "2", chat: { id: chatId }, reply, replyWithDocument } as never);
 
-    // No model turn at all on the success branch — not for the send, and never
-    // the free-text draft path.
-    expect(runKernelText).not.toHaveBeenCalled();
     expect(replyWithDocument).toHaveBeenCalledOnce();
     const [doc, docOpts] = (replyWithDocument.mock.calls[0] ?? []) as unknown as [
       { fileData?: unknown; filename?: string },
@@ -265,10 +177,10 @@ describe("handleDraft (resolution path)", () => {
     expect(written[0]).toMatch(/^cv-aquablu.*\.pdf$/);
   });
 
-  it("falls back to a text draft, and says so, when tailoring fails", async () => {
-    // The stretch section carries `/draft`, not `/ask` — a years flag is an
-    // application to write, not a question to send. Its ranks continue from DO
-    // TODAY, so the same integer reaches exactly one row across both sections.
+  it("says plainly that nothing was drafted when tailoring fails", async () => {
+    // UPDATED 2026-10-10: the jobs process has no kernel, so the old free-text
+    // fallback draft is gone. The reply must say nothing was drafted, so the
+    // founder never waits for a text draft that will not come.
     vi.doMock("../../../src/db/job-queries.js", () => ({
       getApplicationByBriefRank: vi.fn(async (section: string, rank: number) =>
         section === "stretch" && rank === 3 ? ROW : null,
@@ -286,25 +198,16 @@ describe("handleDraft (resolution path)", () => {
     }));
 
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
-    const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
+    const replyWithDocument = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "3", chat: { id: chatId }, reply } as never, { runKernelText });
+    await handleDraft({ match: "3", chat: { id: chatId }, reply, replyWithDocument } as never);
 
-    expect(runKernelText).toHaveBeenCalledOnce();
-    const callArgs = runKernelText.mock.calls[0] as unknown as [string, string];
-    expect(callArgs[1]).toContain("Aquablu B.V");
-    // It must be a DRAFT instruction, never the question prompt: asking an
-    // employer whether its five-year bar is firm invites the pre-emptive
-    // rejection the stretch band exists to avoid.
-    expect(callArgs[1]).toContain("Draft a tailored application");
-
-    // Ack, then an explicit "this failed, falling back" notice — a founder
-    // reading only the last message must know a text draft, not a PDF, is
-    // what's about to arrive.
+    expect(replyWithDocument).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledTimes(2);
-    const [fallbackText] = (reply.mock.calls[1] ?? []) as unknown as [string?];
-    expect(fallbackText).toContain("Couldn't build a tailored PDF");
+    const [failText] = (reply.mock.calls[1] ?? []) as unknown as [string?];
+    expect(failText).toContain("Couldn't build a tailored PDF for Aquablu B.V");
+    expect(failText).toContain("Nothing was drafted");
   });
 
   it("replies instead of drafting when the rank does not resolve", async () => {
@@ -312,12 +215,10 @@ describe("handleDraft (resolution path)", () => {
       getApplicationByBriefRank: vi.fn(async () => null),
     }));
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
-    const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "9", reply } as never, { runKernelText });
+    await handleDraft({ match: "9", reply } as never);
 
-    expect(runKernelText).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledOnce();
     const [replyArg1] = (reply.mock.calls[0] ?? []) as [unknown?];
     expect(String(replyArg1)).toContain("No row 9");
@@ -329,66 +230,10 @@ describe("handleDraft (resolution path)", () => {
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const reply = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "the first one", reply } as never, {
-      runKernelText: vi.fn(async () => undefined),
-    });
+    await handleDraft({ match: "the first one", reply } as never);
 
     expect(getApplicationByBriefRank).not.toHaveBeenCalled();
     const [replyArg2] = (reply.mock.calls[0] ?? []) as [unknown?];
     expect(String(replyArg2)).toContain("Usage:");
-  });
-});
-
-describe("handleAsk (resolution path)", () => {
-  beforeEach(() => vi.resetModules());
-
-  // T4, 2026-09-05: /ask never resolved a profile at all before this — it
-  // always read Pushkar's brief regardless of what was typed, unlike /draft
-  // which already honored "wife". This closed that gap.
-  it("resolves the named profile's brief, not always the default", async () => {
-    const getApplicationByBriefRank = vi.fn(async (_section: string, _rank: number, opts: { profileId?: string }) =>
-      opts.profileId === "wife-nl-finance" ? ROW : null,
-    );
-    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
-    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
-    const runKernelText = vi.fn(async () => undefined);
-    const reply = vi.fn(async () => undefined);
-
-    await handleAsk({ match: "wife 1", reply } as never, { runKernelText });
-
-    expect(getApplicationByBriefRank).toHaveBeenCalledWith(
-      "ask",
-      1,
-      expect.objectContaining({ profileId: "wife-nl-finance" }),
-    );
-    expect(runKernelText).toHaveBeenCalledOnce();
-  });
-
-  it("bare /ask still resolves the default profile's brief", async () => {
-    const getApplicationByBriefRank = vi.fn(async () => ROW);
-    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
-    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
-    const reply = vi.fn(async () => undefined);
-
-    await handleAsk({ match: "1", reply } as never, { runKernelText: vi.fn(async () => undefined) });
-
-    expect(getApplicationByBriefRank).toHaveBeenCalledWith(
-      "ask",
-      1,
-      expect.objectContaining({ profileId: "pushkar-nl-tech" }),
-    );
-  });
-
-  it("refuses an unrecognised profile word rather than guessing whose row it means", async () => {
-    const getApplicationByBriefRank = vi.fn();
-    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
-    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
-    const reply = vi.fn(async () => undefined);
-
-    await handleAsk({ match: "bogus 1", reply } as never, { runKernelText: vi.fn(async () => undefined) });
-
-    expect(getApplicationByBriefRank).not.toHaveBeenCalled();
-    const [replyArg] = (reply.mock.calls[0] ?? []) as [unknown?];
-    expect(String(replyArg)).toContain("bogus");
   });
 });

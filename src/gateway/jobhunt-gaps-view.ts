@@ -11,7 +11,7 @@ import { resolveProfileArg, isProfileArgMiss } from "./jobhunt-profile-arg.js";
 import { profileMissMessage } from "../tools/jobhunt/brief-resolver.js";
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { childLogger } from "../infra/logger.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:jobhunt-gaps-view" });
 

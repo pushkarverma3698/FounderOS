@@ -4,8 +4,7 @@
  * The `wife_` aliases left the ☰ menu on 2026-09-28 (they were 11 of its 34
  * rows, and every job command already takes a profile word). The founder's
  * condition: nothing she can do may go missing. This is the one visible row
- * that lists them all, and the Jobs screen's "👩 Tashi's jobs" button shows the
- * same text (home-menu.ts), so the two cannot drift.
+ * that lists them all.
  *
  * Rendered from COMMAND_MENU's `hidden` rows — description and `example` come
  * from the one list, so adding an alias there adds it here. A test fails if a

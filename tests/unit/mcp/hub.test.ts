@@ -363,16 +363,6 @@ describe("hub — stdio entry points", () => {
     expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(5);
   }, 60_000);
 
-  it("turicks-brain.ts still serves the five brain tools for configs that start it", async () => {
-    expect(await toolsOf("src/mcp/turicks-brain.ts")).toEqual([
-      "search_memory",
-      "get_memory",
-      "remember",
-      "save_decision",
-      "save_bug",
-    ]);
-  }, 60_000);
-
   // A hub with an open bridge child never noticed its stdin close, so it outlived the
   // laptop ssh session that started it. When that session ends, the hub must exit.
   it("exits when its stdin closes, even with a connected server open", async () => {

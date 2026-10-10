@@ -1,7 +1,7 @@
 /**
- * FounderOS — /draft and /ask
- * ===========================
- * The two commands that turn the daily job brief into an action.
+ * FounderOS — /draft and /applied
+ * ===============================
+ * The commands that turn the daily job brief into an action.
  *
  * The brief prints "1. Aquablu B.V — Embedded Software Engineer … → /draft 1".
  * Without these handlers that arrow points at nothing: grammy drops unregistered
@@ -14,14 +14,13 @@
  * Asking a model to work out which job "2" meant would be a guess with an
  * application riding on it.
  *
- * Neither command sends anything. They compose an instruction and hand it to the
- * ordinary kernel turn, so drafting an email still stops at the HITL card
- * (ADR-018: the machine never submits an application).
+ * Neither command submits anything (ADR-018: the machine never submits an
+ * application). There is no kernel since 2026-10-10: `/ask` and the text-draft
+ * fallback went with it, so a failed PDF build now says so and stops.
  */
 
 import { InputFile, type Context } from "grammy";
 import * as path from "node:path";
-import type { BriefSection } from "../db/job-queries.js";
 import { markRowApplied, packetKeyboard } from "./jobhunt-buttons.js";
 import { listApplyQueue } from "../db/apply-queries.js";
 import {
@@ -30,7 +29,6 @@ import {
   profileMissMessage,
 } from "./jobhunt-profile-arg.js";
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
-import { askInstruction, draftInstruction } from "./jobhunt-instructions.js";
 import { sendCoverLetter } from "./cover-letter-delivery.js";
 import {
   buildApplicationPacket,
@@ -38,9 +36,8 @@ import {
   type ApplicationPacket,
 } from "../tools/jobhunt/apply-packet.js";
 import { truncateAtWord } from "../tools/jobhunt/telegram-format.js";
-import { ARTIFACT_ROOT } from "../core/config.js";
-import { threadIdFor } from "./kernel-run.js";
-import { safeHtml } from "./approval-card.js";
+import { ARTIFACT_ROOT, TENANT } from "../core/config.js";
+import { safeHtml } from "./safe-html.js";
 import { childLogger } from "./../infra/logger.js";
 import type { JobApplication } from "../db/schema.js";
 import { idRef, parseRowArg, parseRowRef, rankRef, resolveRowRef, unresolvedMessage, type RowRef } from "./jobhunt-row-ref.js";
@@ -102,50 +99,9 @@ export function parseDraftArg(raw: string): DraftArg | null {
   return ids.length > 0 ? { rows, ids, all: false } : { rows, all: false };
 }
 
-export interface JobhuntCommandDeps {
-  /** The normal kernel turn — same path a typed message takes. */
-  readonly runKernelText: (ctx: Context, text: string, profileId?: string) => Promise<void>;
-}
-
-async function handleRowCommand(
-  ctx: Context,
-  command: "draft" | "ask",
-  sections: readonly BriefSection[],
-  compose: (row: JobApplication) => string,
-  deps: JobhuntCommandDeps,
-): Promise<void> {
-  // Unlike /draft, this never resolved a profile — /ask always read
-  // Pushkar's brief regardless of what was typed. With a second profile
-  // registered, "wife" has to be honored here the same way /draft honors it.
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowRef(rest) !== null);
-  if (isProfileArgMiss(selected)) {
-    await ctx.reply(profileMissMessage(selected));
-    return;
-  }
-
-  const ref = parseRowRef(selected.rest);
-  if (ref === null) {
-    await ctx.reply(unresolvedMessage(command, null));
-    return;
-  }
-
-  const resolved = await resolveRowRef(ref, command, sections, selected.profile);
-  if (!resolved.ok) {
-    await ctx.reply(resolved.message);
-    return;
-  }
-  const { row } = resolved;
-
-  log.info(
-    { command, ref, company: row.company, id: row.id, profile: selected.profile.id },
-    "Brief row command resolved",
-  );
-  await deps.runKernelText(ctx, compose(row), selected.profile.id);
-}
-
 /** The per-thread directory a tailored CV lands in before delivery. */
 function artifactDirFor(ctx: Context): string {
-  const safeThreadDir = threadIdFor(ctx.chat?.id ?? "unknown").replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const safeThreadDir = `${TENANT}:${ctx.chat?.id ?? "unknown"}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
   return path.join(ARTIFACT_ROOT, safeThreadDir);
 }
 
@@ -200,7 +156,7 @@ export function packetMessage(packet: ApplicationPacket, rank?: number): string 
  * launch; running six in parallel would put six headless browsers on a 4GB VPS
  * and race the same `tailor_status` column.
  */
-export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
+export async function handleDraft(ctx: Context): Promise<void> {
   // "all" belongs to parseDraftArg, so it is reserved before the profile lookup.
   const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all"], (rest) =>
     parseDraftArg(rest) !== null,
@@ -234,7 +190,7 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
   }
 
   for (const [i, ref] of capped.entries()) {
-    await draftOneRow(ctx, ref, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
+    await draftOneRow(ctx, ref, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
   }
 }
 
@@ -258,7 +214,6 @@ async function liveDraftRanks(profile: JobSearchProfile): Promise<number[]> {
 async function draftOneRow(
   ctx: Context,
   ref: RowRef,
-  deps: JobhuntCommandDeps,
   progress: string,
   profile: JobSearchProfile,
 ): Promise<void> {
@@ -267,14 +222,13 @@ async function draftOneRow(
     await ctx.reply(resolved.message);
     return;
   }
-  await draftRow(ctx, resolved.row, deps, progress, profile, ref.kind === "rank" ? ref.rank : undefined);
+  await draftRow(ctx, resolved.row, progress, profile, ref.kind === "rank" ? ref.rank : undefined);
 }
 
 /** Build the application for a resolved row; shared by `/draft N` and the 📝 Draft button. */
 export async function draftRow(
   ctx: Context,
   row: JobApplication,
-  deps: JobhuntCommandDeps,
   progress: string,
   profile: JobSearchProfile,
   rank?: number,
@@ -289,19 +243,15 @@ export async function draftRow(
   if (!built.ok) {
     log.warn(
       { id: row.id, company: row.company, reason: built.reason },
-      "Tailored-PDF path failed — falling back to text draft",
+      "Tailored-PDF path failed",
     );
     // truncateAtWord, not .slice: prod 2026-09-07 clipped the claim-guard's
     // reason mid-word (`... [technology] "TD)`), hiding the rest of the list of
     // ungrounded claims — the only actionable content in the message.
     await ctx.reply(
-      `⚠ Couldn't build a tailored PDF for ${row.company} (${truncateAtWord(built.reason, DRAFT_FAILURE_REASON_CHARS)}) — drafting a text application instead.`,
+      `⚠ Couldn't build a tailored PDF for ${row.company} (${truncateAtWord(built.reason, DRAFT_FAILURE_REASON_CHARS)}). ` +
+        `Nothing was drafted. Send /draft again to retry, or apply with your base CV.`,
     );
-    // profile.id — not the default. Without it this kernel turn ran under the
-    // jobhunt worker's boot-time prompt, which always named the FIRST
-    // registered candidate: a fallback draft for the second candidate's row
-    // came back signed with the wrong person's name (2026-09-05, ING/Tashi).
-    await deps.runKernelText(ctx, draftInstruction(row), profile.id);
     return;
   }
 
@@ -327,19 +277,13 @@ export async function draftRow(
   });
 }
 
-/** `/ask N` — write the one question that unblocks row N of ONE QUESTION AWAY. */
-export async function handleAsk(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
-  await handleRowCommand(ctx, "ask", ["ask"], askInstruction, deps);
-}
-
 /**
  * `/applied N` — mark row N applied and drain it from the queue.
  *
  * A row the founder actually applied to must stop appearing in DO TODAY /
  * ASK / a stretch — `listActionableApplications` filters on `stage =
- * 'screened'`, so moving the stage is what removes it, the same mechanism
- * `/draft` and `/ask` never touch. No kernel turn: this is a plain state
- * change with nothing for a model to compose or approve.
+ * 'screened'`, so moving the stage is what removes it. A plain state change
+ * with nothing for a model to compose or approve.
  */
 export async function handleApplied(ctx: Context): Promise<void> {
   const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowRef(rest) !== null);
