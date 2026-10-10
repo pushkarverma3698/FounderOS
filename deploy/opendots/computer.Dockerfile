@@ -20,7 +20,7 @@ RUN ln -s "$(readlink -f /usr/local/bin/claude)" /usr/local/bin/claude-bin && rm
   && printf '%s\n' '#!/bin/sh' \
      't=/workspace/.claude-token' \
      '[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN' \
-     'exec /usr/local/bin/claude-bin "$@"' > /usr/local/bin/claude \
+     'export IS_SANDBOX=1' 'exec /usr/local/bin/claude-bin "$@"' > /usr/local/bin/claude \
   && chmod 755 /usr/local/bin/claude
 
 # /workspace is the only volume that survives a computer restart, so CLI logins
