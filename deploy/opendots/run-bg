@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# OpenDots kills a shell command after 70s. Long work (claude -p, agy) runs here instead:
+#   run-bg start <name> <command...>   start detached in tmux, output to /workspace/runs/<name>.log
+#   run-bg status <name>               running | exit=<code>, plus the last 20 lines
+#   run-bg tail <name> [lines]         last N lines of the log (default 60)
+#   run-bg list                        every run and its state
+set -euo pipefail
+DIR=/workspace/runs
+mkdir -p "$DIR"
+
+state() {
+  if tmux has-session -t "run-$1" 2>/dev/null; then echo running
+  elif [[ -f "$DIR/$1.exit" ]]; then echo "exit=$(cat "$DIR/$1.exit")"
+  else echo unknown; fi
+}
+
+cmd=${1:-}; name=${2:-}
+case "$cmd" in
+  start)
+    [[ -n "$name" && $# -ge 3 ]] || { echo "usage: run-bg start <name> <command...>" >&2; exit 2; }
+    [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "name must be [a-zA-Z0-9_-]" >&2; exit 2; }
+    if tmux has-session -t "run-$name" 2>/dev/null; then echo "run-$name is already running" >&2; exit 1; fi
+    shift 2
+    rm -f "$DIR/$name.exit"
+    { printf '%q ' "$@"; printf '> %q 2>&1\necho $? > %q\n' "$DIR/$name.log" "$DIR/$name.exit"; } > "$DIR/$name.cmd"
+    tmux new-session -d -s "run-$name" "bash $DIR/$name.cmd"
+    echo "started run-$name; poll with: run-bg status $name"
+    ;;
+  status) echo "$(state "$name")"; tail -n 20 "$DIR/$name.log" 2>/dev/null || true ;;
+  tail) tail -n "${3:-60}" "$DIR/$name.log" ;;
+  list) for f in "$DIR"/*.cmd; do [[ -e "$f" ]] || continue; n=$(basename "$f" .cmd); echo "$n $(state "$n")"; done ;;
+  *) sed -n '2,6p' "$0"; exit 2 ;;
+esac

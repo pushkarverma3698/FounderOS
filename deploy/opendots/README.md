@@ -1,0 +1,35 @@
+# OpenDots on founderos-vps
+
+CopilotKit OpenDots (pinned `625452e`) runs in Docker under `/opt/opendots/app`, on `127.0.0.1:4310`.
+Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot computer plus `claude`, `agy`,
+`gh`, git, tmux and `run-bg`. Plan and decisions: `docs/plans/2026-10-10-opendots-migration.md`.
+
+| File | Purpose |
+|---|---|
+| `install.sh` | Install or update: clone, secrets, build all images, start, health check |
+| `computer.Dockerfile` | Agent computer image |
+| `compose.turicks.yml` | Points the supervisor at that image |
+| `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg status <name>` |
+| `seed-cli-logins.sh` | Log one Dot's computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
+
+## Founder steps, once
+1. Tailscale: open the login URL printed by `sudo tailscale up --hostname=turicks-dots` on the VPS, and
+   install Tailscale on the phone with the same account.
+2. CopilotKit key, on the laptop:
+   `git clone https://github.com/CopilotKit/OpenDots.git /tmp/od && cd /tmp/od && cp .env.example .env && npx copilotkit@latest login && npx copilotkit@latest project select`.
+   Copy the `CPK_INTELLIGENCE_API_KEY=` and `CPK_TELEMETRY_ID=` lines into `/opt/opendots/app/.env`.
+3. Owner token for the phone login: `ssh founderos-vps 'grep ^OWNER_TOKEN= /opt/opendots/app/.env'`.
+4. Claude login for the Engineer Dot: run `claude setup-token` on the laptop and keep the `sk-ant-...` token
+   for the seed step below. The VPS has no claude login to reuse.
+
+## Operator steps after those
+- HTTPS for the phone: `sudo tailscale serve --bg 4310`, then set `APP_ORIGIN=https://turicks-dots.<tailnet>.ts.net`
+  in `.env` and rerun `install.sh`.
+- After the Engineer Dot's computer is started: `ssh -t founderos-vps 'bash /opt/opendots/deploy/seed-cli-logins.sh'` lists
+  computers; rerun it with the container name and paste the token. It stores the token in `/workspace/home/.claude-token`;
+  the image's `claude` wrapper reads it, because the Dot's shell sources no profile.
+
+## Operating
+- Status: `cd /opt/opendots/app && docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml ps`
+- Model: `OPENAI_MODEL` in `.env` (OpenRouter, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`), then rerun `install.sh`.
+- Memory: each computer may use 2 GiB and the VPS has 7.6 GiB with Oplify on it. Keep two computers running at most.
