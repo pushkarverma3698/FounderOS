@@ -33,7 +33,7 @@ Decisions taken with the founder (AskUserQuestion, 2026-10-10):
 
 ## Phase 1: OpenDots on the VPS
 - [x] `/opt/opendots/app` at `625452e`, secrets generated in `.env` (mode 600).
-- [x] Model: OpenRouter, `google/gemini-3.8-flash`, same key as FounderOS.
+- [x] Model: OpenRouter `typesafe/jev-router` (per-request model pick), same key as FounderOS. Switched 2026-10-10 on the founder's call.
 - [x] `deploy/opendots/install.sh`: builds app, browser, supervisor, and `opendots-computer-turicks:1`
       (OpenBot + claude 2.1.287 + agy + gh + run-bg), starts on 127.0.0.1:4310. Ran clean 2026-10-10.
 - [x] Tailscale 1.104.1 installed on the VPS; `tailscale up --hostname=turicks-dots` waits on the founder's login.
