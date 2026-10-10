@@ -18,6 +18,9 @@ echo "agy:    $(docker exec "$c" sh -c 'cd /workspace/tmp && timeout 150 agy --n
 
 read -rsp "claude setup-token token (input hidden, Enter to skip): " token; echo
 [[ -z $token ]] && exit 0
+# setup-token prints the token wrapped over two lines; a paste of both arrives as two reads.
+while read -rs -t 2 more; do token+=$more; done
+token=${token//[[:space:]]/}
 [[ $token == sk-ant-* ]] || { echo "that does not look like a setup-token (sk-ant-...)" >&2; exit 1; }
 printf '%s\n%s\n' "$token" "$(date +%F)" | docker exec -i "$c" sh -c 'umask 077; cat > /workspace/.claude-token'
 echo "claude: $(docker exec "$c" sh -c 'cd /workspace/tmp && timeout 120 claude -p "reply with the single word ready" --max-turns 1' 2>&1 | tail -1)"
