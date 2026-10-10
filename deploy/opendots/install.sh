@@ -10,7 +10,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 AGY_SRC=${AGY_SRC:-/home/antigravity/.local/bin/agy}
 
 [[ -d $APP/.git ]] || git clone -q https://github.com/CopilotKit/OpenDots.git "$APP"
-git -C "$APP" fetch -q origin && git -C "$APP" checkout -q "$OPENDOTS_REV"
+git -C "$APP" fetch -q origin && git -C "$APP" checkout -q -f "$OPENDOTS_REV"
+# Our one change to OpenDots: a chat turn or task may wait on a claude run (15 min and 40 tool steps instead of 90 s and 5).
+# checkout -f dropped the previous copy, so this re-applies cleanly; it fails loudly if upstream code moved.
+git -C "$APP" apply "$HERE/opendots-turn-limits.patch"
 
 if [[ ! -f $APP/.env ]]; then
   cp "$APP/.env.example" "$APP/.env"

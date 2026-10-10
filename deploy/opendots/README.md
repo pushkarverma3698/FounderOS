@@ -9,7 +9,9 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `install.sh` | Install or update: clone, secrets, build all images, start, health check |
 | `computer.Dockerfile` | Agent computer image |
 | `compose.turicks.yml` | Points the supervisor at that image |
-| `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg status <name>` |
+| `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
+| `opendots-turn-limits.patch` | Our one OpenDots change, applied by `install.sh`: a chat turn may last 15 min and 40 tool steps (upstream: 90 s, 5), so the Engineer can wait for a claude run inside one reply |
+| `setup-dots.sh` | Creates or updates the Chief of Staff and Engineer Dots and their instructions (the system prompts) |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
@@ -34,4 +36,9 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 ## Operating
 - Status: `cd /opt/opendots/app && docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml ps`
 - Model: `OPENAI_MODEL` in `.env` (OpenRouter, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`), then rerun `install.sh`.
+- Dot instructions (system prompts), max 2000 characters each. For a quick try, edit in the app: "…" next to the Dot,
+  then "Role instructions". To keep a change, edit `CHIEF` or `ENGINEER` in `setup-dots.sh`, copy it to
+  `/opt/opendots/deploy/`, and run `ssh founderos-vps 'bash /opt/opendots/deploy/setup-dots.sh'`. That script overwrites
+  edits made in the app, so this file is the source of truth.
+- Restart a computer to pick up a rebuilt image: `POST /api/dots/<id>/computer/stop`, then `.../start` (owner token, JSON body `{}`).
 - Memory: each computer may use 2 GiB and the VPS has 7.6 GiB with Oplify on it. Keep two computers running at most.
