@@ -18,13 +18,14 @@ COPY run-bg /usr/local/bin/run-bg
 # `claude setup-token` token that seed-cli-logins.sh stores on the persistent volume.
 RUN ln -s "$(readlink -f /usr/local/bin/claude)" /usr/local/bin/claude-bin && rm /usr/local/bin/claude \
   && printf '%s\n' '#!/bin/sh' \
-     't=/workspace/home/.claude-token' \
+     't=/workspace/.claude-token' \
      '[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN' \
      'exec /usr/local/bin/claude-bin "$@"' > /usr/local/bin/claude \
   && chmod 755 /usr/local/bin/claude
 
 # /workspace is the only volume that survives a computer restart, so CLI logins
-# (~/.claude, ~/.gemini, gh, git config) live under it.
-ENV HOME=/workspace/home
+# (~/.claude, ~/.gemini, gh, git config) live under it. The computer service also runs every shell
+# command with HOME=/workspace (OpenBot shell.ts), so this must match.
+ENV HOME=/workspace
 # The container is the sandbox; Claude Code refuses skip-permissions as root without this.
 ENV IS_SANDBOX=1

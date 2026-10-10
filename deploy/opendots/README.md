@@ -14,7 +14,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 
 ## Founder steps, once
 1. Tailscale: open the login URL printed by `sudo tailscale up --hostname=turicks-dots` on the VPS, and
-   install Tailscale on the phone with the same account.
+   install Tailscale on the phone with the same account. The first `tailscale serve` prints a
+   `login.tailscale.com/f/serve?...` link: open it once to turn on HTTPS for the tailnet.
 2. CopilotKit key, on the laptop:
    `git clone https://github.com/CopilotKit/OpenDots.git /tmp/od && cd /tmp/od && cp .env.example .env && npx copilotkit@latest login && npx copilotkit@latest project select`.
    Copy the `CPK_INTELLIGENCE_API_KEY=` and `CPK_TELEMETRY_ID=` lines into `/opt/opendots/app/.env`.
@@ -23,10 +24,10 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
    for the seed step below. The VPS has no claude login to reuse.
 
 ## Operator steps after those
-- HTTPS for the phone: `sudo tailscale serve --bg 4310`, then set `APP_ORIGIN=https://turicks-dots.<tailnet>.ts.net`
+- HTTPS for the phone: `sudo tailscale serve --bg 4310`, then set `APP_ORIGIN=https://turicks-dots.taile5afc3.ts.net,http://localhost:4310`
   in `.env` and rerun `install.sh`.
 - After the Engineer Dot's computer is started: `ssh -t founderos-vps 'bash /opt/opendots/deploy/seed-cli-logins.sh'` lists
-  computers; rerun it with the container name and paste the token. It stores the token in `/workspace/home/.claude-token`;
+  computers; rerun it with the container name and paste the token. It stores the token in `/workspace/.claude-token`;
   the image's `claude` wrapper reads it, because the Dot's shell sources no profile.
 
 ## Operating

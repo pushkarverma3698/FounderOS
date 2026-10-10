@@ -22,7 +22,8 @@ Decisions taken with the founder (AskUserQuestion, 2026-10-10):
   runs go through `run-bg` (tmux, log under `/workspace/runs`).
 - Each Dot computer is a Docker container capped at 2 GiB. The VPS has 7.6 GiB, no swap, and also runs
   Oplify's Postgres/Redis: keep at most two computers running.
-- Only `/workspace` survives a computer restart, so `HOME=/workspace/home` keeps CLI logins.
+- Only `/workspace` survives a computer restart, so `HOME=/workspace` keeps CLI logins (the computer service forces
+  HOME=/workspace for every shell command anyway). Its root has no CAP_DAC_OVERRIDE: copied files must be uid 0.
 
 ## Phase 0: safety (done 2026-10-10)
 - [x] `archive/founderos-v3` tag pushed.
