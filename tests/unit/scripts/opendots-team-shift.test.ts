@@ -713,6 +713,21 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     expect(items()).toHaveLength(1);
   });
 
+  it("closes a finished run first (its Done block), then files and starts the task", () => {
+    world([issue(5, ["agent:in-pr"])]);
+    writeJob("builder", "issue", 5, 600);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "WHAT I DID: added /health\nWHY: issue #5\nWHAT'S LEFT: review\nRESULT: PR #7\n");
+    const r = shift("builder", "--engine", "claude", "--task", TASK);
+    expect(r.status, r.err).toBe(0);
+    const lines = r.out.split("\n");
+    expect(lines.slice(0, 5)).toEqual([
+      "Done: owner/sandbox issue #5.", "WHAT I DID: added /health", "WHY: issue #5", "WHAT'S LEFT: review", "RESULT: PR #7",
+    ]);
+    expect(lines[5]).toMatch(/^Started: owner\/sandbox issue #6, claude run shift-builder-sandbox-6-\d+\.$/);
+    expect(item("issue", 6).labels).toEqual(["agent:building"]);
+  });
+
   it("rejects an unknown engine, an empty task, and a task for another role", () => {
     world([]);
     expect(shift("builder", "--engine", "gpt", "--task", TASK).status).toBe(2);

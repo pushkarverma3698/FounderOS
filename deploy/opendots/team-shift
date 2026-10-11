@@ -160,6 +160,11 @@ fi
 if [[ -n $task ]]; then
   if [[ -f $job ]]; then
     read -r repo kind n name started engine0 < "$job"
+    # A finished run waits for the next shift to be closed: close it now (prints its Done or blocked line).
+    [[ $(run-bg status "$name" | head -n1) == running ]] || "$0" "$role" || true
+  fi
+  if [[ -f $job ]]; then
+    read -r repo kind n name started engine0 < "$job"
     echo "Busy: $repo $kind #$n, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
     exit 0
   fi
