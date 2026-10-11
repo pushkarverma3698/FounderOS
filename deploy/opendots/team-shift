@@ -160,8 +160,12 @@ fi
 if [[ -n $task ]]; then
   if [[ -f $job ]]; then
     read -r repo kind n name started engine0 < "$job"
-    # A finished run waits for the next shift to be closed: close it now (prints its Done or blocked line).
-    [[ $(run-bg status "$name" | head -n1) == running ]] || "$0" "$role" || true
+    # A finished run waits for the next shift to be closed: close it now. Its Done or blocked lines go last, labelled,
+    # so the reply leads with this task, not the earlier one.
+    if [[ $(run-bg status "$name" | head -n1) != running ]]; then
+      closed=$("$0" "$role" 2>&1 || true)
+      [[ -z $closed ]] || trap 'printf "Earlier run, now closed:\n%s\n" "$closed"' EXIT
+    fi
   fi
   if [[ -f $job ]]; then
     read -r repo kind n name started engine0 < "$job"

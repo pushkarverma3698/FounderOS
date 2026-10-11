@@ -721,10 +721,11 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     const r = shift("builder", "--engine", "claude", "--task", TASK);
     expect(r.status, r.err).toBe(0);
     const lines = r.out.split("\n");
-    expect(lines.slice(0, 5)).toEqual([
+    expect(lines[0]).toMatch(/^Started: owner\/sandbox issue #6, claude run shift-builder-sandbox-6-\d+\.$/);
+    expect(lines.slice(1)).toEqual([
+      "Earlier run, now closed:",
       "Done: owner/sandbox issue #5.", "WHAT I DID: added /health", "WHY: issue #5", "WHAT'S LEFT: review", "RESULT: PR #7",
     ]);
-    expect(lines[5]).toMatch(/^Started: owner\/sandbox issue #6, claude run shift-builder-sandbox-6-\d+\.$/);
     expect(item("issue", 6).labels).toEqual(["agent:building"]);
   });
 
