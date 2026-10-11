@@ -292,20 +292,24 @@ describe("team-shift: review rounds", () => {
 });
 
 /**
- * deploy/opendots/setup-dots.sh against a fake owner API (curl) and fake docker.
- * Founder 2026-10-11: shifts every 60 min. A rerun must move the existing shift tasks too (it used to set the
- * interval only when it created a task, so a rerun left the live tasks on 15 min).
+ * deploy/opendots/setup-dots.sh against a fake owner API (curl), docker and crontab.
+ * Founder 2026-10-11: shifts every 60 min, and an idle shift costs nothing. A host cron (shift-cron) is the only
+ * clock; the OpenDots shift tasks have no interval of their own, so the paid Dot runs only when cron wakes it.
+ * A rerun must fix existing tasks too (it used to set the interval only when it created a task).
  */
 describe("setup-dots.sh: shift schedule", () => {
   const SETUP = join(ROOT, "deploy", "opendots", "setup-dots.sh");
   const TOKEN = "owner-token-not-for-output";
   const shiftPrompt = (role: string): string => `${role} shift: follow your SHIFT rules for one item, or reply "No work".`;
+  const shiftTasks = (every: number | null) => ["Architect", "Builder", "Reviewer"].map((role) =>
+    ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: every }));
 
   function setup(tasks: { id: string; prompt: string; status: string; intervalSeconds: number | null }[], env: Record<string, string> = {}) {
     spawnSync("mkdir", ["-p", join(dir, "app")]);
     writeFileSync(join(dir, "app", ".env"), `X=1\nOWNER_TOKEN=${TOKEN}\n`);
     bin("curl", fakeScript("opendots-curl.sh"));
     bin("docker", fakeScript("opendots-docker.sh"));
+    bin("crontab", fakeScript("opendots-crontab.sh"));
     const dots = [["Chief of Staff", "chief"], ["Builder", "b"], ["Architect", "a"], ["Reviewer", "r"]];
     writeFileSync(join(fake, "workspace.json"), JSON.stringify({
       spaces: [{ name: "Everyday", id: "s1" }],
@@ -316,32 +320,162 @@ describe("setup-dots.sh: shift schedule", () => {
     const r = spawnSync("bash", [SETUP], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
-        FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app"), ...env },
+        FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app"), OPENDOTS_SHIFT_TASKS: join(dir, "shift-tasks"), ...env },
     });
     const calls = existsSync(join(fake, "curl.log")) ? readFileSync(join(fake, "curl.log"), "utf8").trim().split("\n") : [];
     return { status: r.status, out: r.stdout + r.stderr, calls };
   }
+  const crontab = (): string => readFileSync(join(fake, "crontab"), "utf8");
 
-  it("moves existing shift tasks to 60 minutes and never prints the owner token", () => {
-    const r = setup(["Architect", "Builder", "Reviewer"].map((role) =>
-      ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: 900 })));
+  it("takes the interval off existing shift tasks and never prints the owner token", () => {
+    const r = setup(shiftTasks(900));
     expect(r.status, r.out).toBe(0);
     for (const role of ["Architect", "Builder", "Reviewer"])
-      expect(r.calls).toContain(`PUT /tasks/t-${role}/schedule {"intervalSeconds":3600}`);
+      expect(r.calls).toContain(`PUT /tasks/t-${role}/schedule {"intervalSeconds":null}`);
     expect(r.calls.some((c) => c.startsWith("POST /tasks "))).toBe(false);
     expect(r.out).not.toContain(TOKEN);
   });
 
-  it("creates a missing shift task at 60 minutes, paused", () => {
+  it("creates a missing shift task without an interval, paused", () => {
     const r = setup([]);
     expect(r.status, r.out).toBe(0);
-    expect(r.calls.filter((c) => c.startsWith("POST /tasks ")).every((c) => c.includes('"intervalSeconds":3600'))).toBe(true);
+    const created = r.calls.filter((c) => c.startsWith("POST /tasks "));
+    expect(created).toHaveLength(3);
+    for (const c of created) expect(c).not.toContain("intervalSeconds");
     expect(r.calls).toContain('POST /tasks/new-tasks/actions {"action":"pause"}');
   });
 
-  it("leaves a task already on the interval alone", () => {
-    const r = setup(["Architect", "Builder", "Reviewer"].map((role) =>
-      ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: 3600 })));
+  it("leaves a task without an interval alone", () => {
+    const r = setup(shiftTasks(null));
+    expect(r.status, r.out).toBe(0);
     expect(r.calls.some((c) => c.includes("/schedule"))).toBe(false);
+  });
+
+  it("writes role, Dot and task for shift-cron, and installs one hourly cron line, keeping other lines", () => {
+    writeFileSync(join(fake, "crontab"), "*/2 * * * * other-job\n0 * * * * old # opendots-shift\n");
+    const r = setup(shiftTasks(null));
+    expect(r.status, r.out).toBe(0);
+    expect(readFileSync(join(dir, "shift-tasks"), "utf8")).toBe("architect a t-Architect\nbuilder b t-Builder\nreviewer r t-Reviewer\n");
+    const lines = crontab().trim().split("\n");
+    expect(lines[0]).toBe("*/2 * * * * other-job");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatch(/^0 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
+  });
+
+  it("SHIFT_SECONDS=900 gives a 15-minute cron; a value cron cannot express is refused", () => {
+    expect(setup(shiftTasks(null), { SHIFT_SECONDS: "900" }).status).toBe(0);
+    expect(crontab()).toMatch(/^\*\/15 \* \* \* \* /);
+    const bad = setup(shiftTasks(null), { SHIFT_SECONDS: "2700" });
+    expect(bad.status).not.toBe(0);
+    expect(bad.out).toContain("SHIFT_SECONDS");
+  });
+});
+
+/**
+ * Free idle shifts (founder 2026-10-11): a host cron runs `team-shift <role> --check` in each computer and wakes the
+ * Dot (a paid OpenRouter call) only when the check finds something to claim or collect. The check changes nothing.
+ */
+describe("team-shift --check: read-only", () => {
+  function check(role: string): { out: string; status: number | null } {
+    const r = spawnSync("bash", [SCRIPT, role, "--check"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake, TEAM_RUNS: runs,
+        TEAM_REPOS_FILE: join(dir, "repos"), TEAM_BRIEFS: BRIEFS, TEAM_WORK: join(dir, "work") },
+    });
+    return { out: r.stdout.trim(), status: r.status };
+  }
+  const writes = (): string[] => (existsSync(join(fake, "gh.log")) ? readFileSync(join(fake, "gh.log"), "utf8") : "")
+    .split("\n").filter((l) => /^(issue|pr) (edit|comment)|^label create|^repo clone/.test(l));
+
+  it('prints "No work" when no queue has an item', () => {
+    world([issue(1, ["agent:blocked"])]);
+    expect(check("architect")).toEqual({ out: "No work", status: 0 });
+  });
+
+  it("reports a queued item as Due without claiming, cloning, commenting or starting claude", () => {
+    world([issue(4, ["agent:plan"])]);
+    expect(check("architect")).toEqual({ out: "Due: owner/sandbox issue #4 (agent:plan)", status: 0 });
+    expect(item("issue", 4)).toMatchObject({ labels: ["agent:plan"], comments: [] });
+    expect(writes()).toEqual([]);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+    expect(existsSync(join(runs, "shift-architect.job"))).toBe(false);
+  });
+
+  it("reports an item claimed for the role (its job was lost) as Due", () => {
+    world([issue(8, ["agent:building"])]);
+    expect(check("builder").out).toBe("Due: owner/sandbox issue #8 (agent:building)");
+  });
+
+  it("a run still inside its limit is Working, not Due", () => {
+    world([issue(4, ["agent:planning"])]);
+    writeJob("architect", "issue", 4, 600);
+    writeFileSync(join(fake, "state"), "running\n");
+    expect(check("architect").out).toBe("Working: owner/sandbox issue #4, claude run shift-architect-sandbox-4-1, 10 min.");
+  });
+
+  it("a finished, failed, lost or overdue run is Due and the job file stays for the real shift", () => {
+    for (const [state, age] of [["exit=0", 60], ["exit=1", 60], ["unknown", 60], ["running", 91 * 60]] as const) {
+      world([issue(4, ["agent:planning"])]);
+      writeJob("architect", "issue", 4, age);
+      writeFileSync(join(fake, "state"), `${state}\n`);
+      expect(check("architect").out).toBe(`Due: owner/sandbox issue #4, run shift-architect-sandbox-4-1 is ${state}.`);
+      expect(existsSync(join(runs, "shift-architect.job"))).toBe(true);
+    }
+    expect(writes()).toEqual([]);
+    expect(item("issue", 4).labels).toEqual(["agent:planning"]);
+  });
+});
+
+/** deploy/opendots/shift-cron: the host side. Wakes a Dot's shift task only on Due or a failed check. */
+describe("shift-cron: wakes a Dot only when there is work", () => {
+  const CRON = join(ROOT, "deploy", "opendots", "shift-cron");
+  const TOKEN = "owner-token-not-for-output";
+
+  function cron(checks: Record<string, { out: string; rc?: number }>, statuses: Record<string, string> = {}) {
+    spawnSync("mkdir", ["-p", join(dir, "app")]);
+    writeFileSync(join(dir, "app", ".env"), `OWNER_TOKEN=${TOKEN}\n`);
+    writeFileSync(join(dir, "shift-tasks"), "architect dot-a task-a\nbuilder dot-b task-b\nreviewer dot-r task-r\n");
+    for (const [role, c] of Object.entries(checks)) {
+      writeFileSync(join(fake, `check-${role}`), `${c.out}\n`);
+      if (c.rc) writeFileSync(join(fake, `check-${role}.rc`), String(c.rc));
+    }
+    for (const [task, status] of Object.entries(statuses)) writeFileSync(join(fake, `task-${task}`), status);
+    bin("curl", fakeScript("opendots-curl.sh"));
+    bin("docker", fakeScript("opendots-docker.sh"));
+    bin("timeout", '#!/bin/sh\nshift\nexec "$@"\n'); // macOS has no timeout(1); the VPS does
+    const r = spawnSync("bash", [CRON], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
+        FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app"), OPENDOTS_SHIFT_TASKS: join(dir, "shift-tasks") },
+    });
+    const calls = existsSync(join(fake, "curl.log")) ? readFileSync(join(fake, "curl.log"), "utf8").trim().split("\n") : [];
+    const runs = calls.filter((c) => c.includes('{"action":"run"}'));
+    return { status: r.status, out: r.stdout + r.stderr, calls, runs };
+  }
+
+  it("idle everywhere: no task is woken and the OpenDots app is not called", () => {
+    const r = cron({ architect: { out: "No work" }, builder: { out: "No work" }, reviewer: { out: "Working: x" } });
+    expect(r.status, r.out).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(readFileSync(join(fake, "docker.log"), "utf8")).toContain("exec opendots-computer-dot-a team-shift architect --check");
+  });
+
+  it("wakes only the role with work", () => {
+    const r = cron({ architect: { out: "Due: owner/sandbox issue #4 (agent:plan)" }, builder: { out: "No work" }, reviewer: { out: "No work" } });
+    expect(r.runs).toEqual(['POST /tasks/task-a/actions {"action":"run"}']);
+    expect(r.out).toContain("architect: Due: owner/sandbox issue #4 (agent:plan) -> woke task-a");
+    expect(r.out).not.toContain(TOKEN);
+  });
+
+  it("a failing check wakes the Dot so the error reaches the founder", () => {
+    const r = cron({ architect: { out: "gh: authentication required", rc: 1 }, builder: { out: "No work" }, reviewer: { out: "No work" } });
+    expect(r.runs).toEqual(['POST /tasks/task-a/actions {"action":"run"}']);
+  });
+
+  it("never wakes a paused, cancelled, queued or running task (pausing stays the kill switch)", () => {
+    const due = { out: "Due: x" };
+    const r = cron({ architect: due, builder: due, reviewer: due }, { "task-a": "paused", "task-b": "running", "task-r": "cancelled" });
+    expect(r.runs).toEqual([]);
+    expect(r.out).toContain("architect: Due: x -> task-a is paused, not woken");
   });
 });

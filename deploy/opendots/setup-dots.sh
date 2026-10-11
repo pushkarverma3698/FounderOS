@@ -2,14 +2,22 @@
 # Create or update the Dots through the app's owner API. Idempotent; run on the VPS:
 #   bash /opt/opendots/deploy/setup-dots.sh
 # Chief of Staff = the default Dot, renamed; its computer has gh only (it files issues, merges approved PRs).
-# Architect, Builder, Reviewer = the engineering team: each has a computer and a 60-min recurring "shift"
-# task that runs team-shift (claude does the work), and they hand work over with GitHub labels. The Builder is the old Engineer Dot (renamed); the others
+# Architect, Builder, Reviewer = the engineering team: each has a computer and a "shift" task that runs team-shift
+# (claude does the work), and they hand work over with GitHub labels. A host cron (shift-cron, every SHIFT_SECONDS)
+# wakes a shift task only when `team-shift --check` finds work, so an idle shift makes no paid model call. The Builder is the old Engineer Dot (renamed); the others
 # get copies of its logins once. Reruns never overwrite a login a Dot already has (dot-login switches it).
-# Schedules are created PAUSED. Start them in the app (Tasks) or: POST /api/tasks/<id>/actions {"action":"run"}.
+# Shift tasks are created PAUSED; cron never wakes a paused task. Start one in the app (Tasks → Run) or:
+# POST /api/tasks/<id>/actions {"action":"run"}.
 set -euo pipefail
 APP=${OPENDOTS_APP:-/opt/opendots/app}
 REPOS=${TEAM_REPOS:-pushkarverma3698/opendots-sandbox} # space-separated owner/repo the team may work in
 SHIFT_SECONDS=${SHIFT_SECONDS:-3600} # founder 2026-10-11: one shift an hour
+SHIFT_TASKS=${OPENDOTS_SHIFT_TASKS:-$(dirname "$APP")/shift-tasks}
+HERE=$(cd "$(dirname "$0")" && pwd)
+m=$((SHIFT_SECONDS / 60))
+if ((m == 60)); then CRON_AT="0 * * * *"
+elif ((m * 60 == SHIFT_SECONDS && m > 0 && 60 % m == 0)); then CRON_AT="*/$m * * * *"
+else echo "SHIFT_SECONDS=$SHIFT_SECONDS: use 3600 or a whole number of minutes that divides 60" >&2; exit 1; fi
 T=$(grep '^OWNER_TOKEN=' "$APP/.env" | cut -d= -f2-)
 api() { curl -fsS -X "$1" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   "http://127.0.0.1:4310/api$2" ${3:+--data "$3"}; }
@@ -97,9 +105,10 @@ for id in "$builder" "$architect" "$reviewer"; do
   printf '%s\n' $REPOS | docker exec -i "$(box "$id")" sh -c 'cat > /workspace/team-repos'
 done
 
-# Shifts: one recurring task per role, in its own "Shift" conversation. Created paused; never duplicated
-# (a role's task is found by its prompt, which names the role).
+# Shifts: one task per role, in its own "Shift" conversation, with no interval: shift-cron wakes it. Created paused;
+# never duplicated (a role's task is found by its prompt, which names the role).
 state=$(api GET /state)
+shifts=""
 for pair in "Architect:$architect" "Builder:$builder" "Reviewer:$reviewer"; do
   name=${pair%%:*} id=${pair#*:}
   conv=$(api GET /workspace | jq -r --arg d "$id" '.conversations[] | select(.dotId==$d and .title=="Shift") | .id' | head -1)
@@ -108,11 +117,17 @@ for pair in "Architect:$architect" "Builder:$builder" "Reviewer:$reviewer"; do
   read -r task every < <(jq -r --arg p "$SHIFT" \
     '[.tasks[] | select(.prompt==$p and .status!="cancelled")][0] // empty | "\(.id) \(.intervalSeconds)"' <<<"$state") || true
   if [[ -z ${task:-} ]]; then
-    task=$(api POST /tasks "$(jq -nc --arg p "$SHIFT" --arg c "$conv" --argjson s "$SHIFT_SECONDS" '{prompt:$p, threadId:$c, intervalSeconds:$s}')" | jq -r .id)
+    task=$(api POST /tasks "$(jq -nc --arg p "$SHIFT" --arg c "$conv" '{prompt:$p, threadId:$c}')" | jq -r .id)
     api POST "/tasks/$task/actions" '{"action":"pause"}' >/dev/null
-  elif [[ $every != "$SHIFT_SECONDS" ]]; then # an existing task keeps its paused/running state
-    api PUT "/tasks/$task/schedule" "$(jq -nc --argjson s "$SHIFT_SECONDS" '{intervalSeconds:$s}')" >/dev/null
+  elif [[ $every != null ]]; then # an existing task keeps its paused/completed state
+    api PUT "/tasks/$task/schedule" '{"intervalSeconds":null}' >/dev/null
   fi
+  shifts+="$(tr '[:upper:]' '[:lower:]' <<<"$name") $id $task"$'\n'
   echo "$name dot=$id shift-task=$task conversation=$conv"
 done
+printf '%s' "$shifts" > "$SHIFT_TASKS"
+cron_line="$CRON_AT bash $HERE/shift-cron >> $(dirname "$SHIFT_TASKS")/shift-cron.log 2>&1 # opendots-shift"
+current=$(crontab -l 2>/dev/null || true)
+{ grep -v ' # opendots-shift$' <<<"$current" || true; echo "$cron_line"; } | grep -v '^$' | crontab -
+echo "cron: $CRON_AT shift-cron"
 echo "chief=$chief"

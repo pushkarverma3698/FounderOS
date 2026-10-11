@@ -18,6 +18,7 @@ printf '%s %s %s\n' "$method" "$path" "$data" >> "$FAKE/curl.log"
 case "$method $path" in
   "GET /workspace") cat "$FAKE/workspace.json" ;;
   "GET /state") cat "$FAKE/state.json" ;;
+  "GET /tasks/"*) t=${path#/tasks/}; jq -nc --arg s "$(cat "$FAKE/task-$t" 2>/dev/null || echo completed)" '{task:{status:$s}}' ;;
   "POST /dots"|"POST /conversations"|"POST /tasks") echo '{"id":"new-'"${path#/}"'"}' ;;
   *) echo '{}' ;;
 esac

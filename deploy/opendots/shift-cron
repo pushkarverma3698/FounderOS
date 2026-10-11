@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Host cron (installed by setup-dots.sh): the only clock for the engineering shifts. For each role it runs the free,
+# read-only `team-shift <role> --check` in the Dot's computer and wakes the Dot's shift task (one paid OpenRouter
+# turn) only when the check prints "Due:" or fails, so the founder sees the error. "No work" and "Working:" cost
+# nothing. A paused or cancelled task is never woken: pausing the three tasks stays the kill switch.
+set -uo pipefail
+APP=${OPENDOTS_APP:-/opt/opendots/app}
+TASKS=${OPENDOTS_SHIFT_TASKS:-/opt/opendots/shift-tasks} # "role dot-id task-id" per line
+T=$(grep '^OWNER_TOKEN=' "$APP/.env" | cut -d= -f2-)
+api() { curl -fsS -X "$1" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  "http://127.0.0.1:4310/api$2" ${3:+--data "$3"}; }
+
+while read -r role dot task; do
+  [[ -z ${role:-} ]] && continue
+  out=$(timeout 60 docker exec "opendots-computer-$dot" team-shift "$role" --check 2>&1); rc=$?
+  line="$(date -u +%FT%TZ) $role: $(printf '%s' "$out" | tail -n1)"
+  if ((rc == 0)) && [[ $out != Due:* ]]; then echo "$line"; continue; fi
+  ((rc == 0)) || line="$line (check exit $rc)"
+  status=$(api GET "/tasks/$task" | jq -r '.task.status') || status="unreadable"
+  case "$status" in
+    completed | failed | interrupted)
+      if api POST "/tasks/$task/actions" '{"action":"run"}' >/dev/null; then echo "$line -> woke $task"
+      else echo "$line -> waking $task failed"; fi ;;
+    *) echo "$line -> $task is $status, not woken" ;;
+  esac
+done < "$TASKS"
