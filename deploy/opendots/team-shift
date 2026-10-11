@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One engineering shift for a Dot, in one shell call (< 70 s). The Dot only runs this and reports what it prints;
 # claude does the work, so the paid Dot model makes 2-3 calls a shift instead of dozens.
-#   team-shift architect|builder|reviewer [--check]
+#   team-shift architect|builder|reviewer [--check | --progress]
+#   team-shift builder --engine claude|agy --task '<the founder's words>' [--repo owner/repo|name]
 # With a claude job of this role open: report it running, or collect it (check it handed the item over), else
 # block the item. Without one: claim the oldest item in the role's queue and start claude on it, or print "No work".
 # Labels carry the hand-offs (README.md). Repos: one owner/repo per line in $TEAM_REPOS_FILE.
@@ -9,9 +10,29 @@
 # as settings.json rules); the Architect's computer has no agy login, so it blocks for the founder.
 # --check changes nothing and prints "No work", "Working: ..." or "Due: ...": the host cron (shift-cron) wakes the
 # paid Dot only on Due, so an idle shift costs nothing.
+# --progress changes nothing and prints the open run in at most 5 lines (claude's steps come from team-stream).
+# --task (AG-064, the Builder only): the founder's own task from chat. It is filed as an issue claimed for the
+# Builder (labels and audit trail as usual), then the engine he named starts on it.
 set -euo pipefail
+usage() { sed -n '4,5p' "$0" >&2; exit 2; }
 role=${1:-}
-check=$([[ ${2:-} == --check ]] && echo 1 || true)
+shift || true
+check="" progress="" engine="" task="" task_repo=""
+while (($#)); do
+  case "$1" in
+    --check) check=1; shift ;;
+    --progress) progress=1; shift ;;
+    --engine | --task | --repo)
+      (($# >= 2)) || usage
+      case "$1" in --engine) engine=$2 ;; --task) task=$2 ;; --repo) task_repo=$2 ;; esac
+      shift 2 ;;
+    *) usage ;;
+  esac
+done
+if [[ -n $engine$task$task_repo ]]; then
+  engine=${engine:-claude}
+  [[ $role == builder && $engine =~ ^(claude|agy)$ && -n ${task//[[:space:]]/} && -z $check$progress ]] || usage
+fi
 RUNS=${TEAM_RUNS:-/workspace/runs}
 REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
 BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
@@ -23,7 +44,7 @@ case "$role" in
   architect) Role=Architect claim=agent:planning; queues=(issue:agent:plan) ;;
   builder) Role=Builder claim=agent:building; queues=(pr:agent:changes issue:agent:build) ;;
   reviewer) Role=Reviewer claim=agent:reviewing; queues=(pr:agent:review) ;;
-  *) echo "usage: team-shift architect|builder|reviewer [--check]" >&2; exit 2 ;;
+  *) usage ;;
 esac
 # claude gets an explicit allowlist per role (no skip-permissions): reading, labels and comments for all;
 # edits, commits, pushes and PR creation for the Builder only; merges, force-pushes and raw API calls for nobody.
@@ -71,8 +92,15 @@ last_output() { echo '```'; run-bg tail "$1" 30; echo '```'; }
 # LIMIT_RE, AGY_DIR and agy_settings (the role allowlist as agy rules) are shared with chief-run.
 . "$(dirname "$0")/team-lib.sh"
 
+ensure_labels() { # repo: create the team labels once per repo
+  local marker="$RUNS/.labels-${1//\//_}" l
+  [[ -f $marker ]] && return
+  for l in "${ALL_LABELS[@]}"; do gh label create "$l" -R "$1" --force >/dev/null; done
+  touch "$marker"
+}
+
 start() { # kind repo n queue-label ("" = already claimed) [engine] [why another engine took over]
-  local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt marker rounds dir err run
+  local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt rounds dir err run cmds t
   if [[ $role == reviewer ]]; then
     rounds=$(gh pr view "$n" -R "$repo" --json comments \
       --jq '[.comments[].body | select(startswith("Reviewer verdict: CHANGES"))] | length')
@@ -82,11 +110,7 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
       return
     fi
   fi
-  marker="$RUNS/.labels-${repo//\//_}"
-  if [[ ! -f $marker ]]; then
-    for l in "${ALL_LABELS[@]}"; do gh label create "$l" -R "$repo" --force >/dev/null; done
-    touch "$marker"
-  fi
+  ensure_labels "$repo"
   if [[ -n $queue ]]; then gh "$kind" edit "$n" -R "$repo" --remove-label "$queue" --add-label "$claim" >/dev/null; fi
   # claude's permissions cover only its own directory (a cd or git -C elsewhere asks for approval and -p
   # refuses), so the clone is prepared here and claude starts inside it.
@@ -96,18 +120,26 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
     return
   fi
   base=$(base_of "$repo")
+  # Each run starts clean at the base: an earlier run's leftovers (it may not rm) made agy's first rm end its run.
+  git -C "$dir" reset -q --hard && git -C "$dir" clean -fdq && git -C "$dir" checkout -q --detach "origin/$base" || true
+  cmds=""
+  for t in "${allowed[@]}"; do if [[ $t == "Bash("* ]]; then t=${t#"Bash("}; cmds+="${t%":*)"}, "; fi; done
   name="shift-$role-$(tr -c 'a-zA-Z0-9_\n-' - <<<"${repo##*/}")-$n-$(date +%s)"
   prompt="$(cat "$BRIEFS/team.md" "$BRIEFS/$role.md")
 
 THIS SHIFT
 Repository: $repo. Item: $kind #$n (claimed for you: label $claim). Base branch: $base.
 Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.
-Finish by moving the labels as your role says, then print one last line: RESULT: <what you did, with links>."
+Shell commands you may run: ${cmds%, }; anything else is refused, and under agy it ends your whole run.${task:+
+The founder gave this task in chat, so there is no Architect plan: the issue body is the plan.}
+Finish by moving the labels as your role says, then end with the four ENDING lines."
   if [[ $engine == agy ]]; then
     agy_settings
     run=(agy --new-project --print "$prompt" --print-timeout "${LIMIT_MIN}m" --output-format text)
   else
-    run=(claude -p "$prompt" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
+    # team-stream turns claude's event stream into one log line per step, for --progress.
+    run=(team-stream claude -p "$prompt" --output-format stream-json --verbose
+      --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
   fi
   run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" "${run[@]}" >/dev/null
   printf '%s %s %s %s %s %s\n' "$repo" "$kind" "$n" "$name" "$(date +%s)" "$engine" > "$job"
@@ -118,6 +150,58 @@ Finish by moving the labels as your role says, then print one last line: RESULT:
   fi | comment "$kind" "$repo" "$n"
   echo "Started: $repo $kind #$n, $engine run $name${why:+ ($why)}."
 }
+
+# --progress: the open run in at most 5 lines, read-only.
+if [[ -n $progress ]]; then
+  [[ -f $job ]] || { echo "$Role: no run open."; exit 0; }
+  read -r repo kind n name started engine < "$job"
+  echo "$Role: ${engine:-claude} on $repo $kind #$n, $((($(date +%s) - started) / 60)) min, $(run-bg status "$name" | head -n1). Last steps:"
+  run-bg tail "$name" 200 2>/dev/null | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 4 |
+    while IFS= read -r l; do if ((${#l} > 160)); then echo "${l:0:159}…"; else echo "$l"; fi; done || true
+  exit 0
+fi
+
+# --task: file the founder's task as a claimed issue and start the engine he named. One Builder run at a time.
+if [[ -n $task ]]; then
+  if [[ -f $job ]]; then
+    read -r repo kind n name started engine0 < "$job"
+    # A finished run waits for the next shift to be closed: close it now. Its Done or blocked lines go last, labelled,
+    # so the reply leads with this task, not the earlier one.
+    if [[ $(run-bg status "$name" | head -n1) != running ]]; then
+      closed=$("$0" "$role" 2>&1 || true)
+      [[ -z $closed ]] || trap 'printf "Earlier run, now closed:\n%s\n" "$closed"' EXIT
+    fi
+  fi
+  if [[ -f $job ]]; then
+    read -r repo kind n name started engine0 < "$job"
+    echo "Busy: $repo $kind #$n, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    exit 0
+  fi
+  team=()
+  while read -r r; do [[ -z $r || $r == \#* ]] || team+=("$r"); done < "$REPOS_FILE"
+  repo=""
+  for r in ${team[@]+"${team[@]}"}; do
+    if [[ $r == "$task_repo" || $r == */"$task_repo" ]] || [[ -z $task_repo && ${#team[@]} == 1 ]]; then repo=$r; fi
+  done
+  list=$(IFS=,; echo "${team[*]-}" | sed 's/,/, /g')
+  if [[ -z $repo && -z $task_repo ]]; then echo "Say which repo. Team repos: $list."; exit 0; fi
+  if [[ -z $repo ]]; then echo "Not a team repo: $task_repo. Team repos: $list."; exit 0; fi
+  if [[ $engine == agy && ! -s $AGY_DIR/antigravity-oauth-token ]]; then
+    echo "agy: this computer has no agy login, so nothing was filed. Run dot-login agy start first."; exit 0
+  fi
+  ensure_labels "$repo"
+  title=$(head -n1 <<<"$task" | cut -c1-70)
+  body="$task
+
+Filed by the Builder from the founder's chat (engine: $engine). The founder's words above are the plan."
+  if ! url=$(gh issue create -R "$repo" --title "$title" --body "$body" --label "$claim" 2>&1); then
+    echo "Could not file the task on $repo: $(head -n1 <<<"$url")"; exit 0
+  fi
+  n=${url##*/}
+  [[ $n =~ ^[0-9]+$ ]] || { echo "Could not file the task on $repo: gh printed $(head -n1 <<<"$url")"; exit 0; }
+  start issue "$repo" "$n" "" "$engine"
+  exit 0
+fi
 
 # 1. An open job: still running, finished, or lost.
 if [[ -f $job ]]; then
@@ -137,8 +221,15 @@ if [[ -f $job ]]; then
     *) # finished: a run that handed the item over is done, whatever its exit code
       if ! labels "$kind" "$repo" "$n" | grep -qx "$claim"; then
         rm -f "$job"
-        result=$(run-bg tail "$name" 400 | grep '^RESULT:' | tail -n1 || true)
-        echo "Done: $repo $kind #$n. ${result:-No RESULT line; see run $name.}"
+        log=$(run-bg tail "$name" 400 | tr -d '\r')
+        # The run's last WHAT I DID ... RESULT block (team.md ENDING), else its last RESULT line.
+        ending=$(awk '/^WHAT I DID:/ { buf = ""; on = 1 } on { buf = buf $0 "\n" } /^RESULT:/ && on { last = buf; on = 0 }
+          END { printf "%s", last }' <<<"$log" | grep -E "^(WHAT I DID|WHY|WHAT'S LEFT|RESULT):" || true)
+        if [[ -n $ending ]]; then printf 'Done: %s %s #%s.\n%s\n' "$repo" "$kind" "$n" "$ending"
+        else
+          result=$(grep '^RESULT:' <<<"$log" | tail -n1 || true)
+          echo "Done: $repo $kind #$n. ${result:-No RESULT line; see run $name.}"
+        fi
       elif [[ $engine == claude ]] && run-bg tail "$name" 30 | grep -qiE "$LIMIT_RE"; then
         if [[ $role == architect ]]; then why="the Architect has no agy fallback"
         elif [[ ! -s $AGY_DIR/antigravity-oauth-token ]]; then why="this computer has no agy login"

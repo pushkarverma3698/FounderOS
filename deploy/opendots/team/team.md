@@ -13,3 +13,10 @@ RULES
 - Move labels with: gh issue|pr edit N -R REPO --remove-label OLD --add-label NEW.
 - Stuck, unsure, red CI you cannot fix, or a question only the founder can answer: comment the exact question or
   error (with a recommended default), remove your claim label and add agent:blocked. Never guess.
+
+ENDING (every run, success or not): your final message ends with these four lines, one line each, plain text,
+no markdown. The founder reads them in chat, so make them complete and checkable.
+WHAT I DID: <the changes, and the commands you ran with their key result>
+WHY: <the reasoning behind the choices a reviewer would question>
+WHAT'S LEFT: <open items and every NOT VERIFIED item, or "nothing">
+RESULT: <one line, with links>

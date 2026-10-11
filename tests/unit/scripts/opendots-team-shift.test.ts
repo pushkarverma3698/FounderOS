@@ -21,7 +21,7 @@ const FAKES = join(ROOT, "tests", "unit", "scripts", "fakes");
 
 
 
-interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[] }
+interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[]; title?: string; body?: string }
 
 let dir: string;
 let fake: string;
@@ -49,8 +49,8 @@ function item(kind: string, n: number): Item {
   return found;
 }
 
-function shift(role: string): { out: string; status: number | null; err: string } {
-  const r = spawnSync("bash", [SCRIPT, role], {
+function shift(role: string, ...extra: string[]): { out: string; status: number | null; err: string } {
+  const r = spawnSync("bash", [SCRIPT, role, ...extra], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -148,7 +148,7 @@ describe("team-shift: claiming work", () => {
     const all = argv();
     expect(all.slice(0, 2)).toEqual(["sh", "-c"]);
     expect(all[3]).toBe(workDir());
-    expect(all[4]).toBe("claude");
+    expect(all.slice(4, 6)).toEqual(["team-stream", "claude"]); // team-stream logs one line per step (AG-064)
     expect(claudeArgs()[2]).toContain(`Work directory: ${workDir()}`);
   });
 
@@ -377,7 +377,7 @@ describe("setup-dots.sh: shift schedule", () => {
     // The computer tool's description says to snapshot first; for the Chief that is a wasted paid model call.
     expect(prompt).toContain("no computer_snapshot");
     // chief-run waits up to 55 s (CHIEF_WAIT); a shorter shell timeout would cut it and lose its output.
-    expect(prompt).toContain("timeoutMs 70000");
+    expect(prompt).toContain("timeoutMs 60000");
     const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
     // Both ends of one copy pipe log in either order, but copies run one after another: the k-th tar -xf reads the
     // k-th tar -cf.
@@ -392,6 +392,18 @@ describe("setup-dots.sh: shift schedule", () => {
     // The app reports a disabled browser as "Computer permission is disabled"; the Chief read that as "no computer"
     // and gave up (founder chats 2026-10-11), so it gets the same permissions as the engineers.
     expect(r.calls).toContain('PATCH /dots/chief/computer/permissions {"enabled":true,"browser":true,"files":true,"shell":true}');
+  });
+
+  // AG-064: the Builder takes direct tasks, answers "what's happening", and checks claude/agy itself.
+  it("gives the Builder the task, progress and login commands within 2000 characters", () => {
+    const r = setup(shiftTasks(null));
+    expect(r.status, r.out).toBe(0);
+    const put = r.calls.find((c) => c.startsWith("PUT /dots/b "));
+    const prompt = (JSON.parse(put?.slice("PUT /dots/b ".length) ?? "{}") as { instructions: string }).instructions;
+    expect([...prompt].length).toBeLessThanOrEqual(2000);
+    for (const s of ["team-shift builder --engine", "--task", "team-shift builder --progress", "dot-login status"])
+      expect(prompt).toContain(s);
+    expect(prompt).toMatch(/never say the Chief/i);
   });
 
   it("SHIFT_SECONDS=3600 gives an hourly cron; a value cron cannot express is refused", () => {
@@ -635,5 +647,185 @@ describe("team-shift: agy fallback on a claude usage limit", () => {
     writeAgyJob("builder", "issue", 5);
     writeFileSync(join(fake, "state"), "running\n");
     expect(shift("builder").out).toBe("Working: owner/sandbox issue #5, agy run shift-builder-sandbox-5-2, 1 min.");
+  });
+});
+
+/**
+ * AG-064 (founder 2026-10-11): "I want to assign more tasks to the builder directly, and it calls agy or claude,
+ * whichever I tell it to ... Will the builder give complete reasoning at the end and show what is happening in
+ * between?" A direct task is filed as an issue (labels and audit trail keep working) and starts the named engine.
+ */
+describe("team-shift builder --task: a direct task from the founder's chat", () => {
+  const TASK = "Add a CONTRIBUTING.md that says: run npm test before every PR";
+  function agyLogin(): void {
+    spawnSync("mkdir", ["-p", join(dir, "home", ".gemini", "antigravity-cli")]);
+    writeFileSync(join(dir, "home", ".gemini", "antigravity-cli", "antigravity-oauth-token"), "x");
+  }
+
+  it("files the task as a claimed issue and starts claude on it, with the issue body as the plan", () => {
+    world([issue(3, ["agent:build"])]);
+    const r = shift("builder", "--engine", "claude", "--task", TASK);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toMatch(/^Started: owner\/sandbox issue #4, claude run shift-builder-sandbox-4-\d+\.$/);
+    const filed = item("issue", 4);
+    expect(filed.labels).toEqual(["agent:building"]);
+    expect(filed.body).toContain(TASK);
+    expect(filed.title).toBe(TASK);
+    expect(item("issue", 3).labels).toEqual(["agent:build"]); // the queue is untouched
+    const args = claudeArgs();
+    expect(args[2]).toContain("Item: issue #4");
+    expect(args[2]).toContain("the issue body is the plan");
+    expect(argv().join(" ")).not.toContain("dangerously-skip-permissions");
+  });
+
+  it("starts agy when the founder names agy, with the Builder's rules", () => {
+    agyLogin();
+    world([]);
+    const r = shift("builder", "--engine", "agy", "--repo", "sandbox", "--task", TASK);
+    expect(r.out).toMatch(/^Started: owner\/sandbox issue #1, agy run /);
+    const all = argv();
+    expect(all.slice(all.indexOf("agy"), all.indexOf("agy") + 2)).toEqual(["agy", "--new-project"]);
+    expect(readFileSync(join(runs, "shift-builder.job"), "utf8")).toMatch(/ agy\n$/);
+  });
+
+  it("refuses agy without an agy login, before filing anything", () => {
+    world([]);
+    const r = shift("builder", "--engine", "agy", "--task", TASK);
+    expect(r.out).toContain("no agy login");
+    expect(r.out).toContain("dot-login agy start");
+    expect(items()).toEqual([]);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("refuses a repo outside the team and names the team repos", () => {
+    world([]);
+    const r = shift("builder", "--engine", "claude", "--repo", "someone/else", "--task", TASK);
+    expect(r.out).toBe("Not a team repo: someone/else. Team repos: owner/sandbox.");
+    expect(items()).toEqual([]);
+  });
+
+  it("refuses while a Builder run is open, and files nothing", () => {
+    world([issue(5, ["agent:building"])]);
+    writeJob("builder", "issue", 5, 120);
+    writeFileSync(join(fake, "state"), "running\n");
+    const r = shift("builder", "--engine", "claude", "--task", TASK);
+    expect(r.out).toBe("Busy: owner/sandbox issue #5, claude run shift-builder-sandbox-5-1, 2 min. Ask again when it is done.");
+    expect(items()).toHaveLength(1);
+  });
+
+  it("closes a finished run first (its Done block), then files and starts the task", () => {
+    world([issue(5, ["agent:in-pr"])]);
+    writeJob("builder", "issue", 5, 600);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "WHAT I DID: added /health\nWHY: issue #5\nWHAT'S LEFT: review\nRESULT: PR #7\n");
+    const r = shift("builder", "--engine", "claude", "--task", TASK);
+    expect(r.status, r.err).toBe(0);
+    const lines = r.out.split("\n");
+    expect(lines[0]).toMatch(/^Started: owner\/sandbox issue #6, claude run shift-builder-sandbox-6-\d+\.$/);
+    expect(lines.slice(1)).toEqual([
+      "Earlier run, now closed:",
+      "Done: owner/sandbox issue #5.", "WHAT I DID: added /health", "WHY: issue #5", "WHAT'S LEFT: review", "RESULT: PR #7",
+    ]);
+    expect(item("issue", 6).labels).toEqual(["agent:building"]);
+  });
+
+  it("starts every run in a clean work directory at the base, and lists the allowed commands in the prompt", () => {
+    world([]);
+    shift("builder", "--engine", "claude", "--task", TASK);
+    const git = readFileSync(join(fake, "git.log"), "utf8");
+    expect(git).toMatch(/reset -q --hard\n/);
+    expect(git).toMatch(/clean -fdq\n/);
+    expect(git).toMatch(/checkout -q --detach origin\/\w+\n/);
+    const prompt = claudeArgs()[2];
+    expect(prompt).toMatch(/Shell commands you may run: .*git push/);
+    expect(prompt).toContain("anything else is refused, and under agy it ends your whole run");
+    expect(prompt).not.toMatch(/may run: .*\brm\b/);
+  });
+
+  it("rejects an unknown engine, an empty task, and a task for another role", () => {
+    world([]);
+    expect(shift("builder", "--engine", "gpt", "--task", TASK).status).toBe(2);
+    expect(shift("builder", "--engine", "claude", "--task", "  ").status).toBe(2);
+    expect(shift("reviewer", "--engine", "claude", "--task", TASK).status).toBe(2);
+    expect(items()).toEqual([]);
+  });
+
+  it("reports a failed issue create and starts nothing", () => {
+    world([]);
+    writeFileSync(join(fake, "create-fails"), "");
+    const r = shift("builder", "--engine", "claude", "--task", TASK);
+    expect(r.out).toMatch(/^Could not file the task on owner\/sandbox: could not add label/);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+});
+
+describe("team-shift: progress in between and reasoning at the end", () => {
+  it("claude streams its steps (stream-json through a readable filter), still without skip-permissions", () => {
+    world([issue(1, ["agent:build"])]);
+    shift("builder");
+    const args = claudeArgs();
+    expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
+    expect(args).toContain("--verbose");
+    expect(argv().join(" ")).not.toContain("dangerously-skip-permissions");
+  });
+
+  it("the stream filter turns claude's events into one readable line each and keeps unknown lines", () => {
+    const filter = join(ROOT, "deploy", "opendots", "team-stream");
+    const events = [
+      { type: "system", subtype: "init" },
+      { type: "assistant", message: { content: [{ type: "text", text: "Reading the README first." }] } },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }] } },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/w/README.md" } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "WHAT I DID: x\nRESULT: PR #9" }] } },
+      { type: "result", subtype: "success", is_error: false, result: "WHAT I DID: x\nRESULT: PR #9" },
+    ].map((e) => JSON.stringify(e)).join("\n") + "\nnot json at all\n";
+    const r = spawnSync("bash", [filter], { input: events, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe("Reading the README first.\n> Bash: npm test\n> Edit: /w/README.md\nWHAT I DID: x\nRESULT: PR #9\nnot json at all\n");
+  });
+
+  it("the stream filter prints an error result (the usage-limit text) so the limit check still sees it", () => {
+    const filter = join(ROOT, "deploy", "opendots", "team-stream");
+    const ev = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "You've hit your weekly limit" });
+    expect(spawnSync("bash", [filter], { input: `${ev}\n`, encoding: "utf8" }).stdout).toBe("You've hit your weekly limit\n");
+  });
+
+  it("--progress prints at most 5 short lines and changes nothing", () => {
+    world([issue(5, ["agent:building"])]);
+    writeJob("builder", "issue", 5, 180);
+    writeFileSync(join(fake, "state"), "running\n");
+    writeFileSync(join(fake, "log"), ["a", "b", "", "> Bash: npm test", "x".repeat(300), "Writing the fix now."].join("\n") + "\n");
+    const r = shift("builder", "--progress");
+    const lines = r.out.split("\n");
+    expect(lines[0]).toBe("Builder: claude on owner/sandbox issue #5, 3 min, running. Last steps:");
+    expect(lines.slice(1)).toEqual(["b", "> Bash: npm test", `${"x".repeat(159)}…`, "Writing the fix now."]);
+    expect(existsSync(join(fake, "gh.log"))).toBe(false);
+    expect(existsSync(join(runs, "shift-builder.job"))).toBe(true);
+  });
+
+  it("--progress with no run says so", () => {
+    world([]);
+    expect(shift("builder", "--progress").out).toBe("Builder: no run open.");
+  });
+
+  it("Done prints the run's reasoning block (the last one), not just RESULT", () => {
+    world([issue(4, ["agent:in-pr"])]);
+    writeJob("builder", "issue", 4);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), [
+      "> Bash: npm test", "WHAT I DID: draft", "RESULT: draft",
+      "WHAT I DID: added CONTRIBUTING.md, opened PR #9", "WHY: issue #4 asked for it",
+      "WHAT'S LEFT: Reviewer pass", "RESULT: https://github.com/owner/sandbox/pull/9", "",
+    ].join("\n"));
+    expect(shift("builder").out).toBe([
+      "Done: owner/sandbox issue #4.", "WHAT I DID: added CONTRIBUTING.md, opened PR #9", "WHY: issue #4 asked for it",
+      "WHAT'S LEFT: Reviewer pass", "RESULT: https://github.com/owner/sandbox/pull/9",
+    ].join("\n"));
+  });
+
+  it("every run's brief asks for the four-line ending", () => {
+    const team = readFileSync(join(BRIEFS, "team.md"), "utf8");
+    for (const l of ["WHAT I DID:", "WHY:", "WHAT'S LEFT:", "RESULT:"]) expect(team).toContain(l);
   });
 });
