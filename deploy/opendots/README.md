@@ -13,7 +13,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a turn may make 12 model calls (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
-| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused 15-min shift tasks. Idempotent |
+| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused 60-min shift tasks. Idempotent |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
@@ -58,7 +58,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 
 ## Engineering team
 Three Dots act as employees, each with a computer holding `claude`, `agy` and `gh`. They talk to each other
-only through GitHub labels. OpenDots' scheduler runs one "shift" task per Dot every 15 minutes. A Dot is only a
+only through GitHub labels. OpenDots' scheduler runs one "shift" task per Dot every 60 minutes. A Dot is only a
 dispatcher: its shift runs `team-shift <role>` once and replies with the output, so the paid Dot model makes 2-3
 calls a shift. claude does the engineering (subscription, not OpenRouter) with the role brief from `team/` and an
 allowlist: nobody may merge, force-push, rebase or call `gh api`; only the Builder may edit, commit, push and open

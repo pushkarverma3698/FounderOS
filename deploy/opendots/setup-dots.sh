@@ -2,14 +2,14 @@
 # Create or update the Dots through the app's owner API. Idempotent; run on the VPS:
 #   bash /opt/opendots/deploy/setup-dots.sh
 # Chief of Staff = the default Dot, renamed; its computer has gh only (it files issues, merges approved PRs).
-# Architect, Builder, Reviewer = the engineering team: each has a computer and a 15-min recurring "shift"
+# Architect, Builder, Reviewer = the engineering team: each has a computer and a 60-min recurring "shift"
 # task that runs team-shift (claude does the work), and they hand work over with GitHub labels. The Builder is the old Engineer Dot (renamed); the others
 # get copies of its logins once. Reruns never overwrite a login a Dot already has (dot-login switches it).
 # Schedules are created PAUSED. Start them in the app (Tasks) or: POST /api/tasks/<id>/actions {"action":"run"}.
 set -euo pipefail
-APP=/opt/opendots/app
+APP=${OPENDOTS_APP:-/opt/opendots/app}
 REPOS=${TEAM_REPOS:-pushkarverma3698/opendots-sandbox} # space-separated owner/repo the team may work in
-SHIFT_SECONDS=${SHIFT_SECONDS:-900}
+SHIFT_SECONDS=${SHIFT_SECONDS:-3600} # founder 2026-10-11: one shift an hour
 T=$(grep '^OWNER_TOKEN=' "$APP/.env" | cut -d= -f2-)
 api() { curl -fsS -X "$1" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   "http://127.0.0.1:4310/api$2" ${3:+--data "$3"}; }
@@ -105,10 +105,13 @@ for pair in "Architect:$architect" "Builder:$builder" "Reviewer:$reviewer"; do
   conv=$(api GET /workspace | jq -r --arg d "$id" '.conversations[] | select(.dotId==$d and .title=="Shift") | .id' | head -1)
   [[ -n $conv ]] || conv=$(api POST /conversations "$(jq -nc --arg d "$id" '{dotId:$d, title:"Shift"}')" | jq -r .id)
   SHIFT="$name shift: follow your SHIFT rules for one item, or reply \"No work\"."
-  task=$(jq -r --arg p "$SHIFT" '.tasks[] | select(.prompt==$p and .status!="cancelled") | .id' <<<"$state" | head -1)
-  if [[ -z $task ]]; then
+  read -r task every < <(jq -r --arg p "$SHIFT" \
+    '[.tasks[] | select(.prompt==$p and .status!="cancelled")][0] // empty | "\(.id) \(.intervalSeconds)"' <<<"$state") || true
+  if [[ -z ${task:-} ]]; then
     task=$(api POST /tasks "$(jq -nc --arg p "$SHIFT" --arg c "$conv" --argjson s "$SHIFT_SECONDS" '{prompt:$p, threadId:$c, intervalSeconds:$s}')" | jq -r .id)
     api POST "/tasks/$task/actions" '{"action":"pause"}' >/dev/null
+  elif [[ $every != "$SHIFT_SECONDS" ]]; then # an existing task keeps its paused/running state
+    api PUT "/tasks/$task/schedule" "$(jq -nc --argjson s "$SHIFT_SECONDS" '{intervalSeconds:$s}')" >/dev/null
   fi
   echo "$name dot=$id shift-task=$task conversation=$conv"
 done

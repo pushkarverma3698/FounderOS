@@ -290,3 +290,58 @@ describe("team-shift: review rounds", () => {
     expect(shift("reviewer").out).toMatch(/^Started: owner\/sandbox pr #5/);
   });
 });
+
+/**
+ * deploy/opendots/setup-dots.sh against a fake owner API (curl) and fake docker.
+ * Founder 2026-10-11: shifts every 60 min. A rerun must move the existing shift tasks too (it used to set the
+ * interval only when it created a task, so a rerun left the live tasks on 15 min).
+ */
+describe("setup-dots.sh: shift schedule", () => {
+  const SETUP = join(ROOT, "deploy", "opendots", "setup-dots.sh");
+  const TOKEN = "owner-token-not-for-output";
+  const shiftPrompt = (role: string): string => `${role} shift: follow your SHIFT rules for one item, or reply "No work".`;
+
+  function setup(tasks: { id: string; prompt: string; status: string; intervalSeconds: number | null }[], env: Record<string, string> = {}) {
+    spawnSync("mkdir", ["-p", join(dir, "app")]);
+    writeFileSync(join(dir, "app", ".env"), `X=1\nOWNER_TOKEN=${TOKEN}\n`);
+    bin("curl", fakeScript("opendots-curl.sh"));
+    bin("docker", fakeScript("opendots-docker.sh"));
+    const dots = [["Chief of Staff", "chief"], ["Builder", "b"], ["Architect", "a"], ["Reviewer", "r"]];
+    writeFileSync(join(fake, "workspace.json"), JSON.stringify({
+      spaces: [{ name: "Everyday", id: "s1" }],
+      dots: dots.map(([name, id]) => ({ name, id })),
+      conversations: ["a", "b", "r"].map((d) => ({ dotId: d, title: "Shift", id: `c-${d}` })),
+    }));
+    writeFileSync(join(fake, "state.json"), JSON.stringify({ tasks }));
+    const r = spawnSync("bash", [SETUP], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
+        FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app"), ...env },
+    });
+    const calls = existsSync(join(fake, "curl.log")) ? readFileSync(join(fake, "curl.log"), "utf8").trim().split("\n") : [];
+    return { status: r.status, out: r.stdout + r.stderr, calls };
+  }
+
+  it("moves existing shift tasks to 60 minutes and never prints the owner token", () => {
+    const r = setup(["Architect", "Builder", "Reviewer"].map((role) =>
+      ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: 900 })));
+    expect(r.status, r.out).toBe(0);
+    for (const role of ["Architect", "Builder", "Reviewer"])
+      expect(r.calls).toContain(`PUT /tasks/t-${role}/schedule {"intervalSeconds":3600}`);
+    expect(r.calls.some((c) => c.startsWith("POST /tasks "))).toBe(false);
+    expect(r.out).not.toContain(TOKEN);
+  });
+
+  it("creates a missing shift task at 60 minutes, paused", () => {
+    const r = setup([]);
+    expect(r.status, r.out).toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("POST /tasks ")).every((c) => c.includes('"intervalSeconds":3600'))).toBe(true);
+    expect(r.calls).toContain('POST /tasks/new-tasks/actions {"action":"pause"}');
+  });
+
+  it("leaves a task already on the interval alone", () => {
+    const r = setup(["Architect", "Builder", "Reviewer"].map((role) =>
+      ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: 3600 })));
+    expect(r.calls.some((c) => c.includes("/schedule"))).toBe(false);
+  });
+});
