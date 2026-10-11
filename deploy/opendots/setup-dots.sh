@@ -11,7 +11,9 @@
 # POST /api/tasks/<id>/actions {"action":"run"}.
 set -euo pipefail
 APP=${OPENDOTS_APP:-/opt/opendots/app}
-REPOS=${TEAM_REPOS:-pushkarverma3698/opendots-sandbox} # space-separated owner/repo the team may work in
+# Space-separated owner/repo the team may work in. Only repos the computers' gh token can push to: it covers the
+# founder's own account, not OplifyMessage/* or turickai/* (those need their own token first).
+REPOS=${TEAM_REPOS:-pushkarverma3698/opendots-sandbox pushkarverma3698/FounderOS pushkarverma3698/linkedin-growth-engine-v2 pushkarverma3698/fos-journey-sandbox}
 SHIFT_SECONDS=${SHIFT_SECONDS:-900} # founder 2026-10-11: idle checks are free, so every 15 min
 SHIFT_TASKS=${OPENDOTS_SHIFT_TASKS:-$(dirname "$APP")/shift-tasks}
 HERE=$(cd "$(dirname "$0")" && pwd)
