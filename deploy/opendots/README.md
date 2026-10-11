@@ -13,8 +13,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a turn may make 12 model calls (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
-| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the hourly `shift-cron` crontab line (`SHIFT_SECONDS`, default 3600). Idempotent |
-| `shift-cron` | Host cron, every 60 min: runs `team-shift <role> --check` in each computer (no model call) and runs a shift task only when it prints `Due:` or the check fails. Log: `/opt/opendots/shift-cron.log` |
+| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the 15-min `shift-cron` crontab line (`SHIFT_SECONDS`, default 900). Idempotent |
+| `shift-cron` | Host cron, every 15 min: runs `team-shift <role> --check` in each computer (no model call) and runs a shift task only when it prints `Due:` or the check fails. Log: `/opt/opendots/shift-cron.log` |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
@@ -59,7 +59,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 
 ## Engineering team
 Three Dots act as employees, each with a computer holding `claude`, `agy` and `gh`. They talk to each other
-only through GitHub labels. Host cron (`shift-cron`) checks each role every 60 minutes with the read-only
+only through GitHub labels. Host cron (`shift-cron`) checks each role every 15 minutes with the read-only
 `team-shift <role> --check` and runs that Dot's "shift" task only when there is work, so an idle hour makes no
 OpenRouter call. A Dot is only a dispatcher: its shift runs `team-shift <role>` once and replies with the output, so the paid Dot model makes 2-3
 calls a shift. claude does the engineering (subscription, not OpenRouter) with the role brief from `team/` and an
@@ -76,9 +76,9 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 - **Start / stop:** shifts are created paused, and cron never wakes a paused task. Start each once in the app
   (Tasks → Run) or `POST /api/tasks/<id>/actions {"action":"run"}`. Kill switch: pause the three tasks (pausing
   also stops a running shift); to stop the checks too, delete the `# opendots-shift` line from `crontab -e`.
-- **Pace:** a shift that collects a finished run starts the next item an hour later, so each role does about one
-  item every 2 hours. Faster costs nothing while idle: `SHIFT_SECONDS=900` (a divisor of 60 min) and rerun
-  `setup-dots.sh`.
+- **Pace:** a shift that collects a finished run starts the next item at the next check, so each role does about
+  one item every 30 min plus claude's run time. Checks cost nothing while idle; to change the pace set
+  `SHIFT_SECONDS` (3600, or a whole number of minutes that divides 60) and rerun `setup-dots.sh`.
 
 | Event | Remove | Add |
 |---|---|---|

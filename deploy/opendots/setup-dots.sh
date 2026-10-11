@@ -11,7 +11,7 @@
 set -euo pipefail
 APP=${OPENDOTS_APP:-/opt/opendots/app}
 REPOS=${TEAM_REPOS:-pushkarverma3698/opendots-sandbox} # space-separated owner/repo the team may work in
-SHIFT_SECONDS=${SHIFT_SECONDS:-3600} # founder 2026-10-11: one shift an hour
+SHIFT_SECONDS=${SHIFT_SECONDS:-900} # founder 2026-10-11: idle checks are free, so every 15 min
 SHIFT_TASKS=${OPENDOTS_SHIFT_TASKS:-$(dirname "$APP")/shift-tasks}
 HERE=$(cd "$(dirname "$0")" && pwd)
 m=$((SHIFT_SECONDS / 60))

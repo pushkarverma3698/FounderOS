@@ -294,7 +294,7 @@ describe("team-shift: review rounds", () => {
 
 /**
  * deploy/opendots/setup-dots.sh against a fake owner API (curl), docker and crontab.
- * Founder 2026-10-11: shifts every 60 min, and an idle shift costs nothing. A host cron (shift-cron) is the only
+ * Founder 2026-10-11: an idle shift costs nothing, so shifts are checked every 15 min. A host cron (shift-cron) is the only
  * clock; the OpenDots shift tasks have no interval of their own, so the paid Dot runs only when cron wakes it.
  * A rerun must fix existing tasks too (it used to set the interval only when it created a task).
  */
@@ -352,7 +352,7 @@ describe("setup-dots.sh: shift schedule", () => {
     expect(r.calls.some((c) => c.includes("/schedule"))).toBe(false);
   });
 
-  it("writes role, Dot and task for shift-cron, and installs one hourly cron line, keeping other lines", () => {
+  it("writes role, Dot and task for shift-cron, and installs one 15-minute cron line, keeping other lines", () => {
     writeFileSync(join(fake, "crontab"), "*/2 * * * * other-job\n0 * * * * old # opendots-shift\n");
     const r = setup(shiftTasks(null));
     expect(r.status, r.out).toBe(0);
@@ -360,12 +360,12 @@ describe("setup-dots.sh: shift schedule", () => {
     const lines = crontab().trim().split("\n");
     expect(lines[0]).toBe("*/2 * * * * other-job");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toMatch(/^0 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
+    expect(lines[1]).toMatch(/^\*\/15 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
   });
 
-  it("SHIFT_SECONDS=900 gives a 15-minute cron; a value cron cannot express is refused", () => {
-    expect(setup(shiftTasks(null), { SHIFT_SECONDS: "900" }).status).toBe(0);
-    expect(crontab()).toMatch(/^\*\/15 \* \* \* \* /);
+  it("SHIFT_SECONDS=3600 gives an hourly cron; a value cron cannot express is refused", () => {
+    expect(setup(shiftTasks(null), { SHIFT_SECONDS: "3600" }).status).toBe(0);
+    expect(crontab()).toMatch(/^0 \* \* \* \* /);
     const bad = setup(shiftTasks(null), { SHIFT_SECONDS: "2700" });
     expect(bad.status).not.toBe(0);
     expect(bad.out).toContain("SHIFT_SECONDS");
