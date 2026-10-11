@@ -59,6 +59,7 @@ function shift(role: string): { out: string; status: number | null; err: string 
       TEAM_RUNS: runs,
       TEAM_REPOS_FILE: join(dir, "repos"),
       TEAM_BRIEFS: BRIEFS,
+      TEAM_WORK: join(dir, "work"),
     },
   });
   return { out: r.stdout.trim(), status: r.status, err: r.stderr };
@@ -67,6 +68,12 @@ function shift(role: string): { out: string; status: number | null; err: string 
 function argv(): string[] {
   return readFileSync(join(fake, "argv"), "utf8").split("\0");
 }
+/** claude's own arguments: run-bg gets `sh -c 'cd "$0" && exec "$@"' <work dir> claude ...`. */
+function claudeArgs(): string[] {
+  const all = argv();
+  return all.slice(all.indexOf("claude"));
+}
+const workDir = (): string => join(dir, "work", "sandbox");
 
 /** Values given to a variadic claude flag, up to the next flag. */
 function flagValues(args: string[], flag: string): string[] {
@@ -90,6 +97,7 @@ beforeEach(() => {
   bin("gh", fakeScript("opendots-gh.sh"));
   bin("run-bg", fakeScript("opendots-run-bg.sh"));
   bin("tmux", "#!/bin/sh\nexit 0\n");
+  bin("git", `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE/git.log"\n[ -e "$FAKE/fetch-fails" ] && { echo "fatal: could not read from remote" >&2; exit 128; }\nexit 0\n`);
   writeFileSync(join(dir, "repos"), `# team repos\n${REPO}\n`);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -122,7 +130,7 @@ describe("team-shift: claiming work", () => {
     expect(item("issue", 4).labels).toEqual(["agent:planning"]);
     expect(item("issue", 7).labels).toEqual(["agent:plan"]);
     expect(item("issue", 4).comments[0]).toMatch(/^Architect: started claude on this issue/);
-    const args = argv();
+    const args = claudeArgs();
     expect(args[0]).toBe("claude");
     expect(args[1]).toBe("-p");
     expect(args[2]).toContain("YOUR ROLE: Architect");
@@ -131,10 +139,34 @@ describe("team-shift: claiming work", () => {
     expect(existsSync(join(runs, "shift-architect.job"))).toBe(true);
   });
 
+  it("clones the repo, fetches, and starts claude inside the clone (its permissions only cover its own directory)", () => {
+    world([issue(4, ["agent:plan"])]);
+    shift("architect");
+    expect(existsSync(join(workDir(), ".git"))).toBe(true);
+    expect(readFileSync(join(fake, "git.log"), "utf8")).toContain(`-C ${workDir()} fetch`);
+    const all = argv();
+    expect(all.slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(all[3]).toBe(workDir());
+    expect(all[4]).toBe("claude");
+    expect(claudeArgs()[2]).toContain(`Work directory: ${workDir()}`);
+  });
+
+  it("blocks the item and starts no claude when the repo cannot be fetched", () => {
+    world([issue(4, ["agent:plan"])]);
+    writeFileSync(join(fake, "fetch-fails"), "");
+    const r = shift("architect");
+    expect(r.status).toBe(0);
+    expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #4\. Architect: could not prepare/);
+    expect(item("issue", 4).labels).toEqual(["agent:blocked"]);
+    expect(item("issue", 4).comments.join("\n")).toContain("could not read from remote");
+    expect(existsSync(join(fake, "started"))).toBe(false);
+    expect(existsSync(join(runs, "shift-architect.job"))).toBe(false);
+  });
+
   it("uses the default branch as base when the repo has no beta", () => {
     world([issue(4, ["agent:plan"])], { beta: false });
     shift("architect");
-    expect(argv()[2]).toContain("Base branch: main.");
+    expect(claudeArgs()[2]).toContain("Base branch: main.");
   });
 
   it("gives the Builder a PR sent back with changes before a new issue", () => {

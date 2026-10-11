@@ -3,6 +3,7 @@
 set -euo pipefail
 S=$FAKE/items.json
 printf '%s\n' "$*" >> "$FAKE/gh.log"
+if [[ ${1:-} == repo && ${2:-} == clone ]]; then mkdir -p "$4/.git"; exit 0; fi
 kind=$1; sub=${2:-}; shift 2 || true
 n=""; repo=""; label=""; json=""; q="."; adds=(); rems=()
 while (($#)); do

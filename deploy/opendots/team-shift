@@ -10,6 +10,7 @@ role=${1:-}
 RUNS=${TEAM_RUNS:-/workspace/runs}
 REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
 BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
+WORK=${TEAM_WORK:-/workspace/repos}
 LIMIT_MIN=${TEAM_RUN_LIMIT_MIN:-90}
 mkdir -p "$RUNS"
 
@@ -64,7 +65,7 @@ base_of() { # repo -> beta when it exists, else the default branch
 last_output() { echo '```'; run-bg tail "$1" 30; echo '```'; }
 
 start() { # kind repo n queue-label ("" = already claimed)
-  local kind=$1 repo=$2 n=$3 queue=$4 base name prompt marker rounds
+  local kind=$1 repo=$2 n=$3 queue=$4 base name prompt marker rounds dir err
   if [[ $role == reviewer ]]; then
     rounds=$(gh pr view "$n" -R "$repo" --json comments \
       --jq '[.comments[].body | select(startswith("Reviewer verdict: CHANGES"))] | length')
@@ -80,15 +81,22 @@ start() { # kind repo n queue-label ("" = already claimed)
     touch "$marker"
   fi
   if [[ -n $queue ]]; then gh "$kind" edit "$n" -R "$repo" --remove-label "$queue" --add-label "$claim" >/dev/null; fi
+  # claude's permissions cover only its own directory (a cd or git -C elsewhere asks for approval and -p
+  # refuses), so the clone is prepared here and claude starts inside it.
+  dir=$WORK/${repo##*/}
+  if ! err=$({ [[ -d $dir/.git ]] || gh repo clone "$repo" "$dir"; } 2>&1 && git -C "$dir" fetch -q origin 2>&1); then
+    printf '%s\n' "$Role: could not prepare $dir, so claude was not started:" '```' "$err" '```' | block "$kind" "$repo" "$n"
+    return
+  fi
   base=$(base_of "$repo")
   name="shift-$role-$(tr -c 'a-zA-Z0-9_\n-' - <<<"${repo##*/}")-$n-$(date +%s)"
   prompt="$(cat "$BRIEFS/team.md" "$BRIEFS/$role.md")
 
 THIS SHIFT
 Repository: $repo. Item: $kind #$n (claimed for you: label $claim). Base branch: $base.
-Work directory: /workspace/repos/${repo##*/} (gh repo clone $repo there if it is missing; git fetch first).
+Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.
 Finish by moving the labels as your role says, then print one last line: RESULT: <what you did, with links>."
-  run-bg start "$name" claude -p "$prompt" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}" >/dev/null
+  run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" claude -p "$prompt" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}" >/dev/null
   printf '%s %s %s %s %s\n' "$repo" "$kind" "$n" "$name" "$(date +%s)" > "$job"
   echo "$Role: started claude on this $kind (run $name). The result is posted here when it finishes." |
     comment "$kind" "$repo" "$n"
