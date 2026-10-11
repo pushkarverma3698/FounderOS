@@ -60,6 +60,7 @@ function shift(role: string): { out: string; status: number | null; err: string 
       TEAM_REPOS_FILE: join(dir, "repos"),
       TEAM_BRIEFS: BRIEFS,
       TEAM_WORK: join(dir, "work"),
+      HOME: join(dir, "home"),
     },
   });
   return { out: r.stdout.trim(), status: r.status, err: r.stderr };
@@ -253,10 +254,10 @@ describe("team-shift: an open job", () => {
     world([issue(5, ["agent:building", "agent:in-pr"])]);
     writeJob("builder", "issue", 5);
     writeFileSync(join(fake, "state"), "exit=1\n");
-    writeFileSync(join(fake, "log"), "Claude usage limit reached\n");
+    writeFileSync(join(fake, "log"), "Error: npm test failed\n");
     expect(shift("builder").out).toContain("claude stopped with exit=1");
     expect(item("issue", 5).labels).toEqual(["agent:blocked", "agent:in-pr"]);
-    expect(item("issue", 5).comments[0]).toContain("Claude usage limit reached");
+    expect(item("issue", 5).comments[0]).toContain("npm test failed");
   });
 
   it("stops and blocks a run past the time limit", () => {
@@ -477,5 +478,131 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     const r = cron({ architect: due, builder: due, reviewer: due }, { "task-a": "paused", "task-b": "running", "task-r": "cancelled" });
     expect(r.runs).toEqual([]);
     expect(r.out).toContain("architect: Due: x -> task-a is paused, not woken");
+  });
+});
+
+/**
+ * agy fallback (founder 2026-10-11): when claude hits its usage limit, the Builder and Reviewer hand the same item and
+ * brief to agy instead of blocking. agy gets the role's allowlist as settings.json allow/deny rules (no
+ * skip-permissions). The Architect has no agy login and still blocks.
+ */
+describe("team-shift: agy fallback on a claude usage limit", () => {
+  const home = (): string => join(dir, "home");
+  const settingsPath = (): string => join(home(), ".gemini", "antigravity-cli", "settings.json");
+  function agyLogin(): void {
+    spawnSync("mkdir", ["-p", join(home(), ".gemini", "antigravity-cli")]);
+    writeFileSync(join(home(), ".gemini", "antigravity-cli", "antigravity-oauth-token"), "x");
+  }
+  const LIMIT = "Working on it...\nYou've hit your weekly limit · resets Oct 12, 6am (UTC)\n";
+  const agyArgs = (): string[] => { const all = argv(); return all.slice(all.indexOf("agy")); };
+  const settings = () => JSON.parse(readFileSync(settingsPath(), "utf8")) as
+    { colorScheme?: string; permissions: { allow: string[]; deny: string[] } };
+
+  it("starts agy on the same item with the same brief when claude stopped on its limit", () => {
+    agyLogin();
+    world([issue(5, ["agent:building", "agent:in-pr"])]);
+    writeJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    const r = shift("builder");
+    expect(r.out).toMatch(/^Started: owner\/sandbox issue #5, agy run shift-builder-sandbox-5-\d+ \(claude hit its usage limit\)\.$/);
+    expect(item("issue", 5).labels).toEqual(["agent:building", "agent:in-pr"]);
+    expect(item("issue", 5).comments[0]).toMatch(/^Builder: claude hit its usage limit, so agy took over/);
+    const args = agyArgs();
+    expect(args.slice(0, 2)).toEqual(["agy", "--new-project"]);
+    expect(args[args.indexOf("--print") + 1]).toContain("YOUR ROLE: Builder");
+    expect(args[args.indexOf("--print") + 1]).toContain("Item: issue #5");
+    expect(args.join(" ")).not.toContain("dangerously-skip-permissions");
+    expect(argv()[3]).toBe(workDir());
+    expect(readFileSync(join(runs, "shift-builder.job"), "utf8")).toMatch(/ agy\n$/);
+  });
+
+  it("also takes over when claude exited 0 on its weekly limit without handing the item over", () => {
+    agyLogin();
+    world([pr(6, ["agent:reviewing"])]);
+    writeJob("reviewer", "pr", 6);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    expect(shift("reviewer").out).toMatch(/^Started: owner\/sandbox pr #6, agy run /);
+    expect(item("pr", 6).labels).toEqual(["agent:reviewing"]);
+  });
+
+  it("gives agy the role's allowlist as settings rules and keeps the file's other settings", () => {
+    agyLogin();
+    writeFileSync(settingsPath(), JSON.stringify({ colorScheme: "light", permissions: { allow: ["command(rm -rf /)"] } }));
+    world([pr(6, ["agent:reviewing"])]);
+    writeJob("reviewer", "pr", 6);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    shift("reviewer");
+    const s = settings();
+    expect(s.colorScheme).toBe("light");
+    expect(s.permissions.allow).toEqual(expect.arrayContaining(["read_file(*)", "command(gh pr view)", "command(gh pr ready)"]));
+    expect(s.permissions.allow).not.toContain("command(rm -rf /)");
+    expect(s.permissions.allow).not.toContain("write_file(*)");
+    expect(s.permissions.allow).not.toContain("command(git push)");
+    expect(s.permissions.deny).toEqual(expect.arrayContaining(["command(gh pr merge)", "command(gh api)", "command(git push --force)"]));
+  });
+
+  it("the Builder's agy may write files and push", () => {
+    agyLogin();
+    world([issue(5, ["agent:building"])]);
+    writeJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    shift("builder");
+    expect(settings().permissions.allow).toEqual(expect.arrayContaining(["write_file(*)", "command(git push)", "command(gh pr create)"]));
+  });
+
+  it("the Architect has no agy, so a limit still blocks for the founder", () => {
+    agyLogin();
+    world([issue(4, ["agent:planning"])]);
+    writeJob("architect", "issue", 4);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    expect(shift("architect").out).toMatch(/^Blocked: owner\/sandbox issue #4\. Architect: claude stopped with exit=1/);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("blocks when the computer has no agy login", () => {
+    world([issue(5, ["agent:building"])]);
+    writeJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), LIMIT);
+    const r = shift("builder");
+    expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #5\./);
+    expect(item("issue", 5).comments[0]).toContain("no agy login");
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  function writeAgyJob(role: string, kind: string, n: number): void {
+    const started = Math.floor(Date.now() / 1000) - 60;
+    writeFileSync(join(runs, `shift-${role}.job`), `${REPO} ${kind} ${n} shift-${role}-sandbox-${n}-2 ${started} agy\n`);
+  }
+
+  it("collects an agy run that handed the item over even when agy exited non-zero (#452)", () => {
+    world([issue(5, ["agent:in-pr"])]);
+    writeAgyJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), "RESULT: PR #9 opened\n");
+    expect(shift("builder").out).toBe("Done: owner/sandbox issue #5. RESULT: PR #9 opened");
+  });
+
+  it("blocks an agy run that did not hand over and never falls back again", () => {
+    agyLogin();
+    world([issue(5, ["agent:building"])]);
+    writeAgyJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "exit=1\n");
+    writeFileSync(join(fake, "log"), "Individual quota reached. Resets in 3h\n");
+    const r = shift("builder");
+    expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #5\. Builder: agy stopped with exit=1/);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("reports a running agy run as agy", () => {
+    world([issue(5, ["agent:building"])]);
+    writeAgyJob("builder", "issue", 5);
+    writeFileSync(join(fake, "state"), "running\n");
+    expect(shift("builder").out).toBe("Working: owner/sandbox issue #5, agy run shift-builder-sandbox-5-2, 1 min.");
   });
 });

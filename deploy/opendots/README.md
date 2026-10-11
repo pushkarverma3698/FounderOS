@@ -13,7 +13,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a turn may make 12 model calls (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
-| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused 60-min shift tasks. Idempotent |
+| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the hourly `shift-cron` crontab line (`SHIFT_SECONDS`, default 3600). Idempotent |
+| `shift-cron` | Host cron, every 60 min: runs `team-shift <role> --check` in each computer (no model call) and runs a shift task only when it prints `Due:` or the check fails. Log: `/opt/opendots/shift-cron.log` |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
@@ -58,8 +59,9 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 
 ## Engineering team
 Three Dots act as employees, each with a computer holding `claude`, `agy` and `gh`. They talk to each other
-only through GitHub labels. OpenDots' scheduler runs one "shift" task per Dot every 60 minutes. A Dot is only a
-dispatcher: its shift runs `team-shift <role>` once and replies with the output, so the paid Dot model makes 2-3
+only through GitHub labels. Host cron (`shift-cron`) checks each role every 60 minutes with the read-only
+`team-shift <role> --check` and runs that Dot's "shift" task only when there is work, so an idle hour makes no
+OpenRouter call. A Dot is only a dispatcher: its shift runs `team-shift <role>` once and replies with the output, so the paid Dot model makes 2-3
 calls a shift. claude does the engineering (subscription, not OpenRouter) with the role brief from `team/` and an
 allowlist: nobody may merge, force-push, rebase or call `gh api`; only the Builder may edit, commit, push and open
 PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRouter credit in one afternoon.
@@ -71,9 +73,12 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
   with a link to the PR), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
   `agent:blocked` for the queue label). Issues marked `agent:in-pr` whose PR merged into a non-default branch are
   closed by the Builder on a later shift.
-- **Start / stop:** shifts are created paused. Start each in the app (Tasks → Run) or
-  `POST /api/tasks/<id>/actions {"action":"run"}`. Kill switch: pause the three tasks (pausing also stops a running
-  shift).
+- **Start / stop:** shifts are created paused, and cron never wakes a paused task. Start each once in the app
+  (Tasks → Run) or `POST /api/tasks/<id>/actions {"action":"run"}`. Kill switch: pause the three tasks (pausing
+  also stops a running shift); to stop the checks too, delete the `# opendots-shift` line from `crontab -e`.
+- **Pace:** a shift that collects a finished run starts the next item an hour later, so each role does about one
+  item every 2 hours. Faster costs nothing while idle: `SHIFT_SECONDS=900` (a divisor of 60 min) and rerun
+  `setup-dots.sh`.
 
 | Event | Remove | Add |
 |---|---|---|
@@ -91,6 +96,14 @@ Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `c
 "Working"; finished with the claim label moved → "Done" plus claude's `RESULT:` line; finished without moving it,
 failed, or over 90 min → the item is blocked with claude's last output. A lost run is restarted. A 4th review round
 blocks instead of starting.
+
+**agy fallback:** when claude stops on its usage limit (`hit your ... limit`, `usage limit`, `quota reached`), the
+Builder and Reviewer start `agy --print` on the same item with the same brief and keep the claim; the job file
+records `agy` and later shifts report "agy run". agy has no `--allowedTools`, so `team-shift` writes the role's
+claude allowlist into `~/.gemini/antigravity-cli/settings.json` as `permissions.allow` / `deny` rules
+(`command(git push)`, `read_file(*)`, `write_file(*)` for the Builder only), keeping the file's other settings. No
+`--dangerously-skip-permissions`. The Architect's computer has no agy login, so its limit still blocks; a computer
+without `antigravity-oauth-token` blocks too, and a failed agy run blocks without a second fallback.
 
 **Scheduler behaviour (read in OpenDots source, pinned `625452e`, plus our patch):** one task runs at a time.
 Upstream, a recurring task schedules its next run only after a *completed* run; with the patch it also comes

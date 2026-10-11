@@ -5,6 +5,8 @@
 # With a claude job of this role open: report it running, or collect it (check it handed the item over), else
 # block the item. Without one: claim the oldest item in the role's queue and start claude on it, or print "No work".
 # Labels carry the hand-offs (README.md). Repos: one owner/repo per line in $TEAM_REPOS_FILE.
+# When claude stops on its usage limit, the Builder and Reviewer hand the item to agy (same brief, the same allowlist
+# as settings.json rules); the Architect's computer has no agy login, so it blocks for the founder.
 # --check changes nothing and prints "No work", "Working: ..." or "Due: ...": the host cron (shift-cron) wakes the
 # paid Dot only on Due, so an idle shift costs nothing.
 set -euo pipefail
@@ -66,9 +68,30 @@ base_of() { # repo -> beta when it exists, else the default branch
   else gh repo view "$1" --json defaultBranchRef --jq .defaultBranchRef.name; fi
 }
 last_output() { echo '```'; run-bg tail "$1" 30; echo '```'; }
+# claude's usage-limit lines (deploy/lib/claude-run.sh); the weekly limit can exit 0.
+LIMIT_RE='hit your .*limit|usage limit|limit reached|quota reached|RESOURCE_EXHAUSTED'
+AGY_DIR=$HOME/.gemini/antigravity-cli
+# agy has no --allowedTools: the role's claude allowlist becomes permissions.allow/deny in its settings.json
+# (rule syntax from the agy binary: command(<prefix>), read_file(*), write_file(*)). Other settings are kept.
+agy_settings() {
+  local t rules=() f=$AGY_DIR/settings.json allow deny
+  for t in "${allowed[@]}" -- "${denied[@]}"; do
+    case "$t" in
+      --) rules+=(--) ;;
+      Read | Glob | Grep) rules+=("read_file(*)") ;;
+      Edit | Write) rules+=("write_file(*)") ;;
+      Bash\(*) t=${t#Bash(}; rules+=("command(${t%:\*)})") ;;
+    esac
+  done
+  allow=$(printf '%s\n' "${rules[@]}" | sed '/^--$/q' | grep -v '^--$' | jq -Rnc '[inputs] | unique')
+  deny=$(printf '%s\n' "${rules[@]}" | sed '1,/^--$/d' | jq -Rnc '[inputs] | unique')
+  { [[ -s $f ]] && cat "$f" || echo '{}'; } |
+    jq --argjson a "$allow" --argjson d "$deny" '.permissions.allow = $a | .permissions.deny = $d' > "$f.tmp"
+  mv "$f.tmp" "$f"
+}
 
-start() { # kind repo n queue-label ("" = already claimed)
-  local kind=$1 repo=$2 n=$3 queue=$4 base name prompt marker rounds dir err
+start() { # kind repo n queue-label ("" = already claimed) [engine] [why another engine took over]
+  local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt marker rounds dir err run
   if [[ $role == reviewer ]]; then
     rounds=$(gh pr view "$n" -R "$repo" --json comments \
       --jq '[.comments[].body | select(startswith("Reviewer verdict: CHANGES"))] | length')
@@ -99,39 +122,54 @@ THIS SHIFT
 Repository: $repo. Item: $kind #$n (claimed for you: label $claim). Base branch: $base.
 Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.
 Finish by moving the labels as your role says, then print one last line: RESULT: <what you did, with links>."
-  run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" claude -p "$prompt" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}" >/dev/null
-  printf '%s %s %s %s %s\n' "$repo" "$kind" "$n" "$name" "$(date +%s)" > "$job"
-  echo "$Role: started claude on this $kind (run $name). The result is posted here when it finishes." |
-    comment "$kind" "$repo" "$n"
-  echo "Started: $repo $kind #$n, claude run $name."
+  if [[ $engine == agy ]]; then
+    agy_settings
+    run=(agy --new-project --print "$prompt" --print-timeout "${LIMIT_MIN}m" --output-format text)
+  else
+    run=(claude -p "$prompt" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
+  fi
+  run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" "${run[@]}" >/dev/null
+  printf '%s %s %s %s %s %s\n' "$repo" "$kind" "$n" "$name" "$(date +%s)" "$engine" > "$job"
+  if [[ -n $why ]]; then
+    echo "$Role: $why, so $engine took over this $kind (run $name). The result is posted here when it finishes."
+  else
+    echo "$Role: started $engine on this $kind (run $name). The result is posted here when it finishes."
+  fi | comment "$kind" "$repo" "$n"
+  echo "Started: $repo $kind #$n, $engine run $name${why:+ ($why)}."
 }
 
 # 1. An open job: still running, finished, or lost.
 if [[ -f $job ]]; then
-  read -r repo kind n name started < "$job"
+  read -r repo kind n name started engine < "$job"
+  engine=${engine:-claude}
   state=$(run-bg status "$name" | head -n1)
   age=$((($(date +%s) - started) / 60))
-  if [[ $state == running ]] && ((age < LIMIT_MIN)); then echo "Working: $repo $kind #$n, claude run $name, $age min."; exit 0; fi
+  if [[ $state == running ]] && ((age < LIMIT_MIN)); then echo "Working: $repo $kind #$n, $engine run $name, $age min."; exit 0; fi
   if [[ -n $check ]]; then echo "Due: $repo $kind #$n, run $name is $state."; exit 0; fi
   case "$state" in
     running) # over the limit
       tmux kill-session -t "run-$name" 2>/dev/null || true
-      { echo "$Role: claude ran over $LIMIT_MIN min and was stopped. Last output:"; last_output "$name"; } |
+      { echo "$Role: $engine ran over $LIMIT_MIN min and was stopped. Last output:"; last_output "$name"; } |
         block "$kind" "$repo" "$n" ;;
     unknown) # the computer restarted and the run is gone: start it again
-      rm -f "$job"; start "$kind" "$repo" "$n" "" ;;
-    exit=0)
-      if labels "$kind" "$repo" "$n" | grep -qx "$claim"; then
-        { echo "$Role: claude finished but did not hand the item over (label $claim is still set). Last output:"
-          last_output "$name"; } | block "$kind" "$repo" "$n"
-      else
+      rm -f "$job"; start "$kind" "$repo" "$n" "" "$engine" ;;
+    *) # finished: a run that handed the item over is done, whatever its exit code
+      if ! labels "$kind" "$repo" "$n" | grep -qx "$claim"; then
         rm -f "$job"
         result=$(run-bg tail "$name" 400 | grep '^RESULT:' | tail -n1 || true)
         echo "Done: $repo $kind #$n. ${result:-No RESULT line; see run $name.}"
+      elif [[ $engine == claude ]] && run-bg tail "$name" 30 | grep -qiE "$LIMIT_RE"; then
+        if [[ $role == architect ]]; then why="the Architect has no agy fallback"
+        elif [[ ! -s $AGY_DIR/antigravity-oauth-token ]]; then why="this computer has no agy login"
+        else rm -f "$job"; start "$kind" "$repo" "$n" "" agy "claude hit its usage limit"; exit 0; fi
+        { echo "$Role: claude stopped with $state on its usage limit, and $why. The founder switches this Dot's login or waits for the reset. Last output:"
+          last_output "$name"; } | block "$kind" "$repo" "$n"
+      elif [[ $state == exit=0 ]]; then
+        { echo "$Role: $engine finished but did not hand the item over (label $claim is still set). Last output:"
+          last_output "$name"; } | block "$kind" "$repo" "$n"
+      else
+        { echo "$Role: $engine stopped with $state. Last output:"; last_output "$name"; } | block "$kind" "$repo" "$n"
       fi ;;
-    *)
-      { echo "$Role: claude stopped with $state. A usage limit means the founder must switch this Dot's login. Last output:"
-        last_output "$name"; } | block "$kind" "$repo" "$n" ;;
   esac
   exit 0
 fi
