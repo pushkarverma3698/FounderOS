@@ -2,7 +2,7 @@
 
 CopilotKit OpenDots (pinned `625452e`) runs in Docker under `/opt/opendots/app`, on `127.0.0.1:4310`.
 Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot computer plus `claude`, `agy`,
-`gh`, git, tmux, `run-bg` and `team-shift`. Plan and decisions: `docs/plans/2026-10-10-opendots-migration.md`.
+`gh`, git, tmux, `run-bg`, `team-shift` and `chief-run`. Plan and decisions: `docs/plans/2026-10-10-opendots-migration.md`.
 
 | File | Purpose |
 |---|---|
@@ -11,6 +11,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `compose.turicks.yml` | Points the supervisor at that image |
 | `team-shift` | One engineering shift in one shell call: `team-shift architect\|builder\|reviewer` reports or collects the role's claude run, else claims the oldest queued item and starts claude on it with the role brief (`team/`) and a per-role tool allowlist |
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
+| `chief-run` | The Chief of Staff's one command per chat turn: `chief-run '<founder's words>'` runs claude haiku (agy at claude's usage limit) with `team/chief.md` and a gh allowlist scoped to `TEAM_REPOS`, then checks every `ACTION` line on GitHub and prints ✓/✗. It merges itself, only a PR the founder named that has `agent:approved`. Past 55 s: `still running`, then `chief-run --status chief-<id>` |
+| `team-lib.sh` | Shared by `team-shift` and `chief-run`: the usage-limit regex and the claude allowlist written as agy rules |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a scheduled shift turn may make 12 model calls and a chat turn (the Chief with you) 30 (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
 | `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the 15-min `shift-cron` crontab line (`SHIFT_SECONDS`, default 900). Idempotent |
@@ -69,8 +71,8 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 - **Give them work:** ask the Architect in chat, or open an issue labelled `agent:plan` in a repo listed in
   `TEAM_REPOS` (default `pushkarverma3698/opendots-sandbox`). Add repos with
   `TEAM_REPOS="owner/a owner/b" bash /opt/opendots/deploy/setup-dots.sh`.
-- **Your part:** tell the Chief of Staff which `agent:approved` PR to merge (it merges, then closes the issue
-  with a link to the PR), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
+- **Your part:** tell the Chief of Staff which `agent:approved` PR to merge (`chief-run` merges it, then closes
+  the issue with a link to the PR; claude itself has no merge permission), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
   `agent:blocked` for the queue label). Issues marked `agent:in-pr` whose PR merged into a non-default branch are
   closed by the Builder on a later shift.
 - **Start / stop:** shifts are created paused, and cron never wakes a paused task. Start each once in the app

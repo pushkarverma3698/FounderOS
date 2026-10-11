@@ -363,6 +363,33 @@ describe("setup-dots.sh: shift schedule", () => {
     expect(lines[1]).toMatch(/^\*\/15 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
   });
 
+  // AG-063: the Chief dispatches to claude through chief-run, so it gets the Builder's claude and agy logins and the
+  // team repos, and its prompt (max 2000 characters, the app's zod limit) is one command per request.
+  it("gives the Chief a chief-run prompt within 2000 characters, the Builder's claude and agy logins, and the team repos", () => {
+    const r = setup(shiftTasks(null));
+    expect(r.status, r.out).toBe(0);
+    const put = r.calls.find((c) => c.startsWith("PUT /dots/chief "));
+    const prompt = (JSON.parse(put?.slice("PUT /dots/chief ".length) ?? "{}") as { instructions: string }).instructions;
+    expect([...prompt].length).toBeLessThanOrEqual(2000);
+    expect(prompt).toContain("chief-run");
+    expect(prompt).toContain("dot-login");
+    expect(prompt).toContain("still running");
+    const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
+    // Both ends of one copy pipe log in either order, but copies run one after another: the k-th tar -xf reads the
+    // k-th tar -cf.
+    const packs = docker.filter((l) => l.includes(" tar -cf "));
+    const unpacks = docker.filter((l) => l.includes(" tar -xf "));
+    const k = unpacks.findIndex((l) => l.startsWith("exec -i -w /workspace opendots-computer-chief tar -xf"));
+    expect(k).toBeGreaterThanOrEqual(0);
+    expect(packs[k]).toContain(".claude-token");
+    expect(packs[k]).toContain(".gemini/antigravity-cli/antigravity-oauth-token");
+    expect(unpacks[k]).toContain("--skip-old-files");
+    expect(docker).toContain("exec -i opendots-computer-chief sh -c cat > /workspace/team-repos");
+    // The app reports a disabled browser as "Computer permission is disabled"; the Chief read that as "no computer"
+    // and gave up (founder chats 2026-10-11), so it gets the same permissions as the engineers.
+    expect(r.calls).toContain('PATCH /dots/chief/computer/permissions {"enabled":true,"browser":true,"files":true,"shell":true}');
+  });
+
   it("SHIFT_SECONDS=3600 gives an hourly cron; a value cron cannot express is refused", () => {
     expect(setup(shiftTasks(null), { SHIFT_SECONDS: "3600" }).status).toBe(0);
     expect(crontab()).toMatch(/^0 \* \* \* \* /);

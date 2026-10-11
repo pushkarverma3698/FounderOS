@@ -15,7 +15,9 @@ COPY agy /usr/local/bin/agy
 COPY run-bg /usr/local/bin/run-bg
 COPY dot-login /usr/local/bin/dot-login
 COPY team-shift /usr/local/bin/team-shift
-# claude's role briefs, read by team-shift.
+COPY chief-run /usr/local/bin/chief-run
+COPY team-lib.sh /usr/local/bin/team-lib.sh
+# claude's role briefs, read by team-shift and chief-run.
 COPY team /usr/local/share/team
 
 # The Dot's shell is non-interactive, so no profile file is sourced: a wrapper hands claude the

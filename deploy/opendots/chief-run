@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# The Chief of Staff's one command per chat turn (AG-063), so a chat turn costs the paid Dot model at most 2 calls.
+#   chief-run '<the founder's exact words>'    (or the words on stdin)
+#   chief-run --status chief-<id>              a run that was still going when the last turn ended
+# claude (haiku; CHIEF_MODEL overrides) does the request with gh; when claude is at its usage limit, agy does the same
+# request with the same allowlist. OpenDots cuts a shell command at 70 s, so the run goes through run-bg and this
+# waits at most CHIEF_WAIT seconds (55), then prints "still running: chief-<id>".
+# claude ends with one line per action (team/chief.md); this script checks each one on GitHub itself and prints ✓ or ✗.
+# claude cannot merge: for "ACTION merged" this script merges, and only a PR the founder named in his request that
+# has agent:approved. CHIEF_FORCE_LIMIT=1 (live test hook) replaces claude by a run that prints only the limit text.
+set -euo pipefail
+RUNS=${TEAM_RUNS:-/workspace/runs}
+REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
+BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
+DIR=${CHIEF_DIR:-/workspace/chief}
+MODEL=${CHIEF_MODEL:-haiku}
+WAIT=${CHIEF_WAIT:-55}
+mkdir -p "$RUNS" "$DIR"
+# LIMIT_RE, AGY_DIR and agy_settings are shared with team-shift.
+. "$(dirname "$0")/team-lib.sh"
+
+REPOS=()
+while read -r r; do [[ -z $r || $r == \#* ]] || REPOS+=("$r"); done < "$REPOS_FILE"
+# gh only on the team repos, enforced by the rule prefix: every command starts `gh <cmd> -R <repo>` (team/chief.md).
+# No gh pr merge (this script merges), no gh api (a prefix rule cannot keep it read-only), no git, no file edits.
+allowed=()
+for r in ${REPOS[@]+"${REPOS[@]}"}; do
+  for c in "issue list" "issue view" "issue create" "issue edit" "issue comment" "issue close" "issue reopen" \
+    "pr list" "pr view" "pr checks" "pr diff" "pr edit" "pr comment" "label list"; do
+    allowed+=("Bash(gh $c -R $r:*)")
+  done
+done
+denied=("Bash(gh pr merge:*)" "Bash(gh api:*)" "Bash(gh auth:*)" "Bash(gh repo:*)" "Bash(git push:*)" "Bash(rm:*)"
+  "Bash(curl:*)" "Bash(wget:*)" Edit Write NotebookEdit)
+
+usage() { sed -n '3,4p' "$0" >&2; exit 2; }
+prompt_for() { # request
+  printf '%s\n\nTEAM REPOS (the only ones you may touch): %s\nTHE FOUNDER'"'"'S REQUEST (his exact words):\n%s\n' \
+    "$(cat "$BRIEFS/chief.md")" "${REPOS[*]-}" "$1"
+}
+start_run() { # name engine
+  local run prompt
+  prompt=$(prompt_for "$request")
+  if [[ $2 == agy ]]; then
+    agy_settings
+    run=(agy --new-project --print "$prompt" --print-timeout 10m --output-format text)
+  elif [[ ${CHIEF_FORCE_LIMIT:-} == 1 ]]; then
+    run=(sh -c 'echo "You have hit your usage limit (CHIEF_FORCE_LIMIT test: claude was not started)"; exit 1')
+  else
+    run=(claude -p "$prompt" --model "$MODEL" --allowedTools "${allowed[@]}" --disallowedTools "${denied[@]}")
+  fi
+  run-bg start "$1" sh -c 'cd "$0" && exec "$@"' "$DIR" "${run[@]}" >/dev/null
+  echo "$2 $(date +%s)" > "$RUNS/$1.meta"
+}
+wait_run() { # name -> state of the run when it ended or the wait ran out
+  local s
+  while :; do
+    s=$(run-bg status "$1" | head -n1)
+    [[ $s == running && $SECONDS -lt $WAIT ]] || break
+    sleep 1
+  done
+  echo "$s"
+}
+
+if [[ ${1:-} == --status ]]; then
+  name=${2:-}
+  [[ $name =~ ^chief-[a-zA-Z0-9-]+$ ]] || usage
+  [[ -f $RUNS/$name.meta ]] || { echo "no such chief run: $name"; exit 0; }
+  request=$(cat "$RUNS/${name%-agy}.req")
+else
+  if (($#)); then request=$*; else request=$(cat); fi
+  [[ -n ${request//[[:space:]]/} ]] || usage
+  name=chief-$(date +%s)-$RANDOM
+  printf '%s\n' "$request" > "$RUNS/$name.req"
+  start_run "$name" claude
+fi
+read -r engine started < "$RUNS/$name.meta"
+note=""
+[[ $engine == agy ]] && note="claude is at its usage limit; agy did this:"
+
+state=$(wait_run "$name")
+log=$(run-bg tail "$name" 400 | tr -d '\r')
+actions=$(grep -E '^[[:space:]`*>-]*ACTION ' <<<"$log" | sed -E 's/^[^A]*//; s/[`*[:space:]]+$//' || true)
+if [[ $state != running && $engine == claude && -z $actions ]] && tail -n 30 <<<"$log" | grep -qiE "$LIMIT_RE"; then
+  if [[ ! -s $AGY_DIR/antigravity-oauth-token ]]; then
+    echo "claude is at its limit and this computer has no agy login; dot-login agy start"
+    exit 0
+  fi
+  name=$name-agy engine=agy note="claude is at its usage limit; agy did this:"
+  start_run "$name" agy
+  read -r engine started < "$RUNS/$name.meta"
+  state=$(wait_run "$name")
+  log=$(run-bg tail "$name" 400 | tr -d '\r')
+  actions=$(grep -E '^[[:space:]`*>-]*ACTION ' <<<"$log" | sed -E 's/^[^A]*//; s/[`*[:space:]]+$//' || true)
+fi
+if [[ $state == running ]]; then
+  echo "still running: $name (next turn: chief-run --status $name)${note:+ - claude is at its usage limit, agy took over}"
+  exit 0
+fi
+[[ -n $note ]] && echo "$note"
+if [[ $state != exit=0 && -z $actions ]]; then
+  echo "$engine stopped with $state. Last lines:"
+  tail -n 15 <<<"$log"
+  exit 0
+fi
+
+# Checks run against GitHub from 60 s before the run started (clock skew).
+since=$(jq -rn --argjson t $((started - 60)) '$t | todate')
+in_team() { local r; for r in ${REPOS[@]+"${REPOS[@]}"}; do [[ $r == "$1" ]] && return 0; done; return 1; }
+names() { jq -r '[.labels[].name] | if length == 0 then "none" else join(", ") end'; }
+first() { head -n1 <<<"$1"; }
+
+merge() { # repo n
+  local repo=$1 n=$2 j st labels err="" base url i before
+  if ! grep -qE "(^|[^0-9])$n([^0-9]|$)" <<<"$request"; then
+    echo "✗ merged $repo#$n: refused, the founder did not name PR $n"; return
+  fi
+  j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,url,closingIssuesReferences 2>&1) ||
+    { echo "✗ merged $repo#$n: not found on GitHub ($(first "$j"))"; return; }
+  before=$(jq -r .state <<<"$j")
+  if [[ $before != MERGED ]]; then
+    if ! jq -e '[.labels[].name] | index("agent:approved")' <<<"$j" >/dev/null; then
+      echo "✗ merged $repo#$n: refused, PR $n has no agent:approved (labels: $(names <<<"$j"))"; return
+    fi
+    err=$(gh pr merge "$n" -R "$repo" --merge 2>&1) || true
+    j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,url,closingIssuesReferences 2>&1) ||
+      { echo "✗ merged $repo#$n: could not re-read the PR ($(first "$j"))"; return; }
+  fi
+  st=$(jq -r .state <<<"$j")
+  if [[ $st != MERGED ]]; then echo "✗ merged $repo#$n: state $st${err:+ ($(first "$err"))}"; return; fi
+  base=$(jq -r .baseRefName <<<"$j") url=$(jq -r .url <<<"$j")
+  echo "✓ merged $repo#$n into $base $url"
+  [[ $before == MERGED ]] && return
+  for i in $(jq -r '.closingIssuesReferences[].number' <<<"$j"); do
+    if err=$(gh issue close "$i" -R "$repo" --comment "Merged in $url into $base." 2>&1); then echo "✓ closed $repo#$i"
+    else echo "✗ closed $repo#$i: $(first "$err")"; fi
+  done
+}
+
+check() { # one ACTION line
+  local kind repo n label extra j c
+  read -r _ kind repo n label extra <<<"$1"
+  if [[ ! $kind =~ ^(issue-created|label|commented|merged)$ || ! $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ||
+    ! $n =~ ^[0-9]+$ || -n $extra ]] || [[ $kind == label && -z $label ]] || [[ $kind != label && -n $label ]]; then
+    echo "✗ unreadable action: $1"; return
+  fi
+  in_team "$repo" || { echo "✗ $kind $repo#$n: not a team repo"; return; }
+  case $kind in
+    merged) merge "$repo" "$n" ;;
+    commented)
+      c=$(gh api "repos/$repo/issues/$n/comments?since=$since" --jq length 2>&1) || c="error: $(first "$c")"
+      if [[ $c =~ ^[1-9][0-9]*$ ]]; then echo "✓ commented $repo#$n"
+      else echo "✗ commented $repo#$n: no comment since $since${c//[0-9]/}"; fi ;;
+    *)
+      j=$(gh api "repos/$repo/issues/$n" 2>&1) || { echo "✗ $kind $repo#$n: not found on GitHub ($(first "$j"))"; return; }
+      if [[ $kind == label ]]; then
+        if jq -e --arg l "$label" '[.labels[].name] | index($l)' <<<"$j" >/dev/null; then echo "✓ label $repo#$n $label"
+        else echo "✗ label $repo#$n $label: labels are $(names <<<"$j")"; fi
+      elif jq -e '.pull_request' <<<"$j" >/dev/null; then echo "✗ issue-created $repo#$n: that is a pull request"
+      elif [[ $(jq -r .created_at <<<"$j") < $since ]]; then
+        echo "✗ issue-created $repo#$n: created before this run ($(jq -r .created_at <<<"$j"))"
+      elif ! jq -e '[.labels[].name] | index("agent:plan")' <<<"$j" >/dev/null; then
+        echo "✗ issue-created $repo#$n: no agent:plan (labels: $(names <<<"$j"))"
+      else echo "✓ issue-created $repo#$n (agent:plan) https://github.com/$repo/issues/$n"; fi ;;
+  esac
+}
+
+if [[ -n $actions ]]; then
+  while read -r a; do check "$a"; done <<<"$actions"
+else
+  sed '/^[[:space:]]*$/d' <<<"$log" | tail -n 40
+  if grep -qiE "(^|[^a-z])(i|i've|i have) (just )?(merged|created|filed|opened|labell?ed|commented|closed|moved|swapped|added|posted)|^[[:space:]]*done([^a-z]|$)" <<<"$log"; then
+    echo "NOT VERIFIED - claude says it acted but printed no ACTION line"
+  fi
+fi
