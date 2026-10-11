@@ -49,7 +49,7 @@ index db9fb2a..a27926e 100644
  export class ApiError extends Error {
    constructor(
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
-index 6191cc7..043ee6e 100644
+index 6191cc7..660d17e 100644
 --- a/src/server/dot-agent.ts
 +++ b/src/server/dot-agent.ts
 @@ -14,7 +14,7 @@ import {
@@ -61,11 +61,18 @@ index 6191cc7..043ee6e 100644
  import { openaiCompatibleText } from '@tanstack/ai-openai/compatible';
  import { learnedSkillTools, tanstackTools } from './tanstack-tools.js';
  import { Observable } from 'rxjs';
-@@ -24,12 +24,108 @@ import { WorkspaceStore } from './workspace.js';
+@@ -24,12 +24,117 @@ import { WorkspaceStore } from './workspace.js';
  import type { PlatformConfig } from './platform-config.js';
  import { browserResponse } from './research.js';
  import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
-+import { currentScheduledTurn } from '../shared/scheduled-message.js';
++import {
++  currentScheduledTurn,
++  isScheduledTaskMessage,
++} from '../shared/scheduled-message.js';
++const isScheduledTurn = (messages: RunAgentInput['messages']) => {
++  const last = messages.findLast((message) => message.role === 'user');
++  return !!last && isScheduledTaskMessage(last);
++};
  const channelError = () => ({
    type: EventType.RUN_ERROR,
    message:
@@ -76,18 +83,20 @@ index 6191cc7..043ee6e 100644
 +const TURN_TIME_LIMIT_MS = 15 * 60_000;
 +// turicks: was 2200. Coding replies (a file in one tool call, plus reasoning) need far more.
 +const MAX_COMPLETION_TOKENS = 16000;
-+// turicks: was 5 (10 with skills). A Dot runs team-shift and claude does the work, so a turn needs a few
-+// model calls; each call re-sends the whole run, so a turn still asking for tools at the limit fails loudly
-+// instead of ending as "completed" (upstream maxIterations).
-+const MAX_MODEL_CALLS = 12;
-+const stepLimit: AgentLoopStrategy = ({ iterationCount, finishReason }) => {
-+  if (iterationCount < MAX_MODEL_CALLS) return true;
-+  if (finishReason === 'tool_calls')
-+    throw new Error(
-+      `The turn hit the step limit (${MAX_MODEL_CALLS} model calls) and was stopped.`,
-+    );
-+  return false;
-+};
++// turicks: was 5 (10 with skills). A scheduled shift runs team-shift and claude does the work, so it needs a
++// few model calls; a chat turn (the Chief of Staff with the founder) does its own shell work and gets more.
++// Each call re-sends the whole run, so a turn still asking for tools at the limit fails loudly instead of
++// ending as "completed" (upstream maxIterations).
++const SHIFT_MODEL_CALLS = 12;
++const CHAT_MODEL_CALLS = 30;
++const stepLimit =
++  (max: number): AgentLoopStrategy =>
++  ({ iterationCount, finishReason }) => {
++    if (iterationCount < max) return true;
++    if (finishReason === 'tool_calls')
++      throw new Error(`The turn hit the step limit (${max} model calls) and was stopped.`);
++    return false;
++  };
 +type ModelChunk = {
 +  choices?: {
 +    finish_reason?: string | null;
@@ -171,7 +180,7 @@ index 6191cc7..043ee6e 100644
  export class DotAgent extends AbstractAgent {
    private inner?: BuiltInAgent;
    private controller?: AbortController;
-@@ -310,6 +406,7 @@ export class DotAgent extends AbstractAgent {
+@@ -310,6 +415,7 @@ export class DotAgent extends AbstractAgent {
            api: 'chat-completions',
            maxRetries: 1,
          });
@@ -179,7 +188,7 @@ index 6191cc7..043ee6e 100644
          const serverTools = [
            ...tools,
            ...pageTools(pages),
-@@ -333,7 +430,7 @@ export class DotAgent extends AbstractAgent {
+@@ -333,7 +439,7 @@ export class DotAgent extends AbstractAgent {
              const converted = convertInputToTanStackAI({
                ...ctx.input,
                // Match BuiltInAgent's default trust boundary for client messages.
@@ -188,7 +197,7 @@ index 6191cc7..043ee6e 100644
                  (message) =>
                    message.role !== 'system' && message.role !== 'developer',
                ),
-@@ -351,12 +448,8 @@ export class DotAgent extends AbstractAgent {
+@@ -351,11 +457,11 @@ export class DotAgent extends AbstractAgent {
                abortController: ctx.abortController,
                threadId: ctx.input.threadId,
                runId: ctx.input.runId,
@@ -197,12 +206,14 @@ index 6191cc7..043ee6e 100644
 -                dot.skillDeliveryEnabled && conversation.learningContainerId
 -                  ? 10
 -                  : 5,
--              ),
 +              modelOptions: { max_completion_tokens: MAX_COMPLETION_TOKENS },
-+              agentLoopStrategy: stepLimit,
++              agentLoopStrategy: stepLimit(
++                isScheduledTurn(ctx.input.messages)
++                  ? SHIFT_MODEL_CALLS
++                  : CHAT_MODEL_CALLS,
+               ),
                tools: [
                  ...tanstackTools(serverTools),
-                 ...connected,
 diff --git a/src/server/runner.ts b/src/server/runner.ts
 index e5a047e..666b9d7 100644
 --- a/src/server/runner.ts
@@ -331,10 +342,10 @@ index 444b21c..090b7f9 100644
        expect.arrayContaining([
 diff --git a/tests/turicks.test.ts b/tests/turicks.test.ts
 new file mode 100644
-index 0000000..1a1c20a
+index 0000000..a4cbbba
 --- /dev/null
 +++ b/tests/turicks.test.ts
-@@ -0,0 +1,377 @@
+@@ -0,0 +1,417 @@
 +// turicks: the engineering team's shifts are recurring tasks. They must survive a failed or interrupted
 +// run, and each shift sends only its own turn (its state lives in GitHub, not in chat history).
 +import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -522,8 +533,48 @@ index 0000000..1a1c20a
 +// turicks: a Dot dispatches (team-shift) and claude does the work, so a turn needs a few model calls.
 +// Each call re-sends the whole run, so a looping turn must stop early and fail, not end "completed".
 +describe('step limit', () => {
-+  it('stops a turn after 12 model calls and fails it', async () => {
++  const toolLoop = () =>
++    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
++      completion(
++        {
++          role: 'assistant',
++          tool_calls: [
++            {
++              index: 0,
++              id: `call-${Math.random()}`,
++              type: 'function',
++              function: { name: 'list_authorized_spaces', arguments: '{}' },
++            },
++          ],
++        },
++        'tool_calls',
++      ),
++    );
++  // 2026-10-11: 12 calls cut the Chief of Staff's chat with the founder (12 shell execs, then the limit).
++  // A scheduled shift only runs team-shift, so it keeps 12; a chat turn gets 30.
++  it('gives a scheduled shift turn 12 model calls and a chat turn 30', async () => {
++    const shift = agent();
++    shift.input.messages = [
++      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run team-shift.' },
++    ];
++    let network = toolLoop();
++    await expect(lastValueFrom(shift.dotAgent.run(shift.input))).rejects.toThrow(
++      'step limit (12 model calls)',
++    );
++    expect(network).toHaveBeenCalledTimes(12);
++    network.mockRestore();
++    const chat = agent();
++    network = toolLoop();
++    await expect(lastValueFrom(chat.dotAgent.run(chat.input))).rejects.toThrow(
++      'step limit (30 model calls)',
++    );
++    expect(network).toHaveBeenCalledTimes(30);
++  });
++  it('stops a scheduled shift turn after 12 model calls and fails it', async () => {
 +    const { dotAgent, input } = agent();
++    input.messages = [
++      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run team-shift.' },
++    ];
 +    const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
 +      completion(
 +        {
