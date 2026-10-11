@@ -374,6 +374,8 @@ describe("setup-dots.sh: shift schedule", () => {
     expect(prompt).toContain("chief-run");
     expect(prompt).toContain("dot-login");
     expect(prompt).toContain("still running");
+    // The computer tool's description says to snapshot first; for the Chief that is a wasted paid model call.
+    expect(prompt).toContain("no computer_snapshot");
     const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
     // Both ends of one copy pipe log in either order, but copies run one after another: the k-th tar -xf reads the
     // k-th tar -cf.
