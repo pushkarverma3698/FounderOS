@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 COPY agy /usr/local/bin/agy
 COPY run-bg /usr/local/bin/run-bg
 COPY dot-login /usr/local/bin/dot-login
+COPY team-shift /usr/local/bin/team-shift
+# claude's role briefs, read by team-shift.
+COPY team /usr/local/share/team
 
 # The Dot's shell is non-interactive, so no profile file is sourced: a wrapper hands claude the
 # `claude setup-token` token that seed-cli-logins.sh stores on the persistent volume.
