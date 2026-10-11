@@ -100,7 +100,7 @@ ensure_labels() { # repo: create the team labels once per repo
 }
 
 start() { # kind repo n queue-label ("" = already claimed) [engine] [why another engine took over]
-  local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt rounds dir err run
+  local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt rounds dir err run cmds t
   if [[ $role == reviewer ]]; then
     rounds=$(gh pr view "$n" -R "$repo" --json comments \
       --jq '[.comments[].body | select(startswith("Reviewer verdict: CHANGES"))] | length')
@@ -120,12 +120,17 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
     return
   fi
   base=$(base_of "$repo")
+  # Each run starts clean at the base: an earlier run's leftovers (it may not rm) made agy's first rm end its run.
+  git -C "$dir" reset -q --hard && git -C "$dir" clean -fdq && git -C "$dir" checkout -q --detach "origin/$base" || true
+  cmds=""
+  for t in "${allowed[@]}"; do if [[ $t == "Bash("* ]]; then t=${t#"Bash("}; cmds+="${t%":*)"}, "; fi; done
   name="shift-$role-$(tr -c 'a-zA-Z0-9_\n-' - <<<"${repo##*/}")-$n-$(date +%s)"
   prompt="$(cat "$BRIEFS/team.md" "$BRIEFS/$role.md")
 
 THIS SHIFT
 Repository: $repo. Item: $kind #$n (claimed for you: label $claim). Base branch: $base.
-Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.${task:+
+Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.
+Shell commands you may run: ${cmds%, }; anything else is refused, and under agy it ends your whole run.${task:+
 The founder gave this task in chat, so there is no Architect plan: the issue body is the plan.}
 Finish by moving the labels as your role says, then end with the four ENDING lines."
   if [[ $engine == agy ]]; then

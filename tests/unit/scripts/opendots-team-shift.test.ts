@@ -729,6 +729,19 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     expect(item("issue", 6).labels).toEqual(["agent:building"]);
   });
 
+  it("starts every run in a clean work directory at the base, and lists the allowed commands in the prompt", () => {
+    world([]);
+    shift("builder", "--engine", "claude", "--task", TASK);
+    const git = readFileSync(join(fake, "git.log"), "utf8");
+    expect(git).toMatch(/reset -q --hard\n/);
+    expect(git).toMatch(/clean -fdq\n/);
+    expect(git).toMatch(/checkout -q --detach origin\/\w+\n/);
+    const prompt = claudeArgs()[2];
+    expect(prompt).toMatch(/Shell commands you may run: .*git push/);
+    expect(prompt).toContain("anything else is refused, and under agy it ends your whole run");
+    expect(prompt).not.toMatch(/may run: .*\brm\b/);
+  });
+
   it("rejects an unknown engine, an empty task, and a task for another role", () => {
     world([]);
     expect(shift("builder", "--engine", "gpt", "--task", TASK).status).toBe(2);
