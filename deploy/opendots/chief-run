@@ -70,9 +70,24 @@ if [[ ${1:-} == --status ]]; then
 else
   if (($#)); then request=$*; else request=$(cat); fi
   [[ -n ${request//[[:space:]]/} ]] || usage
-  name=chief-$(date +%s)-$RANDOM
-  printf '%s\n' "$request" > "$RUNS/$name.req"
-  start_run "$name" claude
+  # The same words within 90 s join that run (the Dot can send one request as parallel shell calls); the lock keeps
+  # two parallel calls from both starting one, and is skipped after 10 s so a killed call cannot block every turn.
+  for _ in $(seq 50); do mkdir "$RUNS/.chief-lock" 2>/dev/null && break; sleep 0.2; done
+  name="" now=$(date +%s)
+  for m in "$RUNS"/chief-*.meta; do
+    [[ -f $m && $m != *-agy.meta ]] || continue
+    read -r _ t < "$m"
+    n=$(basename "$m" .meta)
+    if ((now - t < 90)) && [[ $(cat "$RUNS/$n.req" 2>/dev/null) == "$request" ]]; then name=$n; fi
+  done
+  if [[ -z $name ]]; then
+    name=chief-$now-$RANDOM
+    printf '%s\n' "$request" > "$RUNS/$name.req"
+    start_run "$name" claude
+  elif [[ -f $RUNS/$name-agy.meta ]]; then
+    name=$name-agy
+  fi
+  rmdir "$RUNS/.chief-lock" 2>/dev/null || true
 fi
 read -r engine started < "$RUNS/$name.meta"
 note=""
@@ -87,7 +102,7 @@ if [[ $state != running && $engine == claude && -z $actions ]] && tail -n 30 <<<
     exit 0
   fi
   name=$name-agy engine=agy note="claude is at its usage limit; agy did this:"
-  start_run "$name" agy
+  [[ -f $RUNS/$name.meta ]] || start_run "$name" agy
   read -r engine started < "$RUNS/$name.meta"
   state=$(wait_run "$name")
   log=$(run-bg tail "$name" 400 | tr -d '\r')

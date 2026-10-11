@@ -117,6 +117,13 @@ describe("chief-run: starting claude", () => {
     expect(argv()[3]).toBe(join(dir, "chief"));
   });
 
+  // Live 2026-10-11: claude wrote `gh pr view 16 -R <repo>`, which the `gh pr view -R <repo>` prefix rule refuses.
+  it("the brief shows the number after -R <repo> and says to retry a refused command in that form", () => {
+    const brief = readFileSync(join(BRIEFS, "chief.md"), "utf8");
+    expect(brief).toContain("gh pr view -R owner/repo 16");
+    expect(brief).toMatch(/refused.*-R <repo> right after the subcommand/s);
+  });
+
   it("CHIEF_MODEL overrides haiku", () => {
     claudeDone("ok\n");
     chief(["status"], { CHIEF_MODEL: "sonnet" });
@@ -170,6 +177,27 @@ describe("chief-run: a run still going after the wait", () => {
     expect(readFileSync(join(fake, "started"), "utf8").trim()).toBe(name);
     claudeDone("all quiet\n");
     expect(chief(["--status", name]).out).toBe("all quiet");
+  });
+
+  // Live 2026-10-11: the Dot sent "merge PR 16" as three parallel shell calls in one model step.
+  it("the same words again within 90 s join the run already started instead of starting another", () => {
+    writeFileSync(join(fake, "state"), "running\n");
+    const first = /^still running: (chief-[a-zA-Z0-9-]+)/.exec(chief(["merge PR 16"]).out)?.[1] ?? "";
+    expect(first).not.toBe("");
+    expect(chief(["merge PR 16"]).out).toContain(`still running: ${first}`);
+    claudeDone("all quiet\n");
+    expect(chief(["merge PR 16"]).out).toBe("all quiet");
+    expect(readFileSync(join(fake, "started"), "utf8").trim().split("\n")).toEqual([first]);
+  });
+
+  it("different words, or the same words after 90 s, start a new run", () => {
+    claudeDone("all quiet\n");
+    chief(["status"]);
+    chief(["new issue: x"]);
+    const [name] = readFileSync(join(fake, "started"), "utf8").trim().split("\n");
+    writeFileSync(join(runs, `${name}.meta`), `claude ${Math.floor(Date.now() / 1000) - 100}\n`);
+    chief(["status"]);
+    expect(readFileSync(join(fake, "started"), "utf8").trim().split("\n")).toHaveLength(3);
   });
 
   it("refuses an unknown or malformed run name", () => {
