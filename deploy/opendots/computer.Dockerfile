@@ -17,6 +17,7 @@ COPY dot-login /usr/local/bin/dot-login
 COPY team-shift /usr/local/bin/team-shift
 COPY chief-run /usr/local/bin/chief-run
 COPY team-lib.sh /usr/local/bin/team-lib.sh
+COPY team-stream /usr/local/bin/team-stream
 # claude's role briefs, read by team-shift and chief-run.
 COPY team /usr/local/share/team
 
