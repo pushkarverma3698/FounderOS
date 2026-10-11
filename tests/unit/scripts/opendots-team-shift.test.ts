@@ -377,7 +377,7 @@ describe("setup-dots.sh: shift schedule", () => {
     // The computer tool's description says to snapshot first; for the Chief that is a wasted paid model call.
     expect(prompt).toContain("no computer_snapshot");
     // chief-run waits up to 55 s (CHIEF_WAIT); a shorter shell timeout would cut it and lose its output.
-    expect(prompt).toContain("timeoutMs 70000");
+    expect(prompt).toContain("timeoutMs 60000");
     const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
     // Both ends of one copy pipe log in either order, but copies run one after another: the k-th tar -xf reads the
     // k-th tar -cf.
