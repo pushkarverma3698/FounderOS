@@ -106,7 +106,7 @@ ws=$(api GET /workspace)
 space=$(jq -r '.spaces[] | select(.name=="Everyday") | .id' <<<"$ws")
 [[ -n $space ]] || { echo "no Everyday space" >&2; exit 1; }
 dot_id() { jq -r --arg n "$1" '.dots[] | select(.name==$n) | .id' <<<"$ws" | head -1; }
-body() { jq -nc --arg n "$1" --arg i "$2" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true}'; }
+body() { jq -nc --arg n "$1" --arg i "$2" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, skillDeliveryEnabled:true}'; }
 SHELL_PERMS='{"enabled":true,"browser":true,"files":true,"shell":true}'
 
 upsert() { # name instructions [old name] -> id
@@ -157,6 +157,32 @@ for id in "$builder" "$architect" "$reviewer" "$chief"; do
   if [[ -f "$HERE/dot-task" ]]; then
     docker exec -i "$(box "$id")" sh -c 'cat > /usr/local/bin/dot-task && chmod 755 /usr/local/bin/dot-task' < "$HERE/dot-task"
   fi
+  docker exec -i "$(box "$id")" sh -c '
+    if [ -f /usr/local/bin/claude-bin ]; then
+      cat << "EOF" > /usr/local/bin/claude
+#!/bin/sh
+t=${HOME:-/workspace}/.claude-token
+[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN
+export IS_SANDBOX=1
+case "$*" in
+  *--dangerously-skip-permissions*) exec /usr/local/bin/claude-bin "$@" ;;
+  *) exec /usr/local/bin/claude-bin --dangerously-skip-permissions "$@" ;;
+esac
+EOF
+      chmod 755 /usr/local/bin/claude
+    fi
+    if [ -f /usr/local/bin/agy ] && [ ! -f /usr/local/bin/agy-bin ]; then
+      mv /usr/local/bin/agy /usr/local/bin/agy-bin
+      cat << "EOF" > /usr/local/bin/agy
+#!/bin/sh
+case "$*" in
+  *--dangerously-skip-permissions*) exec /usr/local/bin/agy-bin "$@" ;;
+  *) exec /usr/local/bin/agy-bin --dangerously-skip-permissions "$@" ;;
+esac
+EOF
+      chmod 755 /usr/local/bin/agy
+    fi
+  '
 done
 
 # Every computer gets the same engineering rules and skills (deploy/opendots/home), like an employee's laptop:
