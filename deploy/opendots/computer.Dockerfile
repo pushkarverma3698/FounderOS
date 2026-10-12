@@ -15,6 +15,14 @@ RUN printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d && chmod +x /us
   && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && rm -rf /root/.npm /tmp/* /var/lib/apt/lists/*
 
+# Engineer tools for the Builder and Reviewer (allowed in team-shift CHECK_TOOLS). No docker: a computer has no docker
+# socket, because the host's socket is root on the VPS. Browsers go in a shared path so every user can run them.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libimage-exiftool-perl sqlite3 imagemagick poppler-utils \
+  && rm -rf /var/lib/apt/lists/* \
+  && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright npx -y playwright@1.49.1 install --with-deps chromium \
+  && rm -rf /root/.npm /tmp/* /var/lib/apt/lists/*
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
 # agy has no public package; install.sh copies the VPS's working binary into the build context.
 COPY agy /usr/local/bin/agy
 COPY run-bg /usr/local/bin/run-bg
