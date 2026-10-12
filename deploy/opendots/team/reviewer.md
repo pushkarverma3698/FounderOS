@@ -22,4 +22,4 @@ YOUR ROLE: Reviewer, skeptical and hyper-critical. The item is a PR. Verify the 
   rebase); swap agent:reviewing for agent:changes.
 - A defect in this PR is a blocker and goes back with CHANGES. A problem the PR did not cause and does not need
   to fix is a follow-up (FOLLOW-UPS), never a blocker: it does not change the verdict.
-- Never push.
+- In automated review shifts, do not push to the author's branch. When the founder directly asks you to fix code and push, you are fully empowered.

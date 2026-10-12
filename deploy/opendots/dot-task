@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# dot-task: CLI helper for OpenDots autonomous routines, tasks, and background loops.
+# Works both on the host and inside any Dot's computer container.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF' >&2
+Usage:
+  dot-task list                                          List all tasks
+  dot-task create "<prompt>" [--interval <sec>] [--thread <id>]  Create a task
+  dot-task run <task-id>                                 Run task immediately
+  dot-task pause <task-id>                               Pause task
+  dot-task cancel <task-id>                              Cancel task
+  dot-task loop <name> <interval-sec> "<command>"        Run recurring background routine
+  dot-task loop-status <name>                            Check background loop status
+  dot-task loop-stop <name>                              Stop background loop
+EOF
+  exit 2
+}
+
+# Resolve OpenDots API URL
+if [[ -n "${OPENDOTS_API:-}" ]]; then
+  BASE_URL="${OPENDOTS_API%/api}"
+elif curl -fsS --connect-timeout 1 http://app:4310/health >/dev/null 2>&1; then
+  BASE_URL="http://app:4310"
+else
+  BASE_URL="http://127.0.0.1:4310"
+fi
+
+# Resolve Owner Token
+TOKEN="${OPENDOTS_TOKEN:-}"
+if [[ -z "$TOKEN" && -f /workspace/.opendots-token ]]; then
+  TOKEN=$(head -n 1 /workspace/.opendots-token | tr -d '[:space:]')
+fi
+if [[ -z "$TOKEN" && -f /opt/opendots/app/.env ]]; then
+  TOKEN=$(grep '^OWNER_TOKEN=' /opt/opendots/app/.env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)
+fi
+
+api() {
+  if [[ -z "$TOKEN" ]]; then
+    echo "dot-task: OWNER_TOKEN not found in env, /workspace/.opendots-token, or /opt/opendots/app/.env" >&2
+    exit 1
+  fi
+  curl -fsS -X "$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    "$BASE_URL/api$2" ${3:+--data "$3"}
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  list)
+    res=$(api GET /state)
+    echo -e "ID\tSTATUS\tINTERVAL\tPROMPT"
+    echo "$res" | jq -r '.tasks[] | "\(.id)\t\(.status)\t\(if .intervalSeconds then "\(.intervalSeconds)s" else "manual" end)\t\(.prompt | gsub("\n"; " ") | .[0:70])"'
+    ;;
+  create)
+    prompt="${1:-}"
+    [[ -n "$prompt" ]] || usage
+    shift || true
+    interval="null"
+    thread="null"
+    while (($#)); do
+      case "$1" in
+        --interval) interval="$2"; shift 2 ;;
+        --thread) thread="\"$2\""; shift 2 ;;
+        *) usage ;;
+      esac
+    done
+    payload=$(jq -nc --arg p "$prompt" --argjson i "$interval" --argjson t "$thread" \
+      '{prompt: $p} + (if $i != null then {intervalSeconds: $i} else {} end) + (if $t != null then {threadId: $t} else {} end)')
+    api POST /tasks "$payload"
+    echo ""
+    ;;
+  run|pause|cancel)
+    id="${1:-}"
+    [[ -n "$id" ]] || usage
+    api POST "/tasks/$id/actions" "$(jq -nc --arg a "$cmd" '{action: $a}')"
+    echo "task $id: $cmd requested"
+    ;;
+  loop)
+    name="${1:-}"
+    interval="${2:-}"
+    loop_cmd="${3:-}"
+    [[ -n "$name" && "$interval" =~ ^[0-9]+$ && -n "$loop_cmd" ]] || usage
+    which run-bg >/dev/null 2>&1 || { echo "run-bg not found" >&2; exit 1; }
+    run-bg start "loop-$name" bash -c "while true; do $loop_cmd; sleep $interval; done"
+    echo "loop-$name started with interval ${interval}s"
+    ;;
+  loop-status)
+    name="${1:-}"
+    [[ -n "$name" ]] || usage
+    run-bg status "loop-$name"
+    ;;
+  loop-stop)
+    name="${1:-}"
+    [[ -n "$name" ]] || usage
+    run-bg stop "loop-$name"
+    echo "loop-$name stopped"
+    ;;
+  *)
+    usage
+    ;;
+esac
