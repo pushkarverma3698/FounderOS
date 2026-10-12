@@ -85,6 +85,13 @@ describe("shift-notify: one Telegram message per new outcome", () => {
     expect(r.sent[0]).toContain("text=⛔ Builder is blocked and needs you: sandbox issue #7\nBuilder: which currency should the invoice use?\nIt is not in the plan.\nhttps://github.com/owner/sandbox/issues/7");
   });
 
+  it("a run that blocked the item itself is announced as blocked, not finished", () => {
+    notify();
+    last("builder", "2026-10-12 13:24 UTC\nDone: owner/sandbox issue #38.\nWHAT I DID: Wrote no code.\nRESULT: Blocked on #37 (Part B). https://github.com/owner/sandbox/issues/38");
+    const r = notify();
+    expect(r.sent[0]).toContain("text=⛔ Builder is blocked and needs you: sandbox issue #38\nBlocked on #37 (Part B).");
+  });
+
   it("a failed send is retried on the next run", () => {
     notify();
     last("architect", DONE.replace("pr #34", "issue #3"));
