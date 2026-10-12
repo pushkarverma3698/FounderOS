@@ -210,6 +210,9 @@ done
 printf '%s' "$shifts" > "$SHIFT_TASKS"
 cron_line="$CRON_AT bash $HERE/shift-cron >> $(dirname "$SHIFT_TASKS")/shift-cron.log 2>&1 # opendots-shift"
 current=$(crontab -l 2>/dev/null || true)
-{ grep -v ' # opendots-shift$' <<<"$current" || true; echo "$cron_line"; } | grep -v '^$' | crontab -
-echo "cron: $CRON_AT shift-cron"
+# shift-notify (every minute): a Telegram line to the founder when a role finishes or blocks an item.
+notify_line="* * * * * bash $HERE/shift-notify >> $(dirname "$SHIFT_TASKS")/shift-notify.log 2>&1 # opendots-notify"
+{ grep -v -e ' # opendots-shift$' -e ' # opendots-notify$' <<<"$current" || true; echo "$cron_line"; echo "$notify_line"; } |
+  grep -v '^$' | crontab -
+echo "cron: $CRON_AT shift-cron, every minute shift-notify"
 echo "chief=$chief"
