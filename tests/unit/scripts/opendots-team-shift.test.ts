@@ -392,15 +392,16 @@ describe("setup-dots.sh: shift schedule", () => {
     expect(r.calls.some((c) => c.includes("/schedule"))).toBe(false);
   });
 
-  it("writes role, Dot and task for shift-cron, and installs one every-minute cron line, keeping other lines", () => {
-    writeFileSync(join(fake, "crontab"), "*/2 * * * * other-job\n0 * * * * old # opendots-shift\n");
+  it("writes role, Dot and task for shift-cron, and installs one cron line each for shift-cron and shift-notify, keeping other lines", () => {
+    writeFileSync(join(fake, "crontab"), "*/2 * * * * other-job\n0 * * * * old # opendots-shift\n0 * * * * old # opendots-notify\n");
     const r = setup(shiftTasks(null));
     expect(r.status, r.out).toBe(0);
     expect(readFileSync(join(dir, "shift-tasks"), "utf8")).toBe("architect a t-Architect\nbuilder b t-Builder\nreviewer r t-Reviewer\n");
     const lines = crontab().trim().split("\n");
     expect(lines[0]).toBe("*/2 * * * * other-job");
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(lines[1]).toMatch(/^\*\/1 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
+    expect(lines[2]).toMatch(/^\* \* \* \* \* .*\/shift-notify >> .*shift-notify\.log 2>&1 # opendots-notify$/);
   });
 
   // AG-063: the Chief dispatches to claude through chief-run, so it gets the Builder's claude and agy logins and the
