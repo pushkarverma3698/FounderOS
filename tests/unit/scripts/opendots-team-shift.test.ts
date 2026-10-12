@@ -1256,6 +1256,30 @@ describe("team-shift: a multi-part task runs as stacked PRs", () => {
     world([issue(36, ["agent:blocked"]), child(37, 36)]);
     expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (it is blocked)");
   });
+  const LATER = "2026-10-12T10:00:00Z"; // after the child, so the scan reaches the child first
+
+  // The Builder opens its draft PR early (builder.md), so an open PR that closes #N does not mean #N is finished.
+  it("an issue that is blocked or still being built is not built on, even though its early draft PR is open and unlabelled", () => {
+    world([issue(36, ["agent:blocked"]), depPr(40, 36, []), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (it is blocked)");
+    world([issue(36, ["agent:building"], LATER), depPr(40, 36, []), child(37, 36, ["agent:building"])]);
+    expect(shift("builder").out).toBe("Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is not finished yet). It is back in the build queue.");
+    world([issue(36, ["agent:build"], LATER), depPr(40, 36, []), child(37, 36, ["agent:building"])]);
+    expect(shift("builder").out).toBe("Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is not finished yet). It is back in the build queue.");
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("a blocked child stays blocked while the issue it builds on is itself blocked with an open draft PR", () => {
+    world([issue(36, ["agent:blocked"]), depPr(40, 36, []), child(37, 36, ["agent:blocked"])]);
+    expect(shift("builder", "--check").out).toBe("No work");
+  });
+
+  it("an issue whose PR is finished (agent:in-pr) is built on, and a merged PR is ready whatever the issue says", () => {
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, []), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:build)");
+    world([issue(36, ["agent:building"], LATER), depPr(40, 36, ["agent:approved"], { state: "MERGED" }), child(37, 36, ["agent:building"])]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:building)");
+  });
 
   it("a merged or closed dependency means the normal base, with no stack", () => {
     // GitHub does not close the issue when its PR merges into a non-default branch: the merged PR is what counts.

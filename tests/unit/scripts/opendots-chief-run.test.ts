@@ -382,6 +382,59 @@ describe("chief-run: merges are founder-named and agent:approved, and the script
   });
 });
 
+describe("chief-run: an epic's parts are merged by team-shift, the final PR by the founder", () => {
+  const EPIC = "feat/epic-35";
+  const part = (n: number, labels = ["agent:approved"], o: Partial<Item> = {}): Item =>
+    pr(n, labels, { head: `feat/part-${n}`, base: EPIC, ...o });
+
+  it("refuses a part of an epic and points at the final PR", () => {
+    world([part(41)]);
+    claudeDone(`ACTION merged ${REPO} 41\n`);
+    const r = chief(["merge PR 41"]);
+    expect(r.out).toBe(`✗ merged ${REPO}#41: refused, PR 41 is a part of epic 35; team-shift merges it into ${EPIC} once approved. Merge the final PR instead`);
+    expect(ghLog()).not.toContain("pr merge");
+    expect(find(41).state).toBe("OPEN");
+  });
+
+  it("refuses a part even when it is not approved yet, with the same reason", () => {
+    world([part(41, ["agent:review"])]);
+    claudeDone(`ACTION merged ${REPO} 41\n`);
+    expect(chief(["merge PR 41"]).out).toContain("is a part of epic 35");
+  });
+
+  it("merges the final PR into beta and closes the epic issue when GitHub did not", () => {
+    world([pr(43, ["agent:approved"], { head: EPIC, base: "beta", closes: [] }), issue(35, ["agent:epic"])]);
+    claudeDone(`ACTION merged ${REPO} 43\n`);
+    const r = chief(["merge PR 43"]);
+    expect(r.out).toBe(`✓ merged ${REPO}#43 into beta https://github.com/${REPO}/pull/43\n✓ closed ${REPO}#35`);
+    expect(find(43).state).toBe("MERGED");
+    expect(find(35).state).toBe("CLOSED");
+  });
+
+  it("closes the epic issue once when the PR's Closes line already did", () => {
+    world([pr(43, ["agent:approved"], { head: EPIC, base: "beta", closes: [35] }), issue(35, ["agent:epic"])]);
+    claudeDone(`ACTION merged ${REPO} 43\n`);
+    const r = chief(["merge PR 43"]);
+    expect(r.out).toBe(`✓ merged ${REPO}#43 into beta https://github.com/${REPO}/pull/43\n✓ closed ${REPO}#35`);
+    expect(ghLog().split("\n").filter((l) => l.startsWith("issue close 35"))).toHaveLength(1);
+  });
+
+  it("an epic issue that is already closed is left alone", () => {
+    world([pr(43, ["agent:approved"], { head: EPIC, base: "beta" }), issue(35, ["agent:epic"], { state: "CLOSED" })]);
+    claudeDone(`ACTION merged ${REPO} 43\n`);
+    const r = chief(["merge PR 43"]);
+    expect(r.out).toBe(`✓ merged ${REPO}#43 into beta https://github.com/${REPO}/pull/43`);
+    expect(ghLog()).not.toContain("issue close");
+  });
+
+  it("an ordinary PR is merged as before and no epic issue is looked up", () => {
+    world([pr(16, ["agent:approved"], { head: "feat/x" })]);
+    claudeDone(`ACTION merged ${REPO} 16\n`);
+    expect(chief(["merge PR 16"]).out).toBe(`✓ merged ${REPO}#16 into beta https://github.com/${REPO}/pull/16`);
+    expect(ghLog()).not.toContain("issue view");
+  });
+});
+
 describe("chief-run: live findings 2026-10-12", () => {
   it("verifies ACTION closed on GitHub (claude closed #24 and chief-run called the line unreadable)", () => {
     world([issue(24, ["agent:blocked"], { state: "CLOSED" }), issue(25, ["agent:blocked"])]);
