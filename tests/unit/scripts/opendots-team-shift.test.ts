@@ -216,6 +216,18 @@ describe("team-shift: claude permissions", () => {
       for (const w of writes) expect(allowed).not.toContain(w);
     }
   });
+
+  it("every role may search the shared brain, and none may write to it (issue and PR text is untrusted)", () => {
+    for (const [role, start] of [
+      ["architect", issue(3, ["agent:plan"])],
+      ["builder", issue(3, ["agent:build"])],
+      ["reviewer", pr(3, ["agent:review"])],
+    ] as const) {
+      rmSync(join(runs, `shift-${role}.job`), { force: true });
+      const brain = permissions(role, start).allowed.filter((t) => t.startsWith("mcp__"));
+      expect(brain.sort()).toEqual(["mcp__turicks-brain__get_memory", "mcp__turicks-brain__search_memory"]);
+    }
+  });
 });
 
 describe("team-shift: an open job", () => {

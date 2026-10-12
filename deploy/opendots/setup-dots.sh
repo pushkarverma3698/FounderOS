@@ -32,6 +32,7 @@ EVERY REQUEST about the engineering team in '"$REPOS"' (status, new work, his an
 If the output says "still running: chief-<id>", tell him so; on his next message run chief-run --status chief-<id> first.
 Nothing else: no other commands, no retries, no gh, no reading files, issues, PRs or logs yourself. If the command itself fails, reply with its error line.
 Logins: to log in or out of claude, agy or gh, use dot-login.
+His calendar, email or past decisions: answer with the turicks-brain connection tools (calendar_events, gmail_search, search_memory), not the computer.
 Only when he asks for his day plan: keep one page called "Chief of Staff" in the Everyday Space (top 3 for today, waiting on, decisions needed, done this week), update it from what he tells you, and give the plan in at most 5 numbered lines.
 Never send messages, emails, or purchases without his explicit yes. Do not guess personal facts; ask. Write plainly: result first, short lines, no filler (he has ADHD).'
 
@@ -96,7 +97,7 @@ for id in "$builder" "$architect" "$reviewer" "$chief"; do
   up "$id" || { echo "computer for $id did not start" >&2; exit 1; }
 done
 LOGINS=(.claude-token .claude.json .config/gh/hosts.yml .config/gh/config.yml .gitconfig)
-AGY=(.gemini/antigravity-cli/antigravity-oauth-token .gemini/config/config.json .gemini/GEMINI.md)
+AGY=(.gemini/antigravity-cli/antigravity-oauth-token .gemini/config/config.json)
 copy() { # to-id files...
   local to=$1; shift
   docker exec -w /workspace "$(box "$builder")" tar -cf - "$@" | docker exec -i -w /workspace "$(box "$to")" tar -xf - --no-same-owner --skip-old-files
@@ -111,6 +112,52 @@ for id in "$builder" "$architect" "$reviewer" "$chief"; do
     mkdir -p /workspace/repos /workspace/tmp /workspace/runs && echo "$login"' >/dev/null ||
     { echo "gh login missing in $(box "$id")" >&2; exit 1; }
 done
+
+# Every computer gets the same engineering rules and skills (deploy/opendots/home), like an employee's laptop:
+# ~/.claude/CLAUDE.md and ~/.gemini/GEMINI.md, plus the skills for claude and agy. Reruns overwrite what this
+# script installed; other skills in a computer are left alone.
+stage=$(mktemp -d); trap 'rm -r "$stage"' EXIT
+mkdir -p "$stage/.claude" "$stage/.gemini/config"
+cp "$HERE/home/CLAUDE.md" "$stage/.claude/CLAUDE.md"; cp "$HERE/home/CLAUDE.md" "$stage/.gemini/GEMINI.md"
+cp -R "$HERE/home/skills" "$stage/.claude/skills"; cp -R "$HERE/home/skills" "$stage/.gemini/config/skills"
+for id in "$builder" "$architect" "$reviewer" "$chief"; do
+  # GEMINI.md was a symlink to the laptop-era /opt/agent-rules, which no computer has.
+  docker exec -w /workspace "$(box "$id")" sh -c \
+    'rm -f .gemini/GEMINI.md; for s; do rm -r -f ".claude/skills/$s" ".gemini/config/skills/$s"; done' sh $(ls "$HERE/home/skills")
+  tar -C "$stage" -cf - .claude .gemini | docker exec -i -w /workspace "$(box "$id")" tar -xf - --no-same-owner --no-overwrite-dir
+done
+
+# The shared brain over HTTP (src/mcp/hub-http.ts, deploy/founderos-hub-http.service on the host), for claude in
+# every computer. The computers get the brain-only token: they run repo code as root, so that code can read whatever
+# token they hold. The Chief Dot gets the full token (adds calendar and mail reads) as an OpenDots Connection, stored
+# in the app's database, never in a computer. Skipped until the hub is installed. Tokens never reach the host's argv.
+HUB_ENV=/etc/founderos/hub-http.env
+if [[ -r $HUB_ENV ]]; then
+  hub_var() { grep "^$1=" "$HUB_ENV" | cut -d= -f2- || true; }
+  port=$(hub_var HUB_HTTP_PORT)
+  HUB_URL="http://$(hub_var HUB_HTTP_HOST):${port:-3100}/mcp"
+  for id in "$builder" "$architect" "$reviewer" "$chief"; do
+    hub_var HUB_HTTP_BRAIN_TOKEN | docker exec -i -e HOME=/workspace -e HUB_URL="$HUB_URL" "$(box "$id")" sh -c '
+      t=$(cat); claude mcp remove -s user turicks-brain >/dev/null 2>&1
+      claude mcp add-json -s user turicks-brain \
+        "{\"type\":\"http\",\"url\":\"$HUB_URL\",\"headers\":{\"Authorization\":\"Bearer $t\"}}" >/dev/null' ||
+      { echo "could not add the brain MCP in $(box "$id")" >&2; exit 1; }
+  done
+  conn=$(api GET "/dots/$chief/connections" | jq -r '.[] | select(.name=="turicks-brain") | .id' | head -1)
+  if [[ -z $conn ]]; then
+    conn=$(jq -nc --arg u "$HUB_URL" --rawfile e "$HUB_ENV" \
+      '{name:"turicks-brain", url:$u, token:($e | capture("(^|\n)HUB_HTTP_TOKEN=(?<t>[^\n]+)").t)}' |
+      curl -fsS -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' --data @- \
+        "http://127.0.0.1:4310/api/dots/$chief/connections" | jq -r .id)
+  fi
+  # Reads run on their own; brain writes and call_connected_tool (other servers, may write) stay on Ask first.
+  for tool in search_memory get_memory gmail_search calendar_events list_connected_tools; do
+    api PATCH "/connections/$conn/tools/$tool" '{"enabled":true,"requiresApproval":false}' >/dev/null
+  done
+  echo "brain: claude MCP in 4 computers, Chief connection $conn"
+else
+  echo "brain: $HUB_ENV not readable, skipped (install deploy/founderos-hub-http.service first)"
+fi
 
 # team-shift and chief-run read the repos they may work in from /workspace/team-repos (one per line).
 for id in "$builder" "$architect" "$reviewer" "$chief"; do
