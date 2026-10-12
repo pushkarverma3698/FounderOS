@@ -901,6 +901,16 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     expect(items()).toEqual([]);
   });
 
+  it("resolves alias and unique substring matches for task repo", () => {
+    world([]);
+    writeFileSync(join(dir, "repos"), "OplifyMessage/oplify-messaging-api\nOplifyMessage/oplify-messaging-app\npushkarverma3698/clean-ai\n");
+    const rAlias = shift("builder", "--engine", "claude", "--repo", "oplify", "--task", TASK);
+    expect(rAlias.out).toMatch(/^Started: OplifyMessage\/oplify-messaging-api issue #1, claude run /);
+    rmSync(join(runs, "shift-builder.job"), { force: true });
+    const rSub = shift("builder", "--engine", "claude", "--repo", "clean-ai", "--task", TASK);
+    expect(rSub.out).toMatch(/^Started: pushkarverma3698\/clean-ai issue #\d+, claude run /);
+  });
+
   it("refuses while a Builder run is open, and files nothing", () => {
     world([issue(5, ["agent:building"])]);
     writeJob("builder", "issue", 5, 120);
@@ -966,6 +976,53 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     const r = shift("builder", "--engine", "claude", "--task", TASK);
     expect(r.out).toMatch(/^Could not file the task on owner\/sandbox: could not add label/);
     expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+});
+
+describe("team-shift --inspect: direct inspection without issue filing", () => {
+  const QUERY = "Check all open issues and summarize recent commits";
+  function agyLogin(): void {
+    spawnSync("mkdir", ["-p", join(dir, "home", ".gemini", "antigravity-cli")]);
+    writeFileSync(join(dir, "home", ".gemini", "antigravity-cli", "antigravity-oauth-token"), "x");
+  }
+
+  it("runs claude inspection synchronously when completed quickly, without filing issues", () => {
+    world([issue(3, ["agent:build"])]);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "Found 1 open issue: #3\nRESULT: 1 issue open\n");
+    const r = shift("builder", "--inspect", "--engine", "claude", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("Done: owner/sandbox inspection.");
+    expect(r.out).toContain("Found 1 open issue: #3");
+    expect(items()).toHaveLength(1); // No new issue filed!
+    expect(existsSync(join(runs, "shift-builder.job"))).toBe(false); // Job was cleaned up!
+    const args = claudeArgs();
+    expect(args[2]).toContain("INSPECTION RULES:");
+    expect(args[2]).toContain("DO NOT create GitHub issues");
+  });
+
+  it("runs agy inspection when engine is agy", () => {
+    agyLogin();
+    world([]);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "RESULT: all clear\n");
+    const r = shift("builder", "--inspect", "--engine", "agy", "--repo", "sandbox", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("Done: owner/sandbox inspection.");
+    const all = argv();
+    expect(all.slice(all.indexOf("agy"), all.indexOf("agy") + 2)).toEqual(["agy", "--new-project"]);
+  });
+
+  it("reports background running status when inspection exceeds wait duration", () => {
+    world([]);
+    writeFileSync(join(fake, "state"), "running\n");
+    const r = shiftWith({ TEAM_INSPECT_WAIT: "0" }, "builder", "--inspect", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toMatch(/^Started: owner\/sandbox inspection, claude run /);
+    expect(existsSync(join(runs, "shift-builder.job"))).toBe(true);
+
+    const p = shift("builder", "--progress");
+    expect(p.out).toContain("inspecting owner/sandbox");
   });
 });
 
