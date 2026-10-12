@@ -24,7 +24,9 @@ REPOS=${TEAM_REPOS:-"
   OplifyMessage/oplify-messaging-api OplifyMessage/oplify-messaging-app
   turickai/turicks-web turickai/turicks-demo turickai/leadpulse-backend turickai/leadpulse-frontend
   turickai/Co-Working-Space-Website turickai/transporter-app turickai/.github"}
-SHIFT_SECONDS=${SHIFT_SECONDS:-900} # founder 2026-10-11: idle checks are free, so every 15 min
+# Idle checks are free (one GitHub call per role), so every minute: a 15-min clock made a one-line task take
+# 50 min, nearly all of it hand-offs waiting for the next tick (2026-10-12).
+SHIFT_SECONDS=${SHIFT_SECONDS:-60}
 SHIFT_TASKS=${OPENDOTS_SHIFT_TASKS:-$(dirname "$APP")/shift-tasks}
 HERE=$(cd "$(dirname "$0")" && pwd)
 m=$((SHIFT_SECONDS / 60))

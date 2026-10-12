@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -391,7 +391,7 @@ describe("setup-dots.sh: shift schedule", () => {
     expect(r.calls.some((c) => c.includes("/schedule"))).toBe(false);
   });
 
-  it("writes role, Dot and task for shift-cron, and installs one 15-minute cron line, keeping other lines", () => {
+  it("writes role, Dot and task for shift-cron, and installs one every-minute cron line, keeping other lines", () => {
     writeFileSync(join(fake, "crontab"), "*/2 * * * * other-job\n0 * * * * old # opendots-shift\n");
     const r = setup(shiftTasks(null));
     expect(r.status, r.out).toBe(0);
@@ -399,7 +399,7 @@ describe("setup-dots.sh: shift schedule", () => {
     const lines = crontab().trim().split("\n");
     expect(lines[0]).toBe("*/2 * * * * other-job");
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toMatch(/^\*\/15 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
+    expect(lines[1]).toMatch(/^\*\/1 \* \* \* \* .*\/shift-cron >> .*shift-cron\.log 2>&1 # opendots-shift$/);
   });
 
   // AG-063: the Chief dispatches to claude through chief-run, so it gets the Builder's claude and agy logins and the
@@ -509,6 +509,51 @@ describe("team-shift --check: read-only", () => {
   });
 });
 
+/**
+ * 2026-10-12: with 20 team repos the scan made a gh list call per repo and label, so one idle check took 51 s of
+ * shift-cron's 60 s. The scan is one GraphQL call now, which is what lets the cron run every minute.
+ */
+describe("team-shift: the queue scan is one GitHub call for every repo", () => {
+  const OTHER = "other-owner/second.repo";
+  const ghLog = (): string[] => readFileSync(join(fake, "gh.log"), "utf8").trim().split("\n");
+  beforeEach(() => writeFileSync(join(dir, "repos"), `# team repos\n${REPO}\n${OTHER}\n`));
+
+  it("--check finds an item in the second repo with one graphql call and no list calls", () => {
+    world([{ repo: OTHER, kind: "pr", number: 9, labels: ["agent:review"], createdAt: "2026-10-10T10:00:00Z", comments: [] }]);
+    expect(shift("reviewer", "--check").out).toBe("Due: other-owner/second.repo pr #9 (agent:review)");
+    expect(ghLog().filter((l) => l.startsWith("api graphql"))).toHaveLength(1);
+    expect(ghLog().filter((l) => / list /.test(l))).toEqual([]);
+  });
+
+  it("an idle check over two repos is one call", () => {
+    world([issue(1, ["agent:blocked"])]);
+    expect(shift("builder", "--check").out).toBe("No work");
+    // The logged query spans lines; every other gh call logs one line that starts with its subcommand.
+    expect(ghLog().filter((l) => /^(api|issue|pr|repo|label) /.test(l))).toEqual([expect.stringMatching(/^api graphql /)]);
+  });
+
+  it("keeps the order: repos as listed; in a repo, claimed items first, then the queues in order, oldest first", () => {
+    const other = (kind: "issue" | "pr", number: number, labels: string[]): Item =>
+      ({ repo: OTHER, kind, number, labels, createdAt: "2026-10-01T10:00:00Z", comments: [] });
+    world([other("issue", 30, ["agent:building"]), issue(3, ["agent:build"]), pr(5, ["agent:changes"], "2026-10-11T10:00:00Z"),
+      pr(4, ["agent:changes"], "2026-10-10T10:00:00Z")]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox pr #4 (agent:changes)");
+    world([other("issue", 30, ["agent:building"]), issue(3, ["agent:build"]), issue(2, ["agent:building"])]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #2 (agent:building)");
+    world([other("issue", 30, ["agent:build"])]);
+    expect(shift("builder").out).toMatch(/^Started: other-owner\/second\.repo issue #30, claude run /);
+    expect(items()[0]?.labels).toEqual(["agent:building"]);
+  });
+
+  it("a scan GitHub refuses fails the check, so shift-cron shows the founder the error", () => {
+    world([issue(3, ["agent:build"])]);
+    writeFileSync(join(fake, "graphql-fails"), "");
+    const r = shift("builder", "--check");
+    expect(r.status).not.toBe(0);
+    expect(r.err).toContain("Could not resolve");
+  });
+});
+
 /** deploy/opendots/shift-cron: the host side. Wakes a Dot's shift task only on Due or a failed check. */
 describe("shift-cron: wakes a Dot only when there is work", () => {
   const CRON = join(ROOT, "deploy", "opendots", "shift-cron");
@@ -526,6 +571,8 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     bin("curl", fakeScript("opendots-curl.sh"));
     bin("docker", fakeScript("opendots-docker.sh"));
     bin("timeout", '#!/bin/sh\nshift\nexec "$@"\n'); // macOS has no timeout(1); the VPS does
+    bin("flock", `#!/bin/sh\n[ -e "$FAKE/locked" ] && exit 1\nexit 0\n`); // nor flock(1)
+    rmSync(join(fake, "curl.log"), { force: true });
     const r = spawnSync("bash", [CRON], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
@@ -555,6 +602,45 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     expect(r.runs).toEqual(['POST /tasks/task-a/actions {"action":"run"}']);
   });
 
+  // 2026-10-12: the cron runs every minute. A Due line its Dot cannot clear must not buy a paid turn every minute.
+  it("the same Due line wakes its Dot once, then again only after 15 minutes", () => {
+    const due = { architect: { out: "Due: owner/sandbox issue #4 (agent:plan)" } };
+    expect(cron(due).runs).toHaveLength(1);
+    const again = cron(due);
+    expect(again.runs).toEqual([]);
+    expect(again.out).toContain("architect: Due: owner/sandbox issue #4 (agent:plan) -> woken less than 15 min ago, waiting");
+    const old = new Date(Date.now() - 16 * 60 * 1000);
+    utimesSync(join(dir, "shift-tasks.woke-architect"), old, old);
+    expect(cron(due).runs).toHaveLength(1);
+  });
+
+  it("a new Due line wakes at once, and so does the same line after the role was seen working", () => {
+    expect(cron({ builder: { out: "Due: owner/sandbox issue #4 (agent:build)" } }).runs).toHaveLength(1);
+    expect(cron({ builder: { out: "Due: owner/sandbox issue #4, run shift-builder-sandbox-4-1 is exit=0." } }).runs).toHaveLength(1);
+    expect(cron({ builder: { out: "Working: owner/sandbox issue #5, claude run x, 1 min." } }).runs).toEqual([]);
+    expect(cron({ builder: { out: "Due: owner/sandbox issue #4, run shift-builder-sandbox-4-1 is exit=0." } }).runs).toHaveLength(1);
+  });
+
+  it("a failing check is repeated to the founder every 15 minutes, not every minute", () => {
+    const failing = { reviewer: { out: "gh: authentication required", rc: 1 } };
+    expect(cron(failing).runs).toHaveLength(1);
+    expect(cron(failing).runs).toEqual([]);
+  });
+
+  it("a task that could not be woken is tried again on the next run", () => {
+    const due = { architect: { out: "Due: x" } };
+    expect(cron(due, { "task-a": "running" }).runs).toEqual([]);
+    expect(cron(due, { "task-a": "completed" }).runs).toHaveLength(1);
+  });
+
+  it("does nothing while an earlier run still holds the lock", () => {
+    writeFileSync(join(fake, "locked"), "");
+    const r = cron({ architect: { out: "Due: x" } });
+    expect(r.status).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(existsSync(join(fake, "docker.log"))).toBe(false);
+  });
+
   it("never wakes a paused, cancelled, queued or running task (pausing stays the kill switch)", () => {
     const due = { out: "Due: x" };
     const r = cron({ architect: due, builder: due, reviewer: due }, { "task-a": "paused", "task-b": "running", "task-r": "cancelled" });
@@ -564,9 +650,9 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
 });
 
 /**
- * agy fallback (founder 2026-10-11): when claude hits its usage limit, the Builder and Reviewer hand the same item and
+ * agy fallback (founder 2026-10-11): when claude hits its usage limit, a role hands the same item and
  * brief to agy instead of blocking. agy gets the role's allowlist as settings.json allow/deny rules (no
- * skip-permissions). The Architect has no agy login and still blocks.
+ * skip-permissions). Since 2026-10-12 the Architect does the same; a computer with no agy login blocks.
  */
 describe("team-shift: agy fallback on a claude usage limit", () => {
   const home = (): string => join(dir, "home");
@@ -636,14 +722,18 @@ describe("team-shift: agy fallback on a claude usage limit", () => {
     expect(settings().permissions.allow).toEqual(expect.arrayContaining(["write_file(*)", "command(git push)", "command(gh pr create)"]));
   });
 
-  it("the Architect has no agy, so a limit still blocks for the founder", () => {
+  // 2026-10-12: the Architect has its own agy login now; without the takeover, planning stopped until claude's reset.
+  it("the Architect hands over to agy too, with its plan-only rules", () => {
     agyLogin();
     world([issue(4, ["agent:planning"])]);
     writeJob("architect", "issue", 4);
     writeFileSync(join(fake, "state"), "exit=1\n");
     writeFileSync(join(fake, "log"), LIMIT);
-    expect(shift("architect").out).toMatch(/^Blocked: owner\/sandbox issue #4\. Architect: claude stopped with exit=1/);
-    expect(existsSync(join(fake, "started"))).toBe(false);
+    expect(shift("architect").out).toMatch(/^Started: owner\/sandbox issue #4, agy run shift-architect-sandbox-4-\d+ \(claude hit its usage limit\)\.$/);
+    expect(item("issue", 4).labels).toEqual(["agent:planning"]);
+    expect(settings().permissions.allow).toContain("command(gh issue create)");
+    expect(settings().permissions.allow).not.toContain("write_file(*)");
+    expect(settings().permissions.allow).not.toContain("command(git push)");
   });
 
   it("blocks when the computer has no agy login", () => {
