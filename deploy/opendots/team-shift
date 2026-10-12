@@ -522,9 +522,29 @@ if [[ -n $task ]]; then
   team=()
   while read -r r; do [[ -z $r || $r == \#* ]] || team+=("$r"); done < "$REPOS_FILE"
   repo=""
-  for r in ${team[@]+"${team[@]}"}; do
-    if [[ $r == "$task_repo" || $r == */"$task_repo" ]] || [[ -z $task_repo && ${#team[@]} == 1 ]]; then repo=$r; fi
-  done
+  if [[ -z $task_repo && ${#team[@]} == 1 ]]; then
+    repo=${team[0]}
+  elif [[ -n $task_repo ]]; then
+    lower_input=$(tr '[:upper:]' '[:lower:]' <<<"$task_repo")
+    case "$lower_input" in
+      oplify|oplify-api) task_repo="OplifyMessage/oplify-messaging-api" ;;
+      oplify-app) task_repo="OplifyMessage/oplify-messaging-app" ;;
+      founderos|fos) task_repo="pushkarverma3698/FounderOS" ;;
+      turicks) task_repo="turickai/turicks-web" ;;
+      sandbox) task_repo="pushkarverma3698/opendots-sandbox" ;;
+    esac
+    for r in ${team[@]+"${team[@]}"}; do
+      if [[ $r == "$task_repo" || $r == */"$task_repo" ]]; then repo=$r; break; fi
+    done
+    if [[ -z $repo ]]; then
+      matches=()
+      for r in ${team[@]+"${team[@]}"}; do
+        lower_r=$(tr '[:upper:]' '[:lower:]' <<<"$r")
+        if [[ $lower_r == *"$lower_input"* ]]; then matches+=("$r"); fi
+      done
+      if ((${#matches[@]} == 1)); then repo=${matches[0]}; fi
+    fi
+  fi
   list=$(IFS=,; echo "${team[*]-}" | sed 's/,/, /g')
   if [[ -z $repo && -z $task_repo ]]; then echo "Say which repo. Team repos: $list."; exit 0; fi
   if [[ -z $repo ]]; then echo "Not a team repo: $task_repo. Team repos: $list."; exit 0; fi

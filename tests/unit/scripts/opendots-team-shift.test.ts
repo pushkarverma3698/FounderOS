@@ -901,6 +901,16 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     expect(items()).toEqual([]);
   });
 
+  it("resolves alias and unique substring matches for task repo", () => {
+    world([]);
+    writeFileSync(join(dir, "repos"), "OplifyMessage/oplify-messaging-api\nOplifyMessage/oplify-messaging-app\npushkarverma3698/clean-ai\n");
+    const rAlias = shift("builder", "--engine", "claude", "--repo", "oplify", "--task", TASK);
+    expect(rAlias.out).toMatch(/^Started: OplifyMessage\/oplify-messaging-api issue #1, claude run /);
+    rmSync(join(runs, "shift-builder.job"), { force: true });
+    const rSub = shift("builder", "--engine", "claude", "--repo", "clean-ai", "--task", TASK);
+    expect(rSub.out).toMatch(/^Started: pushkarverma3698\/clean-ai issue #\d+, claude run /);
+  });
+
   it("refuses while a Builder run is open, and files nothing", () => {
     world([issue(5, ["agent:building"])]);
     writeJob("builder", "issue", 5, 120);
