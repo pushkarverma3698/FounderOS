@@ -219,10 +219,13 @@ epic_of() { # repo n body
 # first GitHub error. Every step can be repeated: agent:approved comes off last, and the scan lists approved PRs that
 # are already merged, so the next shift finishes what this one did not.
 merge_part() { # repo n epic-branch
-  local repo=$1 n=$2 epic=$3 p j state hbranch url body why i st k m o plist cnt final="" ptitle fbase parts out err=""
+  local repo=$1 n=$2 epic=$3 p j state hbranch url body why i st k m o plist cnt final="" ptitle fbase parts out err="" tries
   p=${epic#feat/epic-}
   ensure_labels "$repo"
-  j=$(gh pr view "$n" -R "$repo" --json state,headRefName,url,body)
+  j=$(gh pr view "$n" -R "$repo" --json state,headRefName,baseRefName,url,body,comments)
+  # gh pr merge merges into the PR's base as it is NOW, and the scan is seconds old: this script merges into an
+  # epic branch and nowhere else, so a PR retargeted since then is left exactly as it is.
+  if [[ $(jq -r .baseRefName <<<"$j") != "$epic" ]]; then echo "No work"; return; fi
   state=$(jq -r .state <<<"$j") hbranch=$(jq -r .headRefName <<<"$j") url=$(jq -r .url <<<"$j") body=$(jq -r '.body // ""' <<<"$j")
   if [[ $state == CLOSED ]]; then
     gh pr edit "$n" -R "$repo" --remove-label agent:approved >/dev/null
@@ -231,10 +234,20 @@ merge_part() { # repo n epic-branch
     return
   fi
   if [[ $state == OPEN ]]; then
+    # A draft cannot be merged, and the Reviewer's PASS may have left it one. Failing here is not fatal: the merge speaks.
+    gh pr ready "$n" -R "$repo" >/dev/null 2>&1 || true
     err=$(gh pr merge "$n" -R "$repo" --merge 2>&1) || true
     state=$(gh pr view "$n" -R "$repo" --json state --jq .state)
     if [[ $state != MERGED ]]; then
       why=$(head -n1 <<<"${err:-the PR is $state}")
+      # A merge that never works (merge commits forbidden, protected branch, a required check) would loop Builder ->
+      # Reviewer -> merge for ever, outside the review-round limit: the second failure is the founder's.
+      tries=$(jq '[.comments[].body | select(startswith("team-shift: could not merge this approved part"))] | length' <<<"$j")
+      if ((tries > 0)); then
+        printf '%s\n' "$Role: could not merge this approved part into $epic twice ($why). The founder decides: the repo may forbid merge commits or protect the branch." |
+          block pr "$repo" "$n"
+        return
+      fi
       printf '%s\n' "team-shift: could not merge this approved part into $epic ($why). Builder: merge origin/$epic into this branch, fix the conflicts, rerun the checks, push." |
         comment pr "$repo" "$n"
       gh pr edit "$n" -R "$repo" --remove-label agent:approved --add-label agent:changes >/dev/null
@@ -244,7 +257,7 @@ merge_part() { # repo n epic-branch
     fi
   fi
   # PRs stacked on this one go onto the epic branch (GitHub does that only when the branch is deleted, and it is kept).
-  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName)
+  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName,labels)
   for i in $(jq -r --arg h "$hbranch" '.[] | select(.state == "OPEN" and .baseRefName == $h) | .number' <<<"$plist"); do
     gh pr edit "$i" -R "$repo" --base "$epic" >/dev/null
   done
@@ -258,12 +271,18 @@ merge_part() { # repo n epic-branch
     [[ $st == OPEN ]] || continue
     gh issue close "$i" -R "$repo" --comment "Merged in $url into $epic." >/dev/null
   done
-  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName)
+  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName,labels)
   cnt=$(gh issue list -R "$repo" --state all --limit 200 --json number,state,body --jq \
     "[.[] | select((.body // \"\") | test(\"part of:? #$p([^0-9]|\$)\"; \"i\"))] | \"\(length) \([.[] | select(.state == \"OPEN\")] | length)\"")
   read -r m o <<<"$cnt"
   k=$(jq --arg e "$epic" '[.[] | select(.state == "MERGED" and .baseRefName == $e)] | length' <<<"$plist")
   if ((k > m)); then m=$k; fi
+  # A final PR made by an earlier shift whose label call then failed has no agent:* label, so nobody would review it.
+  i=$(jq -r --arg e "$epic" '[.[] | select(.state == "OPEN" and .headRefName == $e and (any(.labels[].name; startswith("agent:")) | not))] | first | .number // empty' <<<"$plist")
+  if [[ -n $i ]]; then
+    gh pr edit "$i" -R "$repo" --add-label agent:review >/dev/null
+    final=$i
+  fi
   # The final PR: every part is closed, nothing is open onto the epic branch, and the branch has no PR of its own yet.
   if ((m > 0 && o == 0)) && [[ $(jq --arg e "$epic" '[.[] | select((.state == "OPEN" and .baseRefName == $e) or (.state != "CLOSED" and .headRefName == $e))] | length' <<<"$plist") == 0 ]]; then
     ptitle=$(gh issue view "$p" -R "$repo" --json title --jq .title)

@@ -17,7 +17,7 @@ const FAKES = join(ROOT, "tests", "unit", "scripts", "fakes");
 const REPO = "owner/sandbox";
 const URL_PREFIX = `https://github.com/${REPO}`;
 
-interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[]; title?: string; body?: string; state?: string; head?: string; base?: string }
+interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[]; title?: string; body?: string; state?: string; head?: string; base?: string; draft?: boolean }
 
 let dir: string;
 let fake: string;
@@ -291,6 +291,79 @@ describe("epic branch: team-shift merges an approved part into feat/epic-P", () 
     expect(readFileSync(join(runs, "last-reviewer.txt"), "utf8")).toContain("sent back to the Builder");
     // It is the Builder's again, and the review-round count (Reviewer verdict: CHANGES) is untouched.
     expect(shift("builder", "--check").out).toBe("Due: owner/sandbox pr #41 (agent:changes)");
+  });
+
+  it("re-reads the base before merging: a PR retargeted since the scan is never merged, and nothing is touched", () => {
+    world([parent(), child(37), partPr(41, 37, ["agent:approved"])]);
+    writeFileSync(join(fake, "view-base"), "beta"); // the scan saw feat/epic-35; by the time of the view it is beta
+    const r = shift("reviewer");
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toBe("No work");
+    expect(ghLog()).not.toContain("pr merge");
+    expect(ghLog()).not.toContain("pr ready");
+    expect(item("pr", 41).state).toBeUndefined();
+    expect(item("pr", 41).labels).toEqual(["agent:approved"]);
+    expect(item("pr", 41).comments).toEqual([]);
+    expect(existsSync(join(runs, "shift-reviewer.job"))).toBe(false);
+  });
+
+  it("marks a draft part ready before it merges it, and a failing gh pr ready does not stop the merge", () => {
+    world([parent(), child(37), partPr(41, 37, ["agent:approved"], { draft: true })]);
+    const r = shift("reviewer");
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toBe(`Done: ${REPO} pr #41.\nRESULT: merged into ${EPIC_BRANCH} (1 of 1 parts)` + `; final PR #${prs().find((p) => p.head === EPIC_BRANCH)?.number} is in review`);
+    const log = ghLog();
+    expect(log.indexOf(`pr ready 41 -R ${REPO}`)).toBeGreaterThan(-1);
+    expect(log.indexOf(`pr ready 41 -R ${REPO}`)).toBeLessThan(log.indexOf("pr merge 41"));
+    expect(item("pr", 41).state).toBe("MERGED");
+    // gh pr ready fails: the merge still runs, and its own error is the one reported.
+    world([parent(), child(37), partPr(41, 37, ["agent:approved"], { draft: true })]);
+    writeFileSync(join(fake, "ready-fails"), "");
+    const sent = shift("reviewer");
+    expect(sent.status, sent.err).toBe(0);
+    expect(ghLog()).toContain(`pr merge 41 -R ${REPO} --merge`);
+    expect(sent.out).toContain("is still a draft");
+    expect(item("pr", 41).labels).toEqual(["agent:changes"]);
+  });
+
+  it("a part whose merge fails a second time is blocked for the founder, not sent back again", () => {
+    const earlier = `team-shift: could not merge this approved part into ${EPIC_BRANCH} (conflict). Builder: merge origin/${EPIC_BRANCH} into this branch, fix the conflicts, rerun the checks, push.`;
+    world([parent(), child(37), partPr(41, 37, ["agent:approved"], { comments: ["Reviewer verdict: PASS", earlier] })]);
+    writeFileSync(join(fake, "merge-fails"), "");
+    const r = shift("reviewer");
+    expect(r.status, r.err).toBe(0);
+    const why = `X Pull request ${REPO}#41 is not mergeable: the merge commit cannot be cleanly created.`;
+    expect(r.out.split("\n")[0]).toBe(`Blocked: ${REPO} pr #41. Reviewer: could not merge this approved part into ${EPIC_BRANCH} twice (${why}). The founder decides: the repo may forbid merge commits or protect the branch.`);
+    expect(r.out).not.toContain("Done:");
+    expect(item("pr", 41).labels).toEqual(["agent:blocked"]);
+    expect(item("pr", 41).state).toBeUndefined();
+    expect(item("pr", 41).comments.at(-1)).toContain("The founder decides");
+    expect(readFileSync(join(runs, "last-reviewer.txt"), "utf8")).toContain("Blocked:");
+    expect(existsSync(join(runs, "shift-reviewer.job"))).toBe(false);
+    expect(prs().filter((p) => p.head === EPIC_BRANCH)).toHaveLength(0);
+    // Nothing is due for the Builder or the Reviewer now: it waits for the founder.
+    expect(shift("builder", "--check").out).toBe("No work");
+    expect(shift("reviewer", "--check").out).toBe("No work");
+  });
+
+  it("an open final PR that carries no agent:* label gets agent:review on the next shift", () => {
+    world([parent(), child(37, { state: "CLOSED" }), partPr(41, 37, ["agent:approved"], { state: "MERGED" }),
+      pr(43, [], { head: EPIC_BRANCH, base: "beta", title: "Add the stats command", body: "Closes #35" })]);
+    const r = shift("reviewer");
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toBe(`Done: ${REPO} pr #41.\nRESULT: merged into ${EPIC_BRANCH} (1 of 1 parts); final PR #43 is in review`);
+    expect(item("pr", 43).labels).toEqual(["agent:review"]);
+    expect(ghLog()).not.toContain("pr create");
+    expect(item("pr", 41).labels).not.toContain("agent:approved");
+  });
+
+  it("a final PR that already has an agent:* label is left alone", () => {
+    world([parent(), child(37, { state: "CLOSED" }), partPr(41, 37, ["agent:approved"], { state: "MERGED" }),
+      pr(43, ["agent:approved"], { head: EPIC_BRANCH, base: "beta", title: "Add the stats command", body: "Closes #35" })]);
+    const r = shift("reviewer");
+    expect(r.out).toBe(`Done: ${REPO} pr #41.\nRESULT: merged into ${EPIC_BRANCH} (1 of 1 parts)`);
+    expect(item("pr", 43).labels).toEqual(["agent:approved"]);
+    expect(ghLog()).not.toMatch(/pr edit 43 .*--add-label/);
   });
 
   it("a GitHub error midway fails the shift, leaves the part merged and marked, and the next shift finishes the rest", () => {

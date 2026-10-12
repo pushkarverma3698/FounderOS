@@ -35,10 +35,16 @@ case "$kind $sub" in
     [[ $json == labels && -e $FAKE/view-labels-fails ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     [[ $json == body && -e $FAKE/view-body-fails ]] && { echo "GraphQL: Could not resolve" >&2; exit 1; }
     base=main; [[ -f $FAKE/has-beta ]] && base=beta
-    jq -c --arg r "$repo" --arg k "$kind" --argjson n "$n" --arg base "$base" \
+    vb=""; [[ -f $FAKE/view-base ]] && vb=$(cat "$FAKE/view-base")
+    jq -c --arg r "$repo" --arg k "$kind" --argjson n "$n" --arg base "$base" --arg vb "$vb" \
       '.[] | select(.repo==$r and .kind==$k and .number==$n) | {number, labels: [.labels[] | {name: .}], comments: [.comments[] | {body: .}], body: (.body // ""), title: (.title // ""),
-        url: "https://github.com/\($r)/\(if $k == "pr" then "pull" else "issues" end)/\($n)", state: (.state // "OPEN"), headRefName: (.head // "branch-\(.number)"), baseRefName: (.base // $base)}' "$S" | jq -r "$q" ;;
+        url: "https://github.com/\($r)/\(if $k == "pr" then "pull" else "issues" end)/\($n)", state: (.state // "OPEN"), headRefName: (.head // "branch-\(.number)"), baseRefName: (if $vb != "" and $k == "pr" then $vb else (.base // $base) end)}' "$S" | jq -r "$q" ;;
+  "pr ready")
+    [[ -e $FAKE/ready-fails ]] && { echo "GraphQL: Resource not accessible (markPullRequestReadyForReview)" >&2; exit 1; }
+    jq --arg r "$repo" --argjson n "$n" 'map(if .repo==$r and .kind=="pr" and .number==$n then .draft = false else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
   "pr merge")
+    [[ $(jq --arg r "$repo" --argjson n "$n" '[.[] | select(.repo==$r and .kind=="pr" and .number==$n and .draft == true)] | length' "$S") == 1 ]] &&
+      { echo "X Pull request $repo#$n is still a draft" >&2; exit 1; }
     [[ -e $FAKE/merge-fails ]] && { echo "X Pull request $repo#$n is not mergeable: the merge commit cannot be cleanly created." >&2; exit 1; }
     jq --arg r "$repo" --argjson n "$n" 'map(if .repo==$r and .kind=="pr" and .number==$n then .state = "MERGED" else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
   "pr create")

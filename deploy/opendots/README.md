@@ -140,6 +140,11 @@ merges a stacked PR into the other PR's branch.
    (the parts were reviewed alone), the Builder fixes on `feat/epic-P`, and the founder merges the final PR through
    the Chief. `chief-run` refuses a part and closes issue `#P` after the final PR merges.
 
+The base is read again right before the merge: a PR that is no longer onto the epic branch is not merged and
+not touched. A draft part is marked ready first. A part whose merge fails a second time (the first failure is
+already a `team-shift: could not merge` comment on the PR) is blocked for the founder, with the `gh` error,
+instead of going round the Builder and the Reviewer again.
+
 Every step can be repeated: `agent:approved` comes off last, and the scan lists approved PRs that are already
 merged, so a GitHub error halfway is finished by the next shift.
 
@@ -147,6 +152,8 @@ merged, so a GitHub error halfway is finished by the next shift.
 |---|---|
 | Only `team-shift` merges, and only into `feat/epic-*` (roles keep `gh pr merge` and `gh api` denied) | `team-shift` (code) |
 | A part of an epic is never merged by the Chief | `chief-run` (code) |
+| `team-shift` merges only into the PR's epic branch: the base is re-read right before the merge | `team-shift` (code) |
+| A part whose merge fails twice is blocked for the founder | `team-shift` (code) |
 | A child is not handed out before what it builds on has a PR | `team-shift` queue scan (code) |
 | A dependency that is blocked, sent back with changes, or closed unmerged is not built on | `team-shift` `dep_state` (code) |
 | A blocked issue with a `Builds on` line returns to `agent:build` once, when #N is ready | `team-shift` (code, marker comment) |
