@@ -603,14 +603,24 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
   });
 
   // 2026-10-12: the cron runs every minute. A Due line its Dot cannot clear must not buy a paid turn every minute.
-  it("the same Due line wakes its Dot once, then again only after 15 minutes", () => {
+  // Live 2026-10-12 10:47Z: the Builder's wake died on a 502 before its model ran, and the item sat for 15 minutes.
+  it("the same Due line wakes its Dot once, a second time after 2 minutes, then only every 15 minutes", () => {
     const due = { architect: { out: "Due: owner/sandbox issue #4 (agent:plan)" } };
+    const age = (min: number): void => {
+      const t = new Date(Date.now() - min * 60 * 1000);
+      utimesSync(join(dir, "shift-tasks.woke-architect"), t, t);
+    };
     expect(cron(due).runs).toHaveLength(1);
     const again = cron(due);
     expect(again.runs).toEqual([]);
-    expect(again.out).toContain("architect: Due: owner/sandbox issue #4 (agent:plan) -> woken less than 15 min ago, waiting");
-    const old = new Date(Date.now() - 16 * 60 * 1000);
-    utimesSync(join(dir, "shift-tasks.woke-architect"), old, old);
+    expect(again.out).toContain("architect: Due: owner/sandbox issue #4 (agent:plan) -> woken 1 time, next try 2 min after the last, waiting");
+    age(3);
+    expect(cron(due).runs).toHaveLength(1);
+    age(3);
+    const third = cron(due);
+    expect(third.runs).toEqual([]);
+    expect(third.out).toContain("-> woken 2 times, next try 15 min after the last, waiting");
+    age(16);
     expect(cron(due).runs).toHaveLength(1);
   });
 
@@ -621,7 +631,7 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     expect(cron({ builder: { out: "Due: owner/sandbox issue #4, run shift-builder-sandbox-4-1 is exit=0." } }).runs).toHaveLength(1);
   });
 
-  it("a failing check is repeated to the founder every 15 minutes, not every minute", () => {
+  it("a failing check is not repeated to the founder every minute", () => {
     const failing = { reviewer: { out: "gh: authentication required", rc: 1 } };
     expect(cron(failing).runs).toHaveLength(1);
     expect(cron(failing).runs).toEqual([]);
