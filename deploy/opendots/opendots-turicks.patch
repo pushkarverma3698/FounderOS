@@ -49,7 +49,7 @@ index db9fb2a..a27926e 100644
  export class ApiError extends Error {
    constructor(
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
-index 6191cc7..660d17e 100644
+index 6191cc7..5b4ead6 100644
 --- a/src/server/dot-agent.ts
 +++ b/src/server/dot-agent.ts
 @@ -14,7 +14,7 @@ import {
@@ -61,7 +61,7 @@ index 6191cc7..660d17e 100644
  import { openaiCompatibleText } from '@tanstack/ai-openai/compatible';
  import { learnedSkillTools, tanstackTools } from './tanstack-tools.js';
  import { Observable } from 'rxjs';
-@@ -24,12 +24,117 @@ import { WorkspaceStore } from './workspace.js';
+@@ -24,12 +24,223 @@ import { WorkspaceStore } from './workspace.js';
  import type { PlatformConfig } from './platform-config.js';
  import { browserResponse } from './research.js';
  import { answerObserver, type SetupTelemetry } from './setup-telemetry.js';
@@ -115,6 +115,112 @@ index 6191cc7..660d17e 100644
 +// renames `length` to `tool_calls` when a tool call was open, which then runs with `{}` arguments).
 +// Signals: a cut-off finish or native reason, the whole output budget used, or tool arguments that
 +// do not parse (any model). A RUN_ERROR stops TanStack's loop before the tool phase, and a failed shift retries.
++interface FallbackTier {
++  model: string;
++  models?: string[];
++}
++
++function parseModelFallbackTiers(modelConfig?: string): FallbackTier[] {
++  const models = (modelConfig ?? "")
++    .split(",")
++    .map((m) => m.trim())
++    .filter(Boolean);
++  if (models.length === 0) {
++    return [
++      {
++        model: "deepseek/deepseek-v4.1-flash",
++        models: [
++          "deepseek/deepseek-v4.1-flash",
++          "z-ai/glm-5.3-flash",
++          "moonshotai/kimi-k3",
++        ],
++      },
++      {
++        model: "google/gemini-3.8-flash",
++        models: ["google/gemini-3.8-flash", "google/gemini-2.5-flash"],
++      },
++    ];
++  }
++  if (models.length <= 3) {
++    return [
++      {
++        model: models[0],
++        models: models.length > 1 ? models : undefined,
++      },
++    ];
++  }
++  const tiers: FallbackTier[] = [];
++  for (let i = 0; i < models.length; i += 3) {
++    const chunk = models.slice(i, i + 3);
++    tiers.push({
++      model: chunk[0],
++      models: chunk.length > 1 ? chunk : undefined,
++    });
++  }
++  return tiers;
++}
++
++function withModelFallback(adapter: object, fallbackTiers: FallbackTier[]) {
++  if (
++    fallbackTiers.length <= 1 &&
++    (!fallbackTiers[0]?.models || fallbackTiers[0].models.length <= 1)
++  ) {
++    return;
++  }
++  const target = adapter as {
++    model: string;
++    chatStream(
++      options: Record<string, unknown>,
++      ...rest: unknown[]
++    ): AsyncIterable<AdapterChunk>;
++  };
++  const originalChatStream = target.chatStream.bind(adapter);
++  target.chatStream = async function* (options, ...rest) {
++    for (let i = 0; i < fallbackTiers.length; i++) {
++      const tier = fallbackTiers[i];
++      target.model = tier.model;
++      options.model = tier.model;
++      if (tier.models && tier.models.length > 0) {
++        options.modelOptions = {
++          ...((options.modelOptions as object) ?? {}),
++          models: tier.models,
++        };
++      } else if ((options.modelOptions as Record<string, unknown>)?.models) {
++        delete (options.modelOptions as Record<string, unknown>).models;
++      }
++      const buffer: AdapterChunk[] = [];
++      let hadError = false;
++      try {
++        const stream = originalChatStream(options, ...rest);
++        for await (const chunk of stream) {
++          if (
++            chunk.type === EventType.RUN_ERROR &&
++            i < fallbackTiers.length - 1
++          ) {
++            hadError = true;
++            break;
++          }
++          if (chunk.type === EventType.RUN_STARTED) {
++            buffer.push(chunk);
++          } else {
++            if (buffer.length > 0) {
++              for (const b of buffer) yield b;
++              buffer.length = 0;
++            }
++            yield chunk;
++          }
++        }
++        if (!hadError) {
++          for (const b of buffer) yield b;
++          return;
++        }
++      } catch (err) {
++        if (i === fallbackTiers.length - 1) throw err;
++      }
++    }
++  };
++}
++
 +function failCutOffReplies(adapter: object) {
 +  const target = adapter as {
 +    processStreamChunks(
@@ -180,15 +286,26 @@ index 6191cc7..660d17e 100644
  export class DotAgent extends AbstractAgent {
    private inner?: BuiltInAgent;
    private controller?: AbortController;
-@@ -310,6 +415,7 @@ export class DotAgent extends AbstractAgent {
+@@ -304,12 +515,17 @@ export class DotAgent extends AbstractAgent {
+           initialSettings.memoryAllowed && dot.memoryAllowed
+             ? this.store.memories().map((memory) => memory.text)
+             : [];
+-        const adapter = openaiCompatibleText(this.config.model, {
++        const fallbackTiers = parseModelFallbackTiers(this.config.model);
++        const primaryModel =
++          fallbackTiers[0]?.model ?? "deepseek/deepseek-v4.1-flash";
++        const adapter = openaiCompatibleText(primaryModel, {
+           apiKey: this.config.apiKey,
+           baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
            api: 'chat-completions',
            maxRetries: 1,
          });
 +        failCutOffReplies(adapter);
++        withModelFallback(adapter, fallbackTiers);
          const serverTools = [
            ...tools,
            ...pageTools(pages),
-@@ -333,7 +439,7 @@ export class DotAgent extends AbstractAgent {
+@@ -333,7 +549,7 @@ export class DotAgent extends AbstractAgent {
              const converted = convertInputToTanStackAI({
                ...ctx.input,
                // Match BuiltInAgent's default trust boundary for client messages.
@@ -197,7 +314,7 @@ index 6191cc7..660d17e 100644
                  (message) =>
                    message.role !== 'system' && message.role !== 'developer',
                ),
-@@ -351,11 +457,11 @@ export class DotAgent extends AbstractAgent {
+@@ -351,11 +567,16 @@ export class DotAgent extends AbstractAgent {
                abortController: ctx.abortController,
                threadId: ctx.input.threadId,
                runId: ctx.input.runId,
@@ -206,7 +323,12 @@ index 6191cc7..660d17e 100644
 -                dot.skillDeliveryEnabled && conversation.learningContainerId
 -                  ? 10
 -                  : 5,
-+              modelOptions: { max_completion_tokens: MAX_COMPLETION_TOKENS },
++              modelOptions: {
++                max_completion_tokens: MAX_COMPLETION_TOKENS,
++                ...(fallbackTiers[0]?.models
++                  ? { models: fallbackTiers[0].models }
++                  : {}),
++              },
 +              agentLoopStrategy: stepLimit(
 +                isScheduledTurn(ctx.input.messages)
 +                  ? SHIFT_MODEL_CALLS
