@@ -64,7 +64,7 @@ READ_TOOLS=(Read Glob Grep "Bash(ls:*)" "Bash(cat:*)" "Bash(head:*)" "Bash(tail:
   "Bash(gh issue create:*)" "Bash(gh issue comment:*)" "Bash(gh issue edit:*)" "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh pr diff:*)"
   "Bash(gh pr checks:*)" "Bash(gh pr comment:*)" "Bash(gh pr edit:*)" "Bash(gh pr checkout:*)"
   mcp__turicks-brain__search_memory mcp__turicks-brain__get_memory) # brain reads only (home/CLAUDE.md)
-CHECK_TOOLS=("Bash(npm:*)" "Bash(npx:*)" "Bash(pnpm:*)" "Bash(node:*)" "Bash(python3:*)" "Bash(pytest:*)" "Bash(make:*)")
+CHECK_TOOLS=("Bash(npm:*)" "Bash(npx:*)" "Bash(pnpm:*)" "Bash(node:*)" "Bash(python3:*)" "Bash(pytest:*)" "Bash(make:*)" "Bash(team-services:*)")
 denied=("Bash(gh pr merge:*)" "Bash(gh api:*)" "Bash(gh auth:*)" "Bash(git push --force:*)" "Bash(git push -f:*)"
   "Bash(git rebase:*)" "Bash(git reset --hard:*)" "Bash(git push origin main:*)" "Bash(git push origin beta:*)")
 case "$role" in
