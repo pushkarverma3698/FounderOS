@@ -121,7 +121,7 @@ copy() { # to-id files...
   local to=$1; shift
   docker exec -w /workspace "$(box "$builder")" tar -cf - "$@" | docker exec -i -w /workspace "$(box "$to")" tar -xf - --no-same-owner --skip-old-files
 }
-copy "$architect" "${LOGINS[@]}" # the Architect plans; it gets no agy login
+copy "$architect" "${LOGINS[@]}" "${AGY[@]}"
 copy "$reviewer" "${LOGINS[@]}" "${AGY[@]}"
 copy "$chief" "${LOGINS[@]}" "${AGY[@]}" # chief-run: claude, agy when claude is at its limit
 for id in "$builder" "$architect" "$reviewer" "$chief"; do
