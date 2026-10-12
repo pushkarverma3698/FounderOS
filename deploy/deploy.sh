@@ -135,6 +135,8 @@ pnpm db:migrate
 
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
+# The HTTP hub (deploy/founderos-hub-http.service) runs this tree's src/mcp too.
+if systemctl cat founderos-hub-http >/dev/null 2>&1; then sudo systemctl restart founderos-hub-http; fi
 
 # Poll for health rather than a single shot: a lone `sleep 5 && curl` races the
 # boot and reports a false failure on an otherwise-successful deploy (2026-07-13).
