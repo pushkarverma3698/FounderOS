@@ -199,3 +199,24 @@ and that code can read every login in the computer: on 2026-10-10 `/workspace/.c
 were readable in all three. Prompts can't prevent this, and the gh token is the founder's, so the Architect can
 technically push too. Until per-role fine-grained GitHub tokens are installed (`dot-login gh`), use the team only
 on the founder's own repos, never on outside contributors' PRs. Computer network access is open.
+
+### Test services
+
+A computer has no docker, so a repo whose tests need Postgres or Redis cannot start its compose file. `team-services`
+runs them as local processes inside the computer: 127.0.0.1 only, throwaway data in `/tmp/team-services` (not
+`/workspace`), Postgres 16 with pgvector (`shared_buffers=32MB`, 20 connections) and Redis capped at 64 MB with no
+persistence. The Builder and the Reviewer may run it; the Architect may not.
+
+```
+team-services start postgres redis   # redis:6380 for a repo whose tests hardcode that port; running it again is a no-op
+team-services run npm test           # npm|npx|pnpm|node|python3|pytest|make, with the lines below exported
+team-services env                    # DATABASE_URL, TEST_DATABASE_URL (postgres://team:team@127.0.0.1:5432/team),
+                                     # REDIS_URL, REDIS_HOST, REDIS_PORT
+team-services status | stop          # stop deletes the data
+```
+
+`run` exists because the allowlist cannot pass `DATABASE_URL=... npm test`. Evidence for what is installed:
+FounderOS integration tests and the Oplify API tests use Postgres (Oplify also Redis on port 6380, set in its test
+helpers); no other repo of the 20 starts a service in its test command. FounderOS and Oplify integration tests skip
+when the database is unreachable, so a green run without `team-services start` tested nothing. Not covered: browsers
+for Playwright, ffmpeg and exiftool.
