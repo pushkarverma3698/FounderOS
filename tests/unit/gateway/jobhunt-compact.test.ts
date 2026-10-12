@@ -189,7 +189,7 @@ describe("handleJobCallback — Show more and CSV taps", () => {
     const wife = listProfiles().find((p) => p.id !== getProfile().id) ?? getProfile();
     const { ctx, calls } = mk(`jh:m:today:${wife.id}`);
     const d = jobs();
-    expect(await handleJobCallback(ctx, { runKernelText: vi.fn() } as never, d)).toBe(true);
+    expect(await handleJobCallback(ctx, d)).toBe(true);
     expect(calls.replies.join("\n")).toContain("FULL BRIEF");
     expect((d.buildBrief as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toMatchObject({ id: wife.id });
   });
@@ -197,7 +197,7 @@ describe("handleJobCallback — Show more and CSV taps", () => {
   it("an unknown profile id on a tap is answered, not thrown", async () => {
     const { handleJobCallback } = await import("../../../src/gateway/jobhunt-callbacks.js");
     const { ctx, calls } = mk("jh:m:jobs:nobody");
-    expect(await handleJobCallback(ctx, { runKernelText: vi.fn() } as never, jobs())).toBe(true);
+    expect(await handleJobCallback(ctx, jobs())).toBe(true);
     expect(calls.answer.join(" ")).toMatch(/out of date/i);
   });
 });

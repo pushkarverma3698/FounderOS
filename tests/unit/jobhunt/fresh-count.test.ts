@@ -48,7 +48,7 @@ const { screenBatch } = await import("../../../src/tools/jobhunt/ingest-batch.js
 const { renderSpend } = await import("../../../src/tools/jobhunt/brief-sections.js");
 const { recordQueryCost } = await import("../../../src/tools/jobhunt/ingest-ledger.js");
 const { ATS_PRICING } = await import("../../../src/tools/jobhunt/cost.js");
-const { JOB_SWEEP_CRON } = await import("../../../src/infra/scheduler.js");
+const { JOB_SWEEP_CRON } = await import("../../../src/tools/jobhunt/sweep-runner.js");
 
 /** A body long enough to clear the thin-posting gate. */
 const BODY =

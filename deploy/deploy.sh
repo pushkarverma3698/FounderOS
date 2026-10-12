@@ -6,9 +6,10 @@
 #
 # Idempotent and fail-loud: any step before the restart failing aborts the
 # deploy and the OLD instance keeps running. The restart happens immediately
-# after migrations — best-effort steps (seed-founder-context, the MCP/Slack/S3
-# diagnostic checks) run AFTER the new code is already live, and each is bounded
-# so it cannot consume the SSH budget.
+# after migrations — best-effort steps (the brain row count and the model
+# credential check) run AFTER the new code is already live, and each is bounded
+# so it cannot consume the SSH budget. Since 2026-10-10 the service is the
+# standalone jobs process (src/jobs/main.ts).
 #
 # Two 2026-08-12 fixes, in order:
 #   1. brain:sync ran BEFORE the restart. When it grew slow enough to exceed the
@@ -47,15 +48,7 @@ pnpm install --frozen-lockfile
 echo "==> Type check (lint) — abort deploy if red"
 pnpm lint
 
-echo "==> Building (backend + JARVIS)"
-# Inject web gateway token into JARVIS build when configured (SSE ?token= + Bearer fetch).
-if [ -f .env ] && grep -q '^WEB_GATEWAY_TOKEN=' .env; then
-  TOKEN="$(grep '^WEB_GATEWAY_TOKEN=' .env | cut -d= -f2- | tr -d '"')"
-  if [ -n "$TOKEN" ]; then
-    export VITE_WEB_GATEWAY_TOKEN="$TOKEN"
-    echo "    VITE_WEB_GATEWAY_TOKEN set from WEB_GATEWAY_TOKEN for JARVIS build"
-  fi
-fi
+echo "==> Building"
 pnpm build:all
 
 # The agy-login helper runs as the antigravity user and reads the built app; a deploy under a strict umask left dist/ 0700.
@@ -143,13 +136,10 @@ pnpm db:migrate
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
-# Poll for health rather than a single shot: v3 boot binds the health server
-# only AFTER compiling the kernel + bridging MCP child servers (blender/slack/
-# deepwiki spawn at startup once MCP_BRIDGE_ENABLED=true), which pushes first-
-# healthy to ~7s — a lone `sleep 5 && curl` races the boot and reports a false
-# failure on an otherwise-successful deploy (2026-07-13). Same {1..30} idiom as
-# the Postgres/Ollama readiness loops above.
-echo "==> Waiting for health (up to 60s — v3 boot spawns MCP bridge child servers)"
+# Poll for health rather than a single shot: a lone `sleep 5 && curl` races the
+# boot and reports a false failure on an otherwise-successful deploy (2026-07-13).
+# Same {1..30} idiom as the Postgres/Ollama readiness loops above.
+echo "==> Waiting for health (up to 60s)"
 HEALTHY=""
 for i in {1..30}; do
   if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
@@ -162,22 +152,6 @@ done
 if [ -z "$HEALTHY" ]; then
   echo "!! /health did NOT come up in 60s — check: journalctl -u founderos -n 50" >&2
   exit 1
-fi
-
-# Secondary surfaces — the JARVIS web UI is not the core product (the Telegram
-# bot is). Warn, don't abort, if they're down.
-if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then
-  echo "==> JARVIS web gateway OK — /api/v1/health"
-else
-  echo "    WARNING: /api/v1/health failed — JARVIS web UI may be down (core bot is up)." >&2
-fi
-
-# Capture the page, then grep it (SIGPIPE under pipefail, as with the Ollama check above): curl writes a whole page.
-spa_html=$(curl -fsS http://127.0.0.1:3001/) || spa_html=""
-if grep -qi 'html\|jarvis\|root' <<<"$spa_html"; then
-  echo "==> JARVIS UI OK — GET / serves SPA"
-else
-  echo "    (v3: web SPA removed — health endpoint only)" >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -202,77 +176,6 @@ if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
   echo "             Run it: gh workflow run brain-sync.yml   (or on the box: pnpm brain:sync)" >&2
 else
   echo "    brain_memories embedded rows: $EMBEDDED (refreshed by .github/workflows/brain-sync.yml)"
-fi
-
-echo "==> Seeding founder context defaults (fill-only: never overwrites a stored key) — best-effort, 120s cap"
-# The seed is the founder's own identity and business context. A self-hosted box (deploy/install.sh)
-# sets FOUNDEROS_SKIP_FOUNDER_SEED=1 (env or .env) so it does not write someone else's profile into your database.
-if [ "${FOUNDEROS_SKIP_FOUNDER_SEED:-}" = "1" ] || grep -qx '^FOUNDEROS_SKIP_FOUNDER_SEED=1$' .env 2>/dev/null; then
-  echo "    FOUNDEROS_SKIP_FOUNDER_SEED=1 - skipping the founder-context seed"
-elif timeout 120 node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
-  echo "    seed-founder-context OK"
-else
-  echo "    WARNING: seed-founder-context failed or timed out — founder context may be stale. Bot still deploys." >&2
-fi
-
-echo "==> Checking MCP bridge runtime dependencies"
-# ADR-041: when the bridge is enabled, the child server processes must be available.
-# A missing runtime contributes zero tools (isolated) but we surface it early here
-# so the operator knows to install before the first Blender/Slack request.
-# `|| true` is REQUIRED: under `set -euo pipefail`, a `VAR=$(grep … | …)` whose
-# grep finds no match returns non-zero (pipefail) and aborts the entire deploy.
-# Prod .env has no MCP_BRIDGE_ENABLED line → this killed the deploy right after
-# seed-founder-context until fixed. Treat "absent" as the default (false).
-MCP_BRIDGE_ENABLED_VAL="$(grep -E '^MCP_BRIDGE_ENABLED=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
-if [ "${MCP_BRIDGE_ENABLED_VAL:-false}" = "true" ]; then
-  echo "    MCP_BRIDGE_ENABLED=true — checking runtimes"
-
-  # blender-mcp requires uvx (ships with the `uv` Python package manager).
-  if ! command -v uvx >/dev/null 2>&1; then
-    echo "    WARNING: uvx not found — blender-mcp server will fail to start." >&2
-    echo "             Install: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
-    echo "             Then: export PATH=\$HOME/.local/bin:\$PATH and redeploy." >&2
-  else
-    echo "    uvx OK: $(uvx --version 2>&1 | head -1)"
-  fi
-
-  # slack MCP requires SLACK_BOT_TOKEN + SLACK_TEAM_ID.
-  SLACK_TOKEN="$(grep -E '^SLACK_BOT_TOKEN=' .env 2>/dev/null | head -1 | cut -d= -f2- || true)"
-  SLACK_TEAM="$(grep -E '^SLACK_TEAM_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- || true)"
-  if [ -z "$SLACK_TOKEN" ] || [ -z "$SLACK_TEAM" ]; then
-    echo "    WARNING: SLACK_BOT_TOKEN or SLACK_TEAM_ID missing — Slack MCP tools will be unavailable." >&2
-    echo "             Set both in PROD_DOTENV or as deployment secrets and redeploy." >&2
-  else
-    echo "    Slack env vars present (token length: ${#SLACK_TOKEN})"
-  fi
-
-  # npx is already on the PATH via Node.js — just confirm.
-  if ! command -v npx >/dev/null 2>&1; then
-    echo "    WARNING: npx not found — Slack MCP server cannot start." >&2
-  else
-    echo "    npx OK"
-  fi
-else
-  echo "    MCP_BRIDGE_ENABLED=false (default) — skipping bridge checks"
-fi
-
-echo "==> Checking image delivery storage (S3)"
-# marketing.generate_image needs S3 to deliver an asset URL. Without storage
-# config, every request generates the image (real spend) then dead-ends at upload.
-GEMINI_KEY_VAL="$(grep -E '^GOOGLE_GENERATIVE_AI_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
-if [ -n "$GEMINI_KEY_VAL" ]; then
-  STORAGE_BUCKET_VAL="$(grep -E '^STORAGE_BUCKET=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
-  AWS_KEY_VAL="$(grep -E '^AWS_ACCESS_KEY_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
-  AWS_SECRET_VAL="$(grep -E '^AWS_SECRET_ACCESS_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
-  if [ -z "$STORAGE_BUCKET_VAL" ] || [ -z "$AWS_KEY_VAL" ] || [ -z "$AWS_SECRET_VAL" ]; then
-    echo "    WARNING: GOOGLE_GENERATIVE_AI_API_KEY set but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY" >&2
-    echo "             are not all set — generate_image will fail at the S3 upload step for every" >&2
-    echo "             request. Set them in PROD_DOTENV (or STORAGE_ENDPOINT_URL for R2/MinIO)." >&2
-  else
-    echo "    STORAGE_BUCKET=$STORAGE_BUCKET_VAL — image delivery ready"
-  fi
-else
-  echo "    GOOGLE_GENERATIVE_AI_API_KEY not set — skipping storage check"
 fi
 
 echo "==> Checking Vertex AI credentials (google-vertexai: primary model provider)"

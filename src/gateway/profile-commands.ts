@@ -26,7 +26,7 @@ import {
   writeApplyProfile,
 } from "../tools/jobhunt/apply-profile.js";
 import { childLogger } from "./../infra/logger.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
 
 const log = childLogger({ module: "gateway:profile-commands" });

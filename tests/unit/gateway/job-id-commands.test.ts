@@ -1,5 +1,5 @@
 /**
- * Draft, ask and applied by the id an alert printed.
+ * Draft and applied by the id an alert printed.
  *
  * THE BUG. An alert printed a row number. Three days later the queue had been re-ranked a hundred times and
  * that row was a different company. The id is the role: it keeps resolving after every re-rank, and the old
@@ -40,7 +40,6 @@ const findApplicationsByIdPrefix = vi.fn(async (hex: string) =>
 );
 const markRowApplied = vi.fn(async (_row: JobApplication) => ({ ok: true as const, already: false }));
 const reply = vi.fn(async (_text: string) => undefined);
-const runKernelText = vi.fn(async (_ctx: unknown, _text: string, _profile?: string) => undefined);
 
 type Rec = Record<string, unknown>;
 const SRC = "../../../src/";
@@ -56,8 +55,8 @@ const mockPacket = () => mockModule("tools/jobhunt/apply-packet.js", withActual(
 beforeEach(() => (vi.resetModules(), vi.clearAllMocks(), mockDb(), mockRefDb(), mockButtons(), mockPacket()));
 
 const ctxFor = (match: string) => ({ match, reply }) as never;
-const deps = () => ({ runKernelText });
-const instruction = () => String(runKernelText.mock.calls[0]?.[1] ?? "");
+/** Every reply, joined: the "Tailoring your CV for <company>" line names the row the id resolved to. */
+const replies = () => reply.mock.calls.map((c) => String(c[0])).join("\n");
 const firstReply = () => String(reply.mock.calls[0]?.[0] ?? "");
 
 /** The command a person would tap on a 3-day-old alert, taken from the alert text itself. */
@@ -83,8 +82,8 @@ describe("draft by id", () => {
   it("opens the same company after the queue was re-ranked", async () => {
     expect(commandFromAlert()).toBe(TYPED);
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor(TYPED), deps());
-    expect(instruction()).toContain("Nexperia");
+    await handleDraft(ctxFor(TYPED));
+    expect(replies()).toContain("Nexperia");
     expect(getApplicationByBriefRank).not.toHaveBeenCalled();
   });
 });
@@ -92,53 +91,46 @@ describe("draft by id", () => {
 describe("draft by position still works", () => {
   it("resolves a plain number against the live brief, as before", async () => {
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor("4"), deps());
+    await handleDraft(ctxFor("4"));
     expect(getApplicationByBriefRank).toHaveBeenCalled();
-    expect(instruction()).toContain("Bosch");
+    expect(replies()).toContain("Bosch");
   });
 });
 
 describe("an id that cannot be acted on is refused out loud", () => {
   it("names the right command when the id belongs to the other candidate", async () => {
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor("j3a9f2c1"), deps());
+    await handleDraft(ctxFor("j3a9f2c1"));
     expect(firstReply()).toContain("draft " + TYPED);
-    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies()).not.toContain("Tailoring");
   });
 
   it("never falls back to a position when the id is unknown", async () => {
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor("tashi jabcdef0"), deps());
+    await handleDraft(ctxFor("tashi jabcdef0"));
     expect(firstReply()).toContain("jabcdef0");
     expect(getApplicationByBriefRank).not.toHaveBeenCalled();
-    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies()).not.toContain("Tailoring");
   });
 
   it("says so when a short id matches two roles", async () => {
     findApplicationsByIdPrefix.mockResolvedValueOnce([NEXPERIA, NEXPERIA]);
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor(TYPED), deps());
+    await handleDraft(ctxFor(TYPED));
     expect(firstReply()).toContain("more than one role");
-    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies()).not.toContain("Tailoring");
   });
 
   it("does not redraft a role that was already applied to", async () => {
     findApplicationsByIdPrefix.mockResolvedValueOnce([role(NEXPERIA_ID, "wife-nl-finance", "Nexperia", null, "applied")]);
     const { handleDraft } = await draftModule();
-    await handleDraft(ctxFor(TYPED), deps());
+    await handleDraft(ctxFor(TYPED));
     expect(firstReply()).toContain("already applied");
-    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies()).not.toContain("Tailoring");
   });
 });
 
-describe("ask and applied take the same id", () => {
-  it("/ask writes the question for the same company", async () => {
-    const { handleAsk } = await draftModule();
-    await handleAsk(ctxFor(TYPED), deps());
-    expect(instruction()).toContain("Nexperia");
-    expect(getApplicationByBriefRank).not.toHaveBeenCalled();
-  });
-
+describe("applied takes the same id", () => {
   it("/applied closes the same company", async () => {
     const { handleApplied } = await draftModule();
     await handleApplied(ctxFor(TYPED));
