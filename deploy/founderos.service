@@ -1,8 +1,9 @@
 [Unit]
-# FounderOS — Telegram multi-agent bot (single-instance, long-polling).
+# FounderOS jobs — the standalone job pipeline (src/jobs/main.ts, since 2026-10-10):
+# the job crons plus the jobs-group Telegram bot (single-instance, long-polling).
 # Postgres runs as a Docker container (see deploy/postgres.compose.yml) and is
 # a hard dependency: the bot crashes loudly on boot if the DB is unreachable.
-Description=FounderOS multi-agent Telegram bot
+Description=FounderOS jobs (job pipeline crons + jobs-group Telegram bot)
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -15,8 +16,6 @@ WorkingDirectory=/opt/founderos
 
 # Node 22 is installed system-wide via NodeSource (apt), so it lands at
 # /usr/bin/node.  pnpm is installed via `npm i -g pnpm@9` → /usr/bin/pnpm.
-# The `claude` executor (src/tools/claude-code.ts) resolves from PATH too —
-# `npm i -g @anthropic-ai/claude-code` puts it in /usr/local/bin.
 # Do NOT use fnm/nvm for the production server: systemd does not source
 # .bashrc, so shim directories from fnm are never on PATH.
 Environment=NODE_ENV=production
@@ -37,8 +36,9 @@ Environment=HOME=/home/founderos
 Environment=FOUNDEROS_PID_FILE=/opt/founderos-data/founderos.pid
 
 # Secrets live in /opt/founderos/.env (chmod 600, NEVER committed).
-# package.json `start` already passes --env-file=.env, but we also point
-# EnvironmentFile here so systemctl status / journald see non-secret config.
+# package.json `start` (node dist/src/jobs/main.js) passes --env-file=.env.
+# The bot token is JOBS_BOT_TOKEN, falling back to TELEGRAM_BOT_TOKEN
+# (src/infra/jobs-bot-token.ts); boot logs which one it used.
 ExecStart=/usr/bin/env pnpm start
 
 # 24/7 reliability: always restart, but back off so a crash-loop (e.g. bad
