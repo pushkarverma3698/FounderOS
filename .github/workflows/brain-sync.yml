@@ -68,9 +68,7 @@ jobs:
 
             pnpm brain:sync
 
-            # AG-029: a source that stopped capturing, or an answer that got worse, turns this run red.
-            # Exit 1 = a cross-source or no-answer case failed, or the run is not a semantic measurement.
-            pnpm eval:retrieval
+            # The AG-029 retrieval eval (pnpm eval:retrieval) went with src/eval in the 2026-10-10 jobs-only cut.
 
             # brain_memories, NOT turicks_brain: ADR-038 moved the writer, and this
             # check was left behind reading the abandoned table. It printed a

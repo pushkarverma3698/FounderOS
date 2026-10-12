@@ -1,18 +1,15 @@
 /**
- * Unit tests — the daily Telegram line (plan C3).
- * ================================================
- * ALWAYS SENT, one of: "Jobhunt check: filed #N <title>", "Jobhunt check: nothing
- * new", "Jobhunt check: check failed: <reason>". Silence is indistinguishable from
- * "nothing to report", which is how the last acting loop could be dead for weeks
- * while looking healthy (dispatch-sweep.ts: IT ALWAYS SENDS).
+ * Unit tests — the daily jobhunt check's Telegram message.
+ * ========================================================
+ * ALWAYS SENT, one of: "Jobhunt check: N finding(s) for you", "Jobhunt check: nothing new",
+ * "Jobhunt check: check failed: <reason>". Silence is indistinguishable from "nothing to report".
+ * Since 2026-10-10 the check is report-only: it files no GitHub issue.
  *
  * Founder-facing rules (CLAUDE.md #26): every reason printed with its own result,
  * split across messages rather than truncated, and it ends in something to do.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   renderJobhuntCheck,
   type JobhuntCheckReport,
@@ -20,6 +17,7 @@ import {
 import { ADAPTER_SILENT_MIN_SWEEP_RUNS, type JobhuntCoverage } from "../../../src/evolution/analyzers/jobhunt.js";
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 import type { Finding } from "../../../src/evolution/types.js";
+import { COMMAND_MENU } from "../../../src/gateway/command-menu.js";
 
 const COVERAGE: JobhuntCoverage = {
   sweepRuns24h: 96,
@@ -43,7 +41,7 @@ const laneSilent: Finding = {
   evidence: "pushkar-nl-tech (Pushkar): 0 new postings reached screening for 9 consecutive free-lane sweeps (about 4.5 hours).",
   severity: "medium",
 };
-const filedFinding: Finding = {
+const adapterSilent: Finding = {
   kind: "adapter-silent",
   subject: "ashby (no new postings since 2026-09-26)",
   evidence: "ashby produced 0 new postings in the last 24h after 100 in the 7 days before.",
@@ -52,28 +50,20 @@ const filedFinding: Finding = {
 };
 
 function report(over: Partial<JobhuntCheckReport> = {}): JobhuntCheckReport {
-  return { outcome: { state: "nothing-dispatchable", totalFindings: 0 }, coverage: COVERAGE, due: [], quiet: [], ...over };
+  return { outcome: { state: "checked", told: 0 }, coverage: COVERAGE, due: [], quiet: [], ...over };
 }
 
 const text = (r: JobhuntCheckReport): string => renderJobhuntCheck(r).join("\n\n");
 const firstLine = (r: JobhuntCheckReport): string => renderJobhuntCheck(r)[0]!.split("\n")[0]!.replace(/<\/?b>/g, "");
 
-describe("the first line is one of the three the plan names", () => {
-  it("filed: 'Jobhunt check: filed #N <title>'", () => {
-    const line = firstLine(
-      report({
-        outcome: { state: "filed", finding: filedFinding, fingerprint: "a".repeat(64), issueNumber: 501, url: "https://github.com/x/y/issues/501" },
-      }),
-    );
-    expect(line).toBe("Jobhunt check: filed #501 [self-audit] adapter-silent: ashby (no new postings since 2026-09-26)");
+describe("the first line is one of the three", () => {
+  it("findings: 'Jobhunt check: N findings for you'", () => {
+    expect(firstLine(report({ outcome: { state: "checked", told: 2 }, due: [notActing, laneSilent] }))).toBe("Jobhunt check: 2 findings for you");
+    expect(firstLine(report({ outcome: { state: "checked", told: 1 }, due: [notActing] }))).toBe("Jobhunt check: 1 finding for you");
   });
 
   it("nothing new: 'Jobhunt check: nothing new'", () => {
     expect(firstLine(report())).toBe("Jobhunt check: nothing new");
-  });
-
-  it("nothing new also covers 'everything already has an issue'", () => {
-    expect(firstLine(report({ outcome: { state: "all-filed", dispatchableCount: 2 } }))).toBe("Jobhunt check: nothing new");
   });
 
   it("failed: 'Jobhunt check: check failed: <reason>', never 'nothing new'", () => {
@@ -82,38 +72,19 @@ describe("the first line is one of the three the plan names", () => {
     expect(text(r)).not.toMatch(/nothing new/i);
   });
 
-  it("a failed check says it filed nothing and that this is not a clean result", () => {
+  it("a failed check says it did not finish and that this is not a clean result", () => {
     const t = text(report({ outcome: { state: "failed", reason: "boom" }, coverage: null }));
-    expect(t).toMatch(/nothing was filed/i);
+    expect(t).toMatch(/did not finish/i);
     expect(t).toMatch(/not a clean result/i);
-  });
-
-  it("halted is its own line, says why nothing ran, and how to resume", () => {
-    const r = report({ outcome: { state: "halted", reason: "deploying", engagedAt: "2026-09-29T03:00:00Z" }, coverage: null });
-    expect(firstLine(r)).toMatch(/^Jobhunt check: skipped/);
-    expect(text(r)).toContain("deploying");
-    expect(text(r)).toContain("/resume");
-    expect(text(r)).not.toMatch(/nothing new/i);
-  });
-
-  it("the kill switch is named, not silent", () => {
-    const r = report({ outcome: { state: "disabled" } });
-    expect(firstLine(r)).toMatch(/^Jobhunt check: filing is switched off/);
-    expect(text(r)).toContain("SELF_IMPROVE_DISPATCH_ENABLED");
   });
 });
 
-describe("a filed issue ends in what the founder can do", () => {
-  const filed = report({
-    outcome: { state: "filed", finding: filedFinding, fingerprint: "a".repeat(64), issueNumber: 501, url: "https://github.com/x/y/issues/501" },
-  });
-
-  it("links the issue, quotes the evidence, and names the one thing only he can do", () => {
-    const t = text(filed);
-    expect(t).toContain('href="https://github.com/x/y/issues/501"');
+describe("a finding ends in what to do next", () => {
+  it("an adapter finding quotes the evidence and names the code to fix, and files nothing", () => {
+    const t = text(report({ outcome: { state: "checked", told: 1 }, due: [adapterSilent] }));
     expect(t).toContain("ashby produced 0 new postings");
-    expect(t).toMatch(/You only act at the merge/);
-    expect(t).toContain("gh issue edit 501 --remove-label agent:ready");
+    expect(t).toMatch(/Code fix: the ashby adapter stored nothing/);
+    expect(t).not.toMatch(/issues\/|gh issue|filed/);
   });
 });
 
@@ -149,17 +120,12 @@ describe("what was checked is printed, so 'nothing new' is not an unfalsifiable 
   });
 });
 
-describe("decisions", () => {
-  it("are printed with their own evidence and marked Telegram-only", () => {
-    const t = text(report({ due: [notActing] }));
-    expect(t).toMatch(/Decisions for you/);
-    expect(t).toMatch(/no issue is filed/i);
+describe("findings", () => {
+  it("are printed with their own evidence", () => {
+    const t = text(report({ outcome: { state: "checked", told: 1 }, due: [notActing] }));
+    expect(t).toMatch(/Findings for you/);
     expect(t).toContain("62 actionable roles");
     expect(t).toContain("candidate-not-acting");
-  });
-
-  it("the first line stays 'nothing new' even when a decision is due, because nothing was filed", () => {
-    expect(firstLine(report({ due: [notActing] }))).toBe("Jobhunt check: nothing new");
   });
 
   it("end in a command: Tashi's own brief and applied commands for her profile", () => {
@@ -224,21 +190,18 @@ describe("splitting, never truncating (Telegram's 4,096-character limit)", () =>
   });
 });
 
-describe("it never names a command the gateway does not have", () => {
-  it("every command in a decision or the halt line is registered", () => {
-    const gateway = ["telegram.ts", "commands.ts"]
-      .map((f) => readFileSync(join(process.cwd(), "src/gateway", f), "utf8"))
-      .join("\n");
+describe("it never names a command the jobs bot does not have", () => {
+  it("every command in a decision is in the ☰ menu (jobs/bot.ts registers exactly that list)", () => {
+    const menu = new Set(COMMAND_MENU.map((e) => e.command));
     const named = new Set<string>();
-    const halted = text(report({ outcome: { state: "halted", reason: "x", engagedAt: "y" }, coverage: null }));
     const decisions = text(
       report({
         due: [notActing, laneSilent, { ...notActing, subject: "pushkar-nl-tech" }, { ...laneSilent, subject: "wife-nl-finance" }],
       }),
     );
-    for (const t of [halted, decisions]) for (const m of t.matchAll(/(?<![\w<])\/([a-z_]+)/g)) named.add(m[1]!);
+    for (const t of [decisions]) for (const m of t.matchAll(/(?<![\w<])\/([a-z_]+)/g)) named.add(m[1]!);
 
-    expect([...named].sort()).toEqual(["applied", "jobs", "resume", "today", "wife_applied", "wife_jobs", "wife_today"]);
-    for (const name of named) expect(gateway, `/${name} is not registered`).toContain(`command("${name}"`);
+    expect([...named].sort()).toEqual(["applied", "jobs", "today", "wife_applied", "wife_jobs", "wife_today"]);
+    for (const name of named) expect(menu.has(name), `/${name} is not registered`).toBe(true);
   });
 });

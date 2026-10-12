@@ -54,6 +54,9 @@ const RECRUITER_PATH = [
   "docs/study/PORTFOLIO-GAPS-AND-ACTIONS.md",
 ];
 
+/** Docs whose source-file count describes the archived full system, not the jobs-only tree. */
+const ARCHIVE_SCALE_DOCS = ["docs/ROADMAP.md", "docs/study/INTERVIEW-BRIEF.md"];
+
 interface Claim {
   /** Human name, used in the failure message. */
   readonly name: string;
@@ -138,13 +141,6 @@ function countAdrs(): number {
   ).length;
 }
 
-function countGoldenTasks(): number {
-  const src = read("src/eval/golden-tasks.ts");
-  const body = src.match(/export const GOLDEN_TASKS[^=]*=\s*\[([\s\S]*?)\n\];/)?.[1];
-  if (body === undefined) throw new Error("Could not locate GOLDEN_TASKS array in src/eval/golden-tasks.ts");
-  return (body.match(/^\s{2}\{/gm) ?? []).length;
-}
-
 function countFreeBoards(): number {
   const csv = "docs/strategy/data/free-ats-boards.csv";
   if (!existsSync(join(ROOT, csv))) throw new Error(`Board registry missing at ${csv}`);
@@ -178,16 +174,13 @@ const CLAIMS: readonly Claim[] = [
     measure: countGitTrackedSourceFiles,
     patterns: [/\b(\d[\d,]*)\+? TypeScript source files/g, /Source \| (\d[\d,]*)\+? files/g],
     floorSlack: 100,
+    files: RECRUITER_PATH.filter((f) => !ARCHIVE_SCALE_DOCS.includes(f)),
+    exemption: `${ARCHIVE_SCALE_DOCS.join(" and ")} quote the full system's size at archive/founderos-v3, before the 2026-10-10 jobs-only cut`,
   },
   {
     name: "ADR count",
     measure: countAdrs,
     patterns: [/\b(\d[\d,]*) ADRs/g],
-  },
-  {
-    name: "golden task count",
-    measure: countGoldenTasks,
-    patterns: [/\b(\d[\d,]*) golden tasks/g, /\b(\d[\d,]*)-task golden set/g],
   },
   {
     name: "free ATS board registry size",
