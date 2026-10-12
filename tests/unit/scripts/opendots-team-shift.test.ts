@@ -869,4 +869,11 @@ describe("team-shift: progress in between and reasoning at the end", () => {
     const team = readFileSync(join(BRIEFS, "team.md"), "utf8");
     for (const l of ["WHAT I DID:", "WHY:", "WHAT'S LEFT:", "RESULT:"]) expect(team).toContain(l);
   });
+
+  // Live 2026-10-12: FounderOS's suite was OOM-killed (exit 137) in the 2 GB computer; one worker passes in 217 s.
+  it("the brief tells every run to test with one worker and how to get pnpm", () => {
+    const team = readFileSync(join(BRIEFS, "team.md"), "utf8");
+    expect(team).toContain("--maxWorkers=1");
+    expect(team).toContain("npx -y pnpm@10");
+  });
 });
