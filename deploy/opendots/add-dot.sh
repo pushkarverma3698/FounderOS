@@ -9,19 +9,30 @@ set -euo pipefail
 usage() {
   cat <<'EOF' >&2
 Usage:
-  add-dot.sh "<Name>" "<Instructions>" [SpaceName]
+  add-dot.sh "<Name>" "<Instructions>" [SpaceName] [--fresh-login]
 
 Arguments:
   Name          Name of the employee (e.g. DevOps, Growth, QA, Analyst)
   Instructions  Role instructions/system prompt (max 2000 characters)
   SpaceName     OpenDots Space (default: Everyday)
+  --fresh-login Leave subscriptions uncopied so employee uses its own dedicated login via dot-login
 EOF
   exit 2
 }
 
-NAME="${1:-}"
-INSTRUCTIONS="${2:-}"
-SPACE_NAME="${3:-Everyday}"
+FRESH_LOGIN=0
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--fresh-login" ]]; then
+    FRESH_LOGIN=1
+  else
+    ARGS+=("$arg")
+  fi
+done
+
+NAME="${ARGS[0]:-}"
+INSTRUCTIONS="${ARGS[1]:-}"
+SPACE_NAME="${ARGS[2]:-Everyday}"
 
 [[ -n "$NAME" && -n "$INSTRUCTIONS" ]] || usage
 
@@ -49,7 +60,7 @@ if [[ -z "$space" ]]; then
 fi
 
 dot_id=$(jq -r --arg n "$NAME" '.dots[] | select(.name==$n) | .id' <<<"$ws" | head -1)
-body() { jq -nc --arg n "$NAME" --arg i "$INSTRUCTIONS" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true}'; }
+body() { jq -nc --arg n "$NAME" --arg i "$INSTRUCTIONS" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, skillDeliveryEnabled:true}'; }
 SHELL_PERMS='{"enabled":true,"browser":true,"files":true,"shell":true}'
 
 if [[ -z "$dot_id" ]]; then
@@ -79,11 +90,18 @@ up || { echo "Error: computer $box did not start in 60s" >&2; exit 1; }
 # Find donor container with valid credentials
 donor=$(docker ps --format '{{.Names}}' | grep '^opendots-computer-' | grep -v "$dot_id" | head -1 || true)
 if [[ -n "$donor" ]]; then
-  echo "Copying credentials from donor container: $donor..."
-  LOGINS=(.claude-token .claude.json .config/gh/hosts.yml .config/gh/config.yml .gitconfig)
-  AGY=(.gemini/antigravity-cli/antigravity-oauth-token .gemini/config/config.json)
-  docker exec -w /workspace "$donor" tar -cf - "${LOGINS[@]}" "${AGY[@]}" 2>/dev/null | \
-    docker exec -i -w /workspace "$box" tar -xf - --no-same-owner --skip-old-files 2>/dev/null || true
+  if (( FRESH_LOGIN == 0 )); then
+    echo "Copying credentials from donor container: $donor..."
+    LOGINS=(.claude-token .claude.json .config/gh/hosts.yml .config/gh/config.yml .gitconfig)
+    AGY=(.gemini/antigravity-cli/antigravity-oauth-token .gemini/config/config.json)
+    docker exec -w /workspace "$donor" tar -cf - "${LOGINS[@]}" "${AGY[@]}" 2>/dev/null | \
+      docker exec -i -w /workspace "$box" tar -xf - --no-same-owner --skip-old-files 2>/dev/null || true
+  else
+    echo "Fresh login requested: copying only git config, leaving subscriptions isolated..."
+    LOGINS=(.config/gh/hosts.yml .config/gh/config.yml .gitconfig)
+    docker exec -w /workspace "$donor" tar -cf - "${LOGINS[@]}" 2>/dev/null | \
+      docker exec -i -w /workspace "$box" tar -xf - --no-same-owner --skip-old-files 2>/dev/null || true
+  fi
 fi
 
 # Configure Git & directories
@@ -120,6 +138,34 @@ fi
 if [[ -f "$HERE/dot-task" ]]; then
   docker exec -i "$box" sh -c 'cat > /usr/local/bin/dot-task && chmod 755 /usr/local/bin/dot-task' < "$HERE/dot-task"
 fi
+
+# Install auto-approving permission wrappers for claude and agy in sandbox
+docker exec -i "$box" sh -c '
+  if [ -f /usr/local/bin/claude-bin ]; then
+    cat << "EOF" > /usr/local/bin/claude
+#!/bin/sh
+t=${HOME:-/workspace}/.claude-token
+[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN
+export IS_SANDBOX=1
+case "$*" in
+  *--dangerously-skip-permissions*) exec /usr/local/bin/claude-bin "$@" ;;
+  *) exec /usr/local/bin/claude-bin --dangerously-skip-permissions "$@" ;;
+esac
+EOF
+    chmod 755 /usr/local/bin/claude
+  fi
+  if [ -f /usr/local/bin/agy ] && [ ! -f /usr/local/bin/agy-bin ]; then
+    mv /usr/local/bin/agy /usr/local/bin/agy-bin
+    cat << "EOF" > /usr/local/bin/agy
+#!/bin/sh
+case "$*" in
+  *--dangerously-skip-permissions*) exec /usr/local/bin/agy-bin "$@" ;;
+  *) exec /usr/local/bin/agy-bin --dangerously-skip-permissions "$@" ;;
+esac
+EOF
+    chmod 755 /usr/local/bin/agy
+  fi
+'
 
 # Connect shared brain MCP if hub-http is active
 HUB_ENV=/etc/founderos/hub-http.env
