@@ -60,6 +60,7 @@ function shift(role: string, ...extra: string[]): { out: string; status: number 
       TEAM_REPOS_FILE: join(dir, "repos"),
       TEAM_BRIEFS: BRIEFS,
       TEAM_WORK: join(dir, "work"),
+      TEAM_LOCAL_RULES: join(dir, "rules"),
       HOME: join(dir, "home"),
     },
   });
@@ -152,6 +153,32 @@ describe("team-shift: claiming work", () => {
     expect(claudeArgs()[2]).toContain(`Work directory: ${workDir()}`);
   });
 
+  // Founder rule: the Oplify instructions stay local. They reach a clone as git-excluded files, never as a commit.
+  it("puts the owner's local rules in the clone as git-excluded files, and leaves a file the repo already has alone", () => {
+    world([issue(4, ["agent:plan"])]);
+    spawnSync("mkdir", ["-p", join(dir, "rules"), join(workDir(), ".git", "info")]);
+    writeFileSync(join(dir, "rules", "owner.md"), "LOCAL RULES\n");
+    writeFileSync(join(workDir(), "AGENTS.md"), "the repo's own file\n");
+    shift("architect");
+    expect(readFileSync(join(workDir(), "CLAUDE.local.md"), "utf8")).toBe("LOCAL RULES\n");
+    expect(readFileSync(join(workDir(), "GEMINI.md"), "utf8")).toBe("LOCAL RULES\n");
+    expect(readFileSync(join(workDir(), "AGENTS.md"), "utf8")).toBe("the repo's own file\n");
+    expect(readFileSync(join(workDir(), ".git", "info", "exclude"), "utf8")).toBe("CLAUDE.local.md\nGEMINI.md\n");
+    // A second shift refreshes its own copies and does not repeat the exclude lines.
+    writeFileSync(join(dir, "rules", "owner.md"), "NEWER RULES\n");
+    rmSync(join(runs, "shift-architect.job"));
+    world([issue(4, ["agent:plan"])]);
+    shift("architect");
+    expect(readFileSync(join(workDir(), "GEMINI.md"), "utf8")).toBe("NEWER RULES\n");
+    expect(readFileSync(join(workDir(), ".git", "info", "exclude"), "utf8")).toBe("CLAUDE.local.md\nGEMINI.md\n");
+  });
+
+  it("writes no rules file into a clone whose owner has no local rules", () => {
+    world([issue(4, ["agent:plan"])]);
+    shift("architect");
+    expect(existsSync(join(workDir(), "CLAUDE.local.md"))).toBe(false);
+  });
+
   it("blocks the item and starts no claude when the repo cannot be fetched", () => {
     world([issue(4, ["agent:plan"])]);
     writeFileSync(join(fake, "fetch-fails"), "");
@@ -214,6 +241,18 @@ describe("team-shift: claude permissions", () => {
     for (const [role, start] of [["architect", issue(2, ["agent:plan"])], ["reviewer", pr(2, ["agent:review"])]] as const) {
       const allowed = permissions(role, start).allowed;
       for (const w of writes) expect(allowed).not.toContain(w);
+    }
+  });
+
+  it("every role may search the shared brain, and none may write to it (issue and PR text is untrusted)", () => {
+    for (const [role, start] of [
+      ["architect", issue(3, ["agent:plan"])],
+      ["builder", issue(3, ["agent:build"])],
+      ["reviewer", pr(3, ["agent:review"])],
+    ] as const) {
+      rmSync(join(runs, `shift-${role}.job`), { force: true });
+      const brain = permissions(role, start).allowed.filter((t) => t.startsWith("mcp__"));
+      expect(brain.sort()).toEqual(["mcp__turicks-brain__get_memory", "mcp__turicks-brain__search_memory"]);
     }
   });
 });
