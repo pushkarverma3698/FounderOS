@@ -16,6 +16,16 @@
 # Follow-up issues (team.md FOLLOW-UPS): every role may file an agent:plan issue for a problem outside its item,
 # marked "found while working on #N". At most FOLLOW_MAX per item, and none from an item that is itself a
 # follow-up; the run is told its limit, and collecting the run closes the issues past it.
+# Stacked PRs (architect.md, builder.md, reviewer.md): an issue whose body says "Builds on: #N" waits in agent:build until #N has an open PR
+# that is not blocked or sent back, then the Builder starts on that PR's branch and opens its PR onto it. Nobody
+# merges: a PASS on a stacked PR prints the merge order for the founder. A blocked issue with that line goes back to
+# the build queue once, when #N is ready.
+# Continued runs (README): a run stopped at the time cap, or ended without handing the item over, is started again
+# in the same directory on the same branch, at most TEAM_CONTINUE_MAX times per item, before the item blocks.
+# Epic branch (README "Epic branch"): a big task is split into parts, each an issue "Part of #P" with P labelled
+# agent:epic. The Builder branches each part off feat/epic-P (created from the base on the first start), the parts
+# are reviewed alone, and this script (never a model) merges an approved part's PR into feat/epic-P. When every part
+# is closed it opens one final draft PR from feat/epic-P to the base, for an integration review and then the founder.
 set -euo pipefail
 usage() { sed -n '4,5p' "$0" >&2; exit 2; }
 role=${1:-}
@@ -42,6 +52,8 @@ BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
 WORK=${TEAM_WORK:-/workspace/repos}
 LOCAL_RULES=${TEAM_LOCAL_RULES:-/workspace/local-rules}
 LIMIT_MIN=${TEAM_RUN_LIMIT_MIN:-90}
+CONTINUE_MAX=${TEAM_CONTINUE_MAX:-2}
+[[ $CONTINUE_MAX =~ ^[0-9]+$ ]] || CONTINUE_MAX=2
 FOLLOW_MAX=2
 mkdir -p "$RUNS"
 
@@ -60,7 +72,7 @@ READ_TOOLS=(Read Glob Grep "Bash(ls:*)" "Bash(cat:*)" "Bash(head:*)" "Bash(tail:
   "Bash(gh issue create:*)" "Bash(gh issue comment:*)" "Bash(gh issue edit:*)" "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh pr diff:*)"
   "Bash(gh pr checks:*)" "Bash(gh pr comment:*)" "Bash(gh pr edit:*)" "Bash(gh pr checkout:*)"
   mcp__turicks-brain__search_memory mcp__turicks-brain__get_memory) # brain reads only (home/CLAUDE.md)
-CHECK_TOOLS=("Bash(npm:*)" "Bash(npx:*)" "Bash(pnpm:*)" "Bash(node:*)" "Bash(python3:*)" "Bash(pytest:*)" "Bash(make:*)")
+CHECK_TOOLS=("Bash(npm:*)" "Bash(npx:*)" "Bash(pnpm:*)" "Bash(node:*)" "Bash(python3:*)" "Bash(pytest:*)" "Bash(make:*)" "Bash(team-services:*)" "Bash(ffmpeg:*)" "Bash(ffprobe:*)" "Bash(exiftool:*)" "Bash(sqlite3:*)" "Bash(convert:*)" "Bash(pdftotext:*)" "Bash(psql:*)" "Bash(redis-cli:*)")
 denied=("Bash(gh pr merge:*)" "Bash(gh api:*)" "Bash(gh auth:*)" "Bash(git push --force:*)" "Bash(git push -f:*)"
   "Bash(git rebase:*)" "Bash(git reset --hard:*)" "Bash(git push origin main:*)" "Bash(git push origin beta:*)")
 case "$role" in
@@ -84,7 +96,7 @@ block() { # kind repo n
   done < <(labels "$1" "$2" "$3")
   gh "$1" edit "$3" -R "$2" ${args[@]+"${args[@]}"} --add-label agent:blocked >/dev/null
   printf '%s\n' "$body" | comment "$1" "$2" "$3"
-  rm -f "$job"
+  rm -f "$job" "$(cont_file "$1" "$2" "$3")"
   echo "Blocked: $2 $1 #$3. $(printf '%s\n' "$body" | head -n1)"
   { echo "Blocked: $2 $1 #$3. $(printf '%s\n' "$body" | head -n1)"
     printf '%s\n' "$body" | tail -n +2 | grep -vE '^(```|[[:space:]]*)$' | tail -n 5 || true; } | remember
@@ -124,7 +136,102 @@ follow_ups() { # kind repo n cap
   [[ -n $kept$closed ]] || return 0
   echo "${kept:+Follow-up issues for $1 #$3:$kept. }${closed:+Closed over the limit of $4:$closed.}" | sed 's/ $//'
 }
+BUILDS_RE='^[[:space:]>*-]*builds on:?\**[[:space:]]*#[0-9]+'
+builds_on() { grep -oiE "$BUILDS_RE" | head -n1 | grep -oE '[0-9]+$' || true; } # body on stdin -> N or nothing
+# Can an issue that builds on #N start? Prints "ready -" (N is merged, closed or unknown: the normal base),
+# "ready <branch> <pr>" (N's code is in that open PR: stack on its branch) or "wait <why>". A lookup GitHub refuses
+# fails the shift: the next one asks again, and the issue is never started on a guess.
+dep_state() { # repo N
+  local out is state lbls prs p pstate head plbls its="its "
+  if ! out=$(gh api "repos/$1/issues/$2" --jq '"\(if .pull_request then "pr" else "issue" end) \(.state) \([.labels[].name] | join(","))"' 2>&1); then
+    if grep -q 'HTTP 404' <<<"$out"; then echo "ready -"; return; fi
+    printf '%s\n' "$out" >&2; return 1
+  fi
+  read -r is state lbls <<<"$out"
+  if [[ $is == pr ]]; then
+    its="" p=$2
+    read -r pstate head plbls < <(gh pr view "$2" -R "$1" --json state,headRefName,labels \
+      --jq '"\(.state) \(.headRefName) \([.labels[].name] | join(","))"')
+  else
+    if [[ $state == closed ]]; then echo "ready -"; return; fi
+    # The PR that closes #N: an open one first, else a merged one (GitHub leaves the issue open when the PR merged
+    # into a branch that is not the default one).
+    prs=$(gh pr list -R "$1" --state all --limit 200 --json number,state,headRefName,body,labels --jq \
+      "[.[] | select(.state != \"CLOSED\" and ((.body // \"\") | test(\"(closes|fixes|resolves):? #$2([^0-9]|\$)\"; \"i\")))]
+        | sort_by(if .state == \"OPEN\" then 0 else 1 end, -.number) | .[0] // empty
+        | \"\(.number) \(.state) \(.headRefName) \([.labels[].name] | join(\",\"))\"")
+    if [[ -z $prs ]]; then
+      if [[ ,$lbls, == *,agent:blocked,* ]]; then echo "wait it is blocked"; else echo "wait no PR yet"; fi
+      return
+    fi
+    read -r p pstate head plbls <<<"$prs"
+  fi
+  case "$pstate" in
+    MERGED) echo "ready -" ;;
+    CLOSED) echo "wait that PR was closed without merging" ;;
+    *) if [[ -n $its && ,$lbls, == *,agent:blocked,* ]]; then echo "wait it is blocked" # an early draft PR is not finished work
+      elif [[ -n $its && ,$lbls, == *,agent:building,* || -n $its && ,$lbls, == *,agent:build,* ]]; then echo "wait its PR #$p is not finished yet"
+      elif [[ ,$plbls, == *,agent:blocked,* ]]; then echo "wait ${its}PR #$p is blocked"
+      elif [[ ,$plbls, == *,agent:changes,* || ,$plbls, == *,agent:building,* ]]; then echo "wait ${its}PR #$p is being changed after review"
+      else echo "ready $head $p"; fi ;;
+  esac
+}
+# The stack this PR is in, as the order the founder merges it: the PR onto the normal base first. Nothing when the PR
+# is not stacked, or sits on an epic branch (team-shift merges those parts itself). Only PRs of the team (an agent:* label) count, so a beta -> main promotion PR is never a stack.
+stack_line() { # repo n
+  gh pr list -R "$1" --state open --limit 100 --json number,headRefName,baseRefName,labels --jq "
+    def root(\$all; \$c; \$d): ([\$all[] | select(.headRefName == \$c.baseRefName)][0]) as \$p
+      | if \$p and \$d < 20 then root(\$all; \$p; \$d + 1) else \$c end;
+    def chain(\$all; \$c; \$d): [\$c] + (([\$all[] | select(.baseRefName == \$c.headRefName)] | sort_by(.number)[0]) as \$k
+      | if \$k and \$d < 20 then chain(\$all; \$k; \$d + 1) else [] end);
+    def ok: [.labels[].name] | index(\"agent:approved\");
+    [.[] | select(any(.labels[].name; startswith(\"agent:\")))] as \$all
+    | ([\$all[] | select(.number == $2)][0]) as \$me
+    | (if \$me then root(\$all; \$me; 0) else null end) as \$top
+    | (if \$top and (\$top.baseRefName | test(\"$EPIC_RE\") | not) then chain(\$all; \$top; 0) else [] end)
+    | if length < 2 then empty else
+        \"Merge order, first to last: \" + (map(\"#\(.number) (\(if ok then \"approved\" else \"not approved yet\" end))\") | join(\", \"))
+        + (if all(.[]; ok) then \". All approved: say merge for each, in this order.\" else \". A PR merges only after the one before it.\" end)
+      end"
+}
 last_output() { echo '```'; run-bg tail "$1" 30; echo '```'; }
+# Continued runs: how often this role has restarted a stopped run on this item. The count lives beside the job file
+# (block deletes the job), is cleared when the item is Done or blocked, and is capped by TEAM_CONTINUE_MAX.
+cont_count() { # kind repo n: the number so far, 0 when none
+  local c="" f
+  f=$(cont_file "$1" "$2" "$3")
+  [[ ! -f $f ]] || read -r c < "$f" || true
+  c=${c//[!0-9]/}
+  echo "${c:-0}"
+}
+cont_file() { # kind repo n
+  local r
+  r=$(echo "$2" | tr / _)
+  echo "$RUNS/continued-$role-$r-$1-$3"
+}
+# A plain check without side effects, so the if around it does not switch errexit off for the restart itself.
+can_continue() { # kind repo n
+  (($(cont_count "$1" "$2" "$3") < CONTINUE_MAX))
+}
+# For a block text: "; it had already been continued 2 times", or nothing when the run never was.
+continued_note() { # kind repo n
+  local c
+  c=$(cont_count "$1" "$2" "$3")
+  if ((c)); then printf '%s%s' "; it had already been continued $c time" "$([[ $c == 1 ]] || echo s)"; fi
+}
+# Start the stopped run again in the same directory on the same branch (start keeps the working tree).
+continue_run() { # kind repo n engine cap-or-exit0
+  local i why at
+  i=$(($(cont_count "$1" "$2" "$3") + 1))
+  if [[ $5 == cap ]]; then
+    why="was stopped at the $LIMIT_MIN-minute limit" at="at the $LIMIT_MIN-minute limit"
+  else
+    why="ended without handing the item over" at="it ended without handing the item over"
+  fi
+  echo "$i" > "$(cont_file "$1" "$2" "$3")"
+  rm -f "$job"
+  start "$1" "$2" "$3" "" "$4" "the last run $why; continuing ($i of $CONTINUE_MAX)" "$i|$at"
+}
 # LIMIT_RE, AGY_DIR and agy_settings (the role allowlist as agy rules) are shared with chief-run.
 . "$(dirname "$0")/team-lib.sh"
 
@@ -135,8 +242,120 @@ ensure_labels() { # repo: create the team labels once per repo
   touch "$marker"
 }
 
+# The epic an issue is a part of: P when its body says "Part of #P" and issue P carries agent:epic (or agent:planning:
+# the Architect opens the parts before it swaps the parent's label). Prints nothing for any other issue. A lookup
+# GitHub refuses fails the shift: the part is never started on a guess.
+epic_of() { # repo n body
+  local p out
+  p=$(part_of <<<"$3")
+  [[ -n $p ]] || return 0
+  if ! out=$(gh issue view "$p" -R "$1" --json labels --jq '[.labels[].name] | join(",")' 2>&1); then
+    if grep -q 'Could not resolve' <<<"$out"; then return 0; fi
+    printf '%s\n' "team-shift: could not look up #$p, which $1 issue #$2 is a part of: $(head -n1 <<<"$out")" >&2
+    return 1
+  fi
+  if [[ ,$out, == *,agent:epic,* || ,$out, == *,agent:planning,* ]]; then echo "$p"; fi
+}
+
+# An approved part of an epic (PR n, base = the epic branch): merge it into the epic branch, move the PRs stacked on
+# it, close its issue, and open the final PR when it was the last part. Called bare, so set -e stops the shift at the
+# first GitHub error. Every step can be repeated: agent:approved comes off last, and the scan lists approved PRs that
+# are already merged, so the next shift finishes what this one did not.
+merge_part() { # repo n epic-branch
+  local repo=$1 n=$2 epic=$3 p j state hbranch url body why i st k m o plist cnt final="" ptitle fbase parts out err="" tries
+  p=${epic#feat/epic-}
+  ensure_labels "$repo"
+  j=$(gh pr view "$n" -R "$repo" --json state,headRefName,baseRefName,url,body,comments)
+  # gh pr merge merges into the PR's base as it is NOW, and the scan is seconds old: this script merges into an
+  # epic branch and nowhere else, so a PR retargeted since then is left exactly as it is.
+  if [[ $(jq -r .baseRefName <<<"$j") != "$epic" ]]; then echo "No work"; return; fi
+  state=$(jq -r .state <<<"$j") hbranch=$(jq -r .headRefName <<<"$j") url=$(jq -r .url <<<"$j") body=$(jq -r '.body // ""' <<<"$j")
+  if [[ $state == CLOSED ]]; then
+    gh pr edit "$n" -R "$repo" --remove-label agent:approved >/dev/null
+    out=$(printf 'Done: %s pr #%s.\nRESULT: closed without merging, so nothing was merged into %s' "$repo" "$n" "$epic")
+    printf '%s\n' "$out"; printf '%s\n' "$out" | remember
+    return
+  fi
+  if [[ $state == OPEN ]]; then
+    # A draft cannot be merged, and the Reviewer's PASS may have left it one. Failing here is not fatal: the merge speaks.
+    gh pr ready "$n" -R "$repo" >/dev/null 2>&1 || true
+    err=$(gh pr merge "$n" -R "$repo" --merge 2>&1) || true
+    state=$(gh pr view "$n" -R "$repo" --json state --jq .state)
+    if [[ $state != MERGED ]]; then
+      why=$(head -n1 <<<"${err:-the PR is $state}")
+      # A merge that never works (merge commits forbidden, protected branch, a required check) would loop Builder ->
+      # Reviewer -> merge for ever, outside the review-round limit: the second failure is the founder's.
+      tries=$(jq '[.comments[].body | select(startswith("team-shift: could not merge this approved part"))] | length' <<<"$j")
+      if ((tries > 0)); then
+        printf '%s\n' "$Role: could not merge this approved part into $epic twice ($why). The founder decides: the repo may forbid merge commits or protect the branch." |
+          block pr "$repo" "$n"
+        return
+      fi
+      printf '%s\n' "team-shift: could not merge this approved part into $epic ($why). Builder: merge origin/$epic into this branch, fix the conflicts, rerun the checks, push." |
+        comment pr "$repo" "$n"
+      gh pr edit "$n" -R "$repo" --remove-label agent:approved --add-label agent:changes >/dev/null
+      out=$(printf 'Done: %s pr #%s.\nRESULT: could not merge into %s (%s): sent back to the Builder with agent:changes' "$repo" "$n" "$epic" "$why")
+      printf '%s\n' "$out"; printf '%s\n' "$out" | remember
+      return
+    fi
+  fi
+  # PRs stacked on this one go onto the epic branch (GitHub does that only when the branch is deleted, and it is kept).
+  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName,labels)
+  for i in $(jq -r --arg h "$hbranch" '.[] | select(.state == "OPEN" and .baseRefName == $h) | .number' <<<"$plist"); do
+    gh pr edit "$i" -R "$repo" --base "$epic" >/dev/null
+  done
+  # The issues this part closes (GitHub closes them only for a PR merged into the default branch).
+  for i in $(grep -oiE '(closes|fixes|resolves):? #[0-9]+' <<<"$body" | grep -oE '[0-9]+$' | sort -un || true); do
+    [[ $i != "$p" ]] || continue
+    if ! st=$(gh issue view "$i" -R "$repo" --json state --jq .state 2>&1); then
+      if grep -q 'Could not resolve' <<<"$st"; then continue; fi
+      printf '%s\n' "$st" >&2; return 1
+    fi
+    [[ $st == OPEN ]] || continue
+    gh issue close "$i" -R "$repo" --comment "Merged in $url into $epic." >/dev/null
+  done
+  plist=$(gh pr list -R "$repo" --state all --limit 200 --json number,state,title,headRefName,baseRefName,labels)
+  cnt=$(gh issue list -R "$repo" --state all --limit 200 --json number,state,body --jq \
+    "[.[] | select((.body // \"\") | test(\"part of:? #$p([^0-9]|\$)\"; \"i\"))] | \"\(length) \([.[] | select(.state == \"OPEN\")] | length)\"")
+  read -r m o <<<"$cnt"
+  k=$(jq --arg e "$epic" '[.[] | select(.state == "MERGED" and .baseRefName == $e)] | length' <<<"$plist")
+  if ((k > m)); then m=$k; fi
+  # A final PR made by an earlier shift whose label call then failed has no agent:* label, so nobody would review it.
+  i=$(jq -r --arg e "$epic" '[.[] | select(.state == "OPEN" and .headRefName == $e and (any(.labels[].name; startswith("agent:")) | not))] | first | .number // empty' <<<"$plist")
+  if [[ -n $i ]]; then
+    gh pr edit "$i" -R "$repo" --add-label agent:review >/dev/null
+    final=$i
+  fi
+  # The final PR: every part is closed, nothing is open onto the epic branch, and the branch has no PR of its own yet.
+  if ((m > 0 && o == 0)) && [[ $(jq --arg e "$epic" '[.[] | select((.state == "OPEN" and .baseRefName == $e) or (.state != "CLOSED" and .headRefName == $e))] | length' <<<"$plist") == 0 ]]; then
+    ptitle=$(gh issue view "$p" -R "$repo" --json title --jq .title)
+    parts=$(jq -r --arg e "$epic" '[.[] | select(.state == "MERGED" and .baseRefName == $e)] | sort_by(.number) | .[] | "- #\(.number) \(.title)"' <<<"$plist")
+    fbase=$(base_of "$repo")
+    final=$(gh pr create -R "$repo" --draft --base "$fbase" --head "$epic" --title "$ptitle" --label agent:review --body "Closes #$p
+
+Parts, each reviewed alone and merged into $epic by team-shift:
+$parts
+
+## What changed
+All $m parts of #$p, together in $epic. Each part's PR above has its own diff and verification.
+
+## How it was verified
+Every part passed its own review against $epic.
+
+## NOT VERIFIED
+integration review pending: how the parts fit together, the repo's full checks on the combined diff, and the Done-when of #$p.")
+    final=${final##*/}
+    [[ $final =~ ^[0-9]+$ ]] || { echo "team-shift: gh pr create did not print a PR url for $epic" >&2; return 1; }
+  fi
+  gh pr edit "$n" -R "$repo" --remove-label agent:approved >/dev/null
+  out=$(printf 'Done: %s pr #%s.\nRESULT: merged into %s (%s of %s parts)%s' "$repo" "$n" "$epic" "$k" "$m" "${final:+; final PR #$final is in review}")
+  printf '%s\n' "$out"; printf '%s\n' "$out" | remember
+}
+
 start() { # kind repo n queue-label ("" = already claimed) [engine] [why another engine took over]
   local kind=$1 repo=$2 n=$3 queue=$4 engine=${5:-claude} why=${6:-} base name prompt rounds dir err run cmds t cap follow
+  local dep="" verdict dbranch="-" dpr="" stack="" pbase phead="" pinfo ibody epic=""
+  local cinfo=${7:-} cont="" cbranch="" # cinfo "i|reason": a continued run (continue_run) keeps its branch and tree
   if [[ $role == reviewer ]]; then
     rounds=$(gh pr view "$n" -R "$repo" --json comments \
       --jq '[.comments[].body | select(startswith("Reviewer verdict: CHANGES"))] | length')
@@ -145,6 +364,21 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
         block "$kind" "$repo" "$n"
       return
     fi
+  fi
+  # A Builder issue that builds on another item starts on that item's open PR, or goes back to wait for one.
+  if [[ $role == builder && $kind == issue && -z $task ]]; then
+    ibody=$(gh issue view "$n" -R "$repo" --json body --jq .body)
+    dep=$(builds_on <<<"$ibody")
+    if [[ -n $dep ]]; then
+      read -r verdict dbranch dpr < <(dep_state "$repo" "$dep") || true
+      [[ -n ${verdict:-} ]] || { echo "team-shift: could not look up #$dep, which $repo issue #$n builds on" >&2; return 1; }
+      if [[ $verdict == wait ]]; then
+        gh issue edit "$n" -R "$repo" --remove-label "${queue:-$claim}" --add-label agent:build >/dev/null
+        echo "Waiting: $repo issue #$n builds on #$dep ($dbranch${dpr:+ $dpr}). It is back in the build queue."
+        return
+      fi
+    fi
+    epic=$(epic_of "$repo" "$n" "$ibody") || return 1
   fi
   ensure_labels "$repo"
   if [[ -n $queue ]]; then gh "$kind" edit "$n" -R "$repo" --remove-label "$queue" --add-label "$claim" >/dev/null; fi
@@ -159,8 +393,40 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
     return
   fi
   base=$(base_of "$repo")
+  # The epic branch is made from the base by the first part's start; later parts find it.
+  if [[ -n $epic ]] && ! git -C "$dir" rev-parse -q --verify "refs/remotes/origin/feat/epic-$epic" >/dev/null 2>&1 &&
+    ! err=$(git -C "$dir" push origin "origin/$base:refs/heads/feat/epic-$epic" 2>&1 && git -C "$dir" fetch -q origin 2>&1); then
+    printf '%s\n' "$Role: could not create feat/epic-$epic from origin/$base, so claude was not started:" '```' "$err" '```' |
+      block "$kind" "$repo" "$n"
+    return
+  fi
+  if [[ $kind == pr ]]; then
+    # A PR is worked on and reviewed against its own base. A base that is another open PR's branch is a stack.
+    pinfo=$(gh pr view "$n" -R "$repo" --json baseRefName,headRefName --jq '"\(.baseRefName) \(.headRefName)"')
+    read -r pbase phead <<<"$pinfo"
+    if [[ -n $pbase && $pbase != "$base" ]]; then
+      base=$pbase
+      if [[ -n $(gh pr list -R "$repo" --state open --limit 100 --json number,headRefName,state \
+        --jq "[.[] | select(.headRefName == \"$base\" and .state == \"OPEN\")][0].number // empty") ]]; then
+        stack="Stacked PR: its base $base is the branch of another open PR, not merged yet. This PR is only its own diff against origin/$base; the code under it belongs to the other PR."
+      fi
+    fi
+    if [[ $role == reviewer && $phead =~ $EPIC_RE ]]; then
+      stack="Integration review: this is the final PR of epic #${phead#feat/epic-}, and every part was already reviewed alone. Review how the parts fit together: the full diff against origin/$base (gh pr diff $n), the repo's full checks, the wiring between the parts, and the Done-when of the parent issue. If the PR body does not meet the repo's PR rules, fix it with gh pr edit."
+    fi
+  elif [[ $dbranch != - ]]; then
+    base=$dbranch
+    stack="Stacked: this issue builds on #$dep, whose code is in open PR #$dpr (branch $base), not merged yet. Branch off origin/$base and open your PR onto it: gh pr create --draft --base $base."
+    if [[ -n $epic ]]; then stack+=" This issue is also part of epic #$epic: team-shift moves your PR onto feat/epic-$epic once the PR under it is merged."; fi
+  elif [[ -n $epic ]]; then
+    base=feat/epic-$epic
+    stack="This issue is part of epic #$epic. Branch off origin/$base and open your PR onto it: gh pr create --draft --base $base (never push to $base itself: team-shift merges your PR into it once the Reviewer approves)."
+  fi
+  # A continued run keeps its branch and working tree (the fetch above is all it needs); with no named branch there is nothing to keep.
+  if [[ -n $cinfo ]]; then cbranch=$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null || true); fi
   # Each run starts clean at the base: an earlier run's leftovers (it may not rm) made agy's first rm end its run.
-  if ! err=$(git -C "$dir" reset -q --hard 2>&1 && git -C "$dir" clean -fdq 2>&1 &&
+  if [[ -n $cbranch ]]; then :
+  elif ! err=$(git -C "$dir" reset -q --hard 2>&1 && git -C "$dir" clean -fdq 2>&1 &&
     git -C "$dir" checkout -q --detach "origin/$base" 2>&1); then
     printf '%s\n' "$Role: could not check out origin/$base in $dir, so $engine was not started:" '```' "$err" '```' |
       block "$kind" "$repo" "$n"
@@ -179,6 +445,12 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
       cp "$LOCAL_RULES/${repo%%/*}.md" "$dir/$f"
     done
   fi
+  if [[ -n $cinfo ]]; then
+    cont="CONTINUING (${cinfo%%|*} of $CONTINUE_MAX): an earlier run on this item was stopped (${cinfo#*|}). "
+    if [[ -n $cbranch ]]; then cont+="Its work is in this directory on branch $cbranch (git status, git log origin/$base..HEAD) and in the open PR if there is one."
+    else cont+="It left no branch in this directory, so this is a clean checkout of origin/$base; look for its open PR (gh pr list)."; fi
+    cont+=" Do not start over: read what is there and its checklist, finish what is left, hand over. If it still cannot be finished in this run: push what you have, write what is left as a checklist in the PR body, and block with the exact remaining steps."
+  fi
   cap=$(follow_cap "$kind" "$repo" "$n")
   if ((cap)); then follow="at most $cap for this item, earlier runs included; write \"found while working on #$n\" in each body."
   else follow="none. This item is itself a follow-up: report a new finding in your comment and in WHAT'S LEFT only."; fi
@@ -191,7 +463,9 @@ THIS SHIFT
 Repository: $repo. Item: $kind #$n (claimed for you: label $claim). Base branch: $base.
 Work directory: $dir (you start in it; already cloned and fetched). Run git and gh here, without cd or git -C.
 Shell commands you may run: ${cmds%, }; anything else is refused, and under agy it ends your whole run.
-Follow-up issues (FOLLOW-UPS above): $follow${task:+
+${stack:+$stack
+}${cont:+$cont
+}Follow-up issues (FOLLOW-UPS above): $follow${task:+
 The founder gave this task in chat, so there is no Architect plan: the issue body is the plan.}
 Finish by moving the labels as your role says, then end with the four ENDING lines."
   if [[ $engine == agy ]]; then
@@ -204,7 +478,9 @@ Finish by moving the labels as your role says, then end with the four ENDING lin
   fi
   run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" "${run[@]}" >/dev/null
   printf '%s %s %s %s %s %s %s\n' "$repo" "$kind" "$n" "$name" "$(date +%s)" "$engine" "$cap" > "$job"
-  if [[ -n $why ]]; then
+  if [[ -n $cinfo ]]; then
+    echo "$Role: $why. Started $engine on this $kind (run $name). The result is posted here when it finishes."
+  elif [[ -n $why ]]; then
     echo "$Role: $why, so $engine took over this $kind (run $name). The result is posted here when it finishes."
   else
     echo "$Role: started $engine on this $kind (run $name). The result is posted here when it finishes."
@@ -277,19 +553,29 @@ if [[ -f $job ]]; then
   age=$((($(date +%s) - started) / 60))
   if [[ $state == running ]] && ((age < LIMIT_MIN)); then echo "Working: $repo $kind #$n, $engine run $name, $age min."; exit 0; fi
   if [[ -n $check ]]; then echo "Due: $repo $kind #$n, run $name is $state."; exit 0; fi
-  follow=""
+  follow="" order=""
   # A count GitHub refuses fails the shift with the job kept: the next shift counts again (no silent skip).
   if [[ $state != unknown ]]; then follow=$(follow_ups "$kind" "$repo" "$n" "${cap:-$FOLLOW_MAX}"); fi
   case "$state" in
     running) # over the limit
       tmux kill-session -t "run-$name" 2>/dev/null || true
-      { echo "$Role: $engine ran over $LIMIT_MIN min and was stopped. Last output:"; last_output "$name"; } |
-        block "$kind" "$repo" "$n" ;;
+      if can_continue "$kind" "$repo" "$n"; then continue_run "$kind" "$repo" "$n" "$engine" cap
+      else
+        { echo "$Role: $engine ran over $LIMIT_MIN min and was stopped$(continued_note "$kind" "$repo" "$n"). Last output:"; last_output "$name"; } |
+          block "$kind" "$repo" "$n"
+      fi ;;
     unknown) # the computer restarted and the run is gone: start it again
       rm -f "$job"; start "$kind" "$repo" "$n" "" "$engine" ;;
     *) # finished: a run that handed the item over is done, whatever its exit code
-      if ! labels "$kind" "$repo" "$n" | grep -qx "$claim"; then
-        rm -f "$job"
+      now=$(labels "$kind" "$repo" "$n")
+      # Back in the build queue with nothing to wait for would be handed out again every minute.
+      if [[ $role == builder && $kind == issue ]] && grep -qx agent:build <<<"$now" &&
+        [[ -z $(gh issue view "$n" -R "$repo" --json body --jq .body | builds_on) ]]; then
+        echo "Builder: put this issue back in the build queue without a \"Builds on: #N\" line, so there is nothing it waits for. The founder decides: name what it builds on, or re-label it agent:build to try again." |
+          block "$kind" "$repo" "$n"
+      elif ! grep -qx "$claim" <<<"$now"; then
+        if [[ $role == reviewer ]]; then order=$(stack_line "$repo" "$n"); fi
+        rm -f "$job" "$(cont_file "$kind" "$repo" "$n")"
         log=$(run-bg tail "$name" 400 | tr -d '\r')
         # The run's last WHAT I DID ... RESULT block (team.md ENDING), else its last RESULT line.
         ending=$(awk '/^WHAT I DID:/ { buf = ""; on = 1 } on { buf = buf $0 "\n" } /^RESULT:/ && on { last = buf; on = 0 }
@@ -299,7 +585,7 @@ if [[ -f $job ]]; then
           result=$(grep '^RESULT:' <<<"$log" | tail -n1 || true)
           done="Done: $repo $kind #$n. ${result:-No RESULT line; see run $name.}"
         fi
-        done+=${follow:+$'\n'$follow}; follow=""
+        done+=${order:+$'\n'$order}${follow:+$'\n'$follow}; follow=""
         printf '%s\n' "$done"; printf '%s\n' "$done" | remember
       elif [[ $engine == claude ]] && run-bg tail "$name" 30 | grep -qiE "$LIMIT_RE"; then
         if [[ -s $AGY_DIR/antigravity-oauth-token ]]; then
@@ -307,8 +593,10 @@ if [[ -f $job ]]; then
         fi
         { echo "$Role: claude stopped with $state on its usage limit, and this computer has no agy login. The founder switches this Dot's login or waits for the reset. Last output:"
           last_output "$name"; } | block "$kind" "$repo" "$n"
+      elif [[ $state == exit=0 ]] && can_continue "$kind" "$repo" "$n"; then
+        continue_run "$kind" "$repo" "$n" "$engine" exit0
       elif [[ $state == exit=0 ]]; then
-        { echo "$Role: $engine finished but did not hand the item over (label $claim is still set). Last output:"
+        { echo "$Role: $engine finished but did not hand the item over (label $claim is still set)$(continued_note "$kind" "$repo" "$n"). Last output:"
           last_output "$name"; } | block "$kind" "$repo" "$n"
       else
         { echo "$Role: $engine stopped with $state. Last output:"; last_output "$name"; } | block "$kind" "$repo" "$n"
@@ -326,24 +614,70 @@ while read -r repo; do [[ -z $repo || $repo == \#* ]] || repos+=("$repo"); done 
 ((${#repos[@]})) || { echo "No work"; exit 0; }
 slots=() # "kind label"
 for q in "${queues[@]}"; do slots+=("${q%%:*} $claim"); done
+# The Reviewer's code-only slot, before its review queue: approved PRs onto an epic branch, which this script merges.
+if [[ $role == reviewer ]]; then slots+=("pr agent:approved"); fi
 for q in "${queues[@]}"; do slots+=("${q%%:*} ${q#*:}"); done
+# The Builder's last slot: blocked issues that build on something, to put back in the queue once that is ready.
+if [[ $role == builder ]]; then slots+=("issue agent:blocked"); fi
 query="query {"
 for i in "${!repos[@]}"; do
   query+=$'\n'"$(printf 'r%03d' "$i"): repository(owner:\"${repos[i]%%/*}\", name:\"${repos[i]#*/}\") {"
   for j in "${!slots[@]}"; do
     read -r kind label <<<"${slots[j]}"
     if [[ $kind == pr ]]; then field=pullRequests; else field=issues; fi
-    query+=$'\n'"s$j: $field(labels:[\"$label\"], states:OPEN, first:1, orderBy:{field:CREATED_AT, direction:ASC}) { nodes { number } }"
+    # Queued and blocked Builder issues come 20 at a time with their body: one that waits is passed over.
+    first=1 nodes="number" states=OPEN sortby=CREATED_AT dir=ASC
+    if [[ $role == builder && $label == agent:build ]]; then first=20 nodes="number body"; fi
+    if [[ $label == agent:blocked ]]; then first=20 nodes="number body comments(last:30) { nodes { body } }"; fi
+    # Approved PRs: the 30 touched last, merged ones too (a part merged into its epic keeps the label until merge_part is done).
+    if [[ $label == agent:approved ]]; then first=30 nodes="number baseRefName" states="[OPEN, MERGED]" sortby=UPDATED_AT dir=DESC; fi
+    query+=$'\n'"s$j: $field(labels:[\"$label\"], states:$states, first:$first, orderBy:{field:$sortby, direction:$dir}) { nodes { $nodes } }"
   done
   query+=$'\n'"}"
 done
 query+=$'\n'"}"
-# The aliases sort in scan order (gh's jq does not keep the query's key order): "repo-index slot number".
-hit=$(gh api graphql -f query="$query" --jq '[.data | to_entries[] | .key as $r | .value | to_entries[]
-  | select(.value.nodes[0]) | "\($r[1:]) \(.key[1:]) \(.value.nodes[0].number)"] | sort | .[0] // empty')
-[[ -n $hit ]] || { echo "No work"; exit 0; }
-read -r i j n <<<"$hit"
-repo=${repos[10#$i]}
-read -r kind label <<<"${slots[j]}"
-if [[ -n $check ]]; then echo "Due: $repo $kind #$n ($label)"; exit 0; fi
+# The aliases sort in scan order (gh's jq does not keep the query's key order):
+# "repo-index slot position number builds-on requeued-before base-branch".
+scan() {
+  gh api graphql -f query="$query" --jq '[.data | to_entries[] | .key as $r | .value | to_entries[] | .key as $s | .value.nodes | to_entries[]
+    | ([(.value.body // "") | match("(?i)(^|\n)[ \t>*-]*builds on:?\\**[ \t]*#([0-9]+)") | .captures[1].string][0] // "-") as $dep
+    | ([(.value.comments.nodes // [])[] | select(.body | startswith("team-shift: back in the build queue"))] | length > 0) as $again
+    | "\($r[1:]) \($s[1:]) \(.key + 100) \(.value.number) \($dep) \($again) \(.value.baseRefName // "-")"] | sort | .[]'
+}
+# GitHub now and then answers with an HTML error page: ask once more before the shift fails.
+if ! found=$(scan 2>/dev/null); then sleep "${TEAM_RETRY_SLEEP:-3}"; found=$(scan); fi
+hit="" waiting="" ready="" merge_into=""
+while read -r i j _ n dep again hbase; do
+  [[ -n $i ]] || continue
+  repo=${repos[10#$i]}
+  read -r kind label <<<"${slots[j]}"
+  if [[ $label == agent:approved ]]; then
+    [[ ${hbase:-} =~ $EPIC_RE ]] || continue
+    merge_into=$hbase
+  elif [[ $label == agent:blocked ]]; then
+    [[ $dep != - && $again == false ]] || continue
+    verdict=""
+    read -r verdict _ < <(dep_state "$repo" "$dep") || true
+    [[ -n ${verdict:-} ]] || { echo "team-shift: could not look up #$dep, which $repo issue #$n builds on" >&2; exit 1; }
+    [[ $verdict == ready ]] || continue
+    ready=$dep
+  elif [[ $label == agent:build && $dep != - ]]; then
+    verdict=""
+    read -r verdict why < <(dep_state "$repo" "$dep") || true
+    [[ -n ${verdict:-} ]] || { echo "team-shift: could not look up #$dep, which $repo issue #$n builds on" >&2; exit 1; }
+    if [[ $verdict == wait ]]; then waiting+="${waiting:+; }$repo issue #$n builds on #$dep ($why)"; continue; fi
+  fi
+  hit=1; break
+done <<<"$found"
+[[ -n $hit ]] || { echo "No work${waiting:+. Waiting: $waiting}"; exit 0; }
+if [[ -n $check ]]; then
+  if [[ -n $merge_into ]]; then echo "Due: $repo $kind #$n (approved part: merge into $merge_into)"
+  else echo "Due: $repo $kind #$n ($label${ready:+, #$ready it builds on is ready})"; fi
+  exit 0
+fi
+if [[ -n $merge_into ]]; then merge_part "$repo" "$n" "$merge_into"; exit 0; fi
+if [[ -n $ready ]]; then
+  echo "team-shift: back in the build queue, because #$ready, which this issue builds on, is ready now (merged, closed, or in an open PR to stack on). This happens once: blocked again, it waits for the founder." |
+    comment issue "$repo" "$n"
+fi
 if [[ $label == "$claim" ]]; then start "$kind" "$repo" "$n" ""; else start "$kind" "$repo" "$n" "$label"; fi
