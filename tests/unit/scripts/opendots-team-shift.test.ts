@@ -256,6 +256,15 @@ describe("team-shift: claude permissions", () => {
     expect(permissions("architect", issue(6, ["agent:plan"])).allowed).not.toContain("Bash(team-services:*)");
   });
 
+  it("the Builder and the Reviewer may run the engineer tools in the image; the Architect may not", () => {
+    for (const tool of ["ffmpeg", "exiftool", "sqlite3", "convert", "pdftotext", "psql", "redis-cli"]) {
+      expect(permissions("builder", issue(5, ["agent:build"])).allowed).toContain(`Bash(${tool}:*)`);
+      rmSync(join(runs, "shift-reviewer.job"), { force: true });
+      expect(permissions("reviewer", pr(5, ["agent:review"])).allowed).toContain(`Bash(${tool}:*)`);
+      expect(permissions("architect", issue(6, ["agent:plan"])).allowed).not.toContain(`Bash(${tool}:*)`);
+    }
+  });
+
   it("every role may search the shared brain, and none may write to it (issue and PR text is untrusted)", () => {
     for (const [role, start] of [
       ["architect", issue(3, ["agent:plan"])],

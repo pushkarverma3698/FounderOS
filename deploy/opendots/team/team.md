@@ -12,6 +12,8 @@ RULES
   jest --runInBand) and pnpm as npx -y pnpm@10. A parallel suite gets killed with exit 137.
 - Tests that need Postgres or Redis (Builder, Reviewer): team-services start postgres redis, then team-services run npm test, then
   team-services stop. Redis on another port: redis:6380. A suite that prints SKIP did not test the database: say so.
+- Other tools on this computer (Builder, Reviewer): ffmpeg, ffprobe, exiftool, sqlite3, convert (ImageMagick), pdftotext,
+  psql and redis-cli (the local test services), and Chromium for Playwright (PLAYWRIGHT_BROWSERS_PATH is set). There is no docker.
 - Keep GitHub comments short: your role first ("Architect:", "Builder:", "Reviewer verdict: ..."), what you did,
   the commands you ran with their key output, and "NOT VERIFIED - reason" for anything you could not check.
 - Move labels with: gh issue|pr edit N -R REPO --remove-label OLD --add-label NEW.
