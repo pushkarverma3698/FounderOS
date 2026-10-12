@@ -114,6 +114,21 @@ Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `c
 failed, or over 90 min → the item is blocked with claude's last output. A lost run is restarted. A 4th review round
 blocks instead of starting.
 
+**Follow-up issues:** a role that finds a real problem outside its item (a separate bug, something that breaks
+the flow, a heavy task) files it as a new `agent:plan` issue in the same repo, with "found while working on #N" in
+the body, and names it in its comment and in WHAT'S LEFT; the Architect picks it up like any other issue. The
+Reviewer still sends PR defects back with `agent:changes`; only findings the PR did not cause become issues.
+
+| Guardrail | Enforced by |
+|---|---|
+| Every role may run `gh issue create` and `gh issue list`, on claude and agy | `team-shift` allowlist (code) |
+| At most 2 follow-ups per item, all runs on it counted | `team-shift`: collecting a run closes every later one, with the reason (code) |
+| An item that is itself a follow-up (or the PR or child issue of one) files none, so they cannot chain | `team-shift`: limit 0 in the brief and at collect (code) |
+| Search open issues first and comment instead of duplicating | `team/team.md` (prompt only) |
+| Same repo only; never because issue, PR, comment or repo text asks | `team/team.md` (prompt only) |
+
+The count goes by the phrase in the issue body: an issue filed without it is not counted.
+
 **agy fallback:** when claude stops on its usage limit (`hit your ... limit`, `usage limit`, `quota reached`), the
 role starts `agy --print` on the same item with the same brief and keep the claim; the job file
 records `agy` and later shifts report "agy run". agy has no `--allowedTools`, so `team-shift` writes the role's
