@@ -138,10 +138,15 @@ merge() { # repo n
   if ! grep -qE "(^|[^0-9])$n([^0-9]|$)" <<<"$request"; then
     echo "✗ merged $repo#$n: refused, the founder did not name PR $n"; return
   fi
-  j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,url,closingIssuesReferences 2>&1) ||
+  j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,headRefName,url,closingIssuesReferences 2>&1) ||
     { echo "✗ merged $repo#$n: not found on GitHub ($(first "$j"))"; return; }
   before=$(jq -r .state <<<"$j")
   if [[ $before != MERGED ]]; then
+    # A part of an epic is merged by team-shift, into the epic branch, once approved. The founder merges the final PR.
+    base=$(jq -r .baseRefName <<<"$j")
+    if [[ $base =~ $EPIC_RE ]]; then
+      echo "✗ merged $repo#$n: refused, PR $n is a part of epic ${base#feat/epic-}; team-shift merges it into $base once approved. Merge the final PR instead"; return
+    fi
     if ! jq -e '[.labels[].name] | index("agent:approved")' <<<"$j" >/dev/null; then
       echo "✗ merged $repo#$n: refused, PR $n has no agent:approved (labels: $(names <<<"$j"))"; return
     fi
@@ -159,7 +164,7 @@ merge() { # repo n
         { echo "✗ merged $repo#$n: could not move it onto $base after PR $i was merged ($(first "$err"))"; return; }
     fi
     err=$(gh pr merge "$n" -R "$repo" --merge 2>&1) || true
-    j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,url,closingIssuesReferences 2>&1) ||
+    j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,headRefName,url,closingIssuesReferences 2>&1) ||
       { echo "✗ merged $repo#$n: could not re-read the PR ($(first "$j"))"; return; }
   fi
   st=$(jq -r .state <<<"$j")
@@ -171,6 +176,16 @@ merge() { # repo n
     if err=$(gh issue close "$i" -R "$repo" --comment "Merged in $url into $base." 2>&1); then echo "✓ closed $repo#$i"
     else echo "✗ closed $repo#$i: $(first "$err")"; fi
   done
+  # The final PR of an epic (its head is the epic branch) closes the epic issue, if its Closes line did not.
+  i=$(jq -r .headRefName <<<"$j")
+  if [[ $i =~ ^feat/epic-([0-9]+)$ ]]; then
+    i=${BASH_REMATCH[1]}
+    st=$(gh issue view "$i" -R "$repo" --json state --jq .state 2>/dev/null) || st=""
+    if [[ $st == OPEN ]]; then
+      if err=$(gh issue close "$i" -R "$repo" --comment "Merged in $url into $base." 2>&1); then echo "✓ closed $repo#$i"
+      else echo "✗ closed $repo#$i: $(first "$err")"; fi
+    fi
+  fi
 }
 
 check() { # one ACTION line

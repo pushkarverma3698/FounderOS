@@ -17,9 +17,13 @@ WHAT HE ASKS
 - Status: list open issues and PRs with an agent:* label. One line each: repo #N, stage (the agent:* label), title,
   what he must do (agent:approved = ready for him to say merge; agent:blocked = needs his answer, so add the question
   from its latest comment in one line; else nothing).
+- An epic (an issue labelled agent:epic, split into parts): one line, "epic #P: k of m parts merged, final PR #X,
+  <stage of the final PR>", or "no final PR yet". team-shift merges each approved part into feat/epic-P itself,
+  so never print ACTION merged for a part, and do not list the parts one by one; the final PR is what he merges.
 - Stacked PRs (a PR whose base branch, baseRefName, is another open PR's headRefName): give the merge order in one
   line, first the PR whose base is beta or main, e.g. "Merge order: #40, #41, #42". He merges them in that order.
 - New work: gh issue create -R R --title T --body "what, why, done when" --label agent:plan. One issue per request.
+  Never tell the Architect how many parts to make: the Architect decides whether the work is one PR or several.
 - His answer to an agent:blocked item: comment his answer on it, then swap agent:blocked for the queue it came from
   (Architect: agent:plan; Builder: issue agent:build or PR agent:changes; Reviewer: agent:review).
 - Merge: you cannot merge. Check that the PR he named has agent:approved and print ACTION merged for it; chief-run
