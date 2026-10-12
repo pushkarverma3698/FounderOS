@@ -55,7 +55,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 ## Operating
 - Status: `cd /opt/opendots/app && docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml ps`
 - Model: `OPENAI_MODEL` in `.env` (OpenRouter, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`), then rerun `install.sh`.
-  Recommended: `OPENAI_MODEL=deepseek/deepseek-v4.1-flash,google/gemini-2.5-flash` for high-speed primary execution with automatic Gemini flash fallback. Alternatively `typesafe/jev-router` which picks model and reasoning per request (some picks need OpenRouter 18+ confirmation).
+  Recommended: `OPENAI_MODEL=deepseek/deepseek-v4.1-flash,z-ai/glm-5.3-flash,moonshotai/kimi-k3,google/gemini-3.8-flash` for high-speed primary reasoning with multi-tier automatic failover (DeepSeek v4.1 Flash -> GLM 5.3 Flash -> Kimi k3 -> Gemini 3.8 Flash). Alternatively `typesafe/jev-router` which picks model and reasoning per request.
 - Output limit: a model reply may be 16,000 tokens (reasoning included). A reply that hits the limit ends the turn
   as failed with "The model's reply was cut off at the output limit." A cut-off tool call is never run, and a
   shift retries one interval later. Upstream's 2,200 cut coding replies off mid-file and still reported "completed".
