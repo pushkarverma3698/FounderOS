@@ -77,6 +77,14 @@ describe("shift-notify: one Telegram message per new outcome", () => {
     expect(notify().sent).toEqual([]);
   });
 
+  // Stacked PRs: team-shift adds the merge order under a PASS. The founder merges from his phone, so it must arrive.
+  it("a finished review of a stacked PR also carries the merge order", () => {
+    notify();
+    last("reviewer", `${DONE}\nMerge order, first to last: #33 (approved), #34 (approved). All approved: say merge for each, in this order.`);
+    const r = notify();
+    expect(r.sent[0]).toContain("label agent:approved.\nMerge order, first to last: #33 (approved), #34 (approved). All approved: say merge for each, in this order.");
+  });
+
   it("a blocked item carries the question and a link to the item", () => {
     notify();
     last("builder", BLOCKED);
