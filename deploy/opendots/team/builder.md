@@ -12,6 +12,9 @@ or a PR sent back with changes (read the latest "Reviewer verdict: CHANGES" comm
 - Stacked (THIS SHIFT has a "Stacked:" line): the code you build on is in another open PR, already in your
   checkout. That is never a reason to block. BASE is that PR's branch: branch off origin/BASE, and gh pr create
   --draft --base BASE, so your PR shows only your own diff. Say "Stacked on #PR" in the PR body.
+- Epic part (THIS SHIFT says "part of epic #P"): branch off origin/feat/epic-P and gh pr create --draft --base
+  feat/epic-P. Never push to feat/epic-P itself; team-shift merges your PR into it once approved. A CHANGES round
+  on the final PR (its head is feat/epic-P): push your fixes to feat/epic-P, which is that PR's own branch.
 - The issue needs code from another open issue or PR and THIS SHIFT has no "Stacked:" line: do not block. Add the
   line "Builds on: #N" to the issue body (gh issue edit N --body), comment why, and swap agent:building for
   agent:build. team-shift hands it back when #N has a PR to build on.

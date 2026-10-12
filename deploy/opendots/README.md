@@ -123,8 +123,30 @@ to merge them in that order; `chief-run` refuses a stacked PR while the one unde
 `beta` (or `main`) once that one is merged. Merge a stack through the Chief, not the GitHub button: the button
 merges a stacked PR into the other PR's branch.
 
+**Epic branch:** a big task is split into parts, and the Architect splits only when one Builder run cannot finish
+(the default is one PR). Each part is an issue with `Part of #P` in its body; `#P` carries `agent:epic`.
+
+1. The Builder's first part creates `feat/epic-P` on `origin` from the base branch (a failure blocks the item
+   with the error). Every part branches off it and opens its draft PR onto it, never into `beta` or `main`.
+   A part that also has a `Builds on` line stays stacked on that PR, and `team-shift` moves it onto the epic
+   branch when the PR under it is merged.
+2. The Reviewer reviews each part alone. On a PASS the PR carries `agent:approved`.
+3. `team-shift reviewer` merges an approved part itself, with no model run (`gh pr merge --merge`, no squash, the
+   branch is kept): it retargets PRs stacked on it, closes its issue, and prints `Done: ... RESULT: merged into
+   feat/epic-P (k of m parts)`. If the merge fails it swaps `agent:approved` for `agent:changes` and comments why,
+   and the Builder merges the epic branch in. The check shows `Due: ... (approved part: merge into feat/epic-P)`.
+4. When every part is closed and nothing is open onto the epic branch, it opens one final draft PR from
+   `feat/epic-P` to the base, labelled `agent:review`, with `Closes #P`. The Reviewer does an integration review
+   (the parts were reviewed alone), the Builder fixes on `feat/epic-P`, and the founder merges the final PR through
+   the Chief. `chief-run` refuses a part and closes issue `#P` after the final PR merges.
+
+Every step can be repeated: `agent:approved` comes off last, and the scan lists approved PRs that are already
+merged, so a GitHub error halfway is finished by the next shift.
+
 | Guardrail | Enforced by |
 |---|---|
+| Only `team-shift` merges, and only into `feat/epic-*` (roles keep `gh pr merge` and `gh api` denied) | `team-shift` (code) |
+| A part of an epic is never merged by the Chief | `chief-run` (code) |
 | A child is not handed out before what it builds on has a PR | `team-shift` queue scan (code) |
 | A dependency that is blocked, sent back with changes, or closed unmerged is not built on | `team-shift` `dep_state` (code) |
 | A blocked issue with a `Builds on` line returns to `agent:build` once, when #N is ready | `team-shift` (code, marker comment) |
