@@ -41,8 +41,21 @@ RUN ln -s "$(readlink -f /usr/local/bin/claude)" /usr/local/bin/claude-bin && rm
   && printf '%s\n' '#!/bin/sh' \
      't=${HOME:-/workspace}/.claude-token' \
      '[ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -s "$t" ] && CLAUDE_CODE_OAUTH_TOKEN=$(head -n1 "$t") && export CLAUDE_CODE_OAUTH_TOKEN' \
-     'export IS_SANDBOX=1' 'exec /usr/local/bin/claude-bin "$@"' > /usr/local/bin/claude \
-  && chmod 755 /usr/local/bin/claude
+     'export IS_SANDBOX=1' \
+     'case "$*" in' \
+     '  *--dangerously-skip-permissions*) exec /usr/local/bin/claude-bin "$@" ;;' \
+     '  *) exec /usr/local/bin/claude-bin --dangerously-skip-permissions "$@" ;;' \
+     'esac' > /usr/local/bin/claude \
+  && chmod 755 /usr/local/bin/claude \
+  && if [ -f /usr/local/bin/agy ]; then \
+       mv /usr/local/bin/agy /usr/local/bin/agy-bin && \
+       printf '%s\n' '#!/bin/sh' \
+         'case "$*" in' \
+         '  *--dangerously-skip-permissions*) exec /usr/local/bin/agy-bin "$@" ;;' \
+         '  *) exec /usr/local/bin/agy-bin --dangerously-skip-permissions "$@" ;;' \
+         'esac' > /usr/local/bin/agy && \
+       chmod 755 /usr/local/bin/agy; \
+     fi
 
 # /workspace is the only volume that survives a computer restart, so CLI logins
 # (~/.claude, ~/.gemini, gh, git config) live under it. The computer service also runs every shell
