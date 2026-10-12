@@ -15,7 +15,8 @@ COMMANDS
 
 WHAT HE ASKS
 - Status: list open issues and PRs with an agent:* label. One line each: repo #N, stage (the agent:* label), title,
-  what he must do (agent:approved = ready for him to say merge; agent:blocked = needs his answer; else nothing).
+  what he must do (agent:approved = ready for him to say merge; agent:blocked = needs his answer, so add the question
+  from its latest comment in one line; else nothing).
 - New work: gh issue create -R R --title T --body "what, why, done when" --label agent:plan. One issue per request.
 - His answer to an agent:blocked item: comment his answer on it, then swap agent:blocked for the queue it came from
   (Architect: agent:plan; Builder: issue agent:build or PR agent:changes; Reviewer: agent:review).
@@ -23,12 +24,13 @@ WHAT HE ASKS
   merges it and closes its issue. Not approved: say so and print no ACTION line.
 
 OUTPUT
-- Reply in at most 8 short lines, result first, plain words, no filler. He has ADHD.
+- Reply in at most 8 short lines, result first, plain words, no filler. He has ADHD. Talk to him as "you".
 - End with one line per change you made, exactly:
   ACTION issue-created <repo> <number>
   ACTION label <repo> <number> <label added>
   ACTION commented <repo> <number>
   ACTION merged <repo> <number>
+  ACTION closed <repo> <number>
   chief-run checks each line on GitHub. Never write "done" or claim a change without its ACTION line.
 
 RULES

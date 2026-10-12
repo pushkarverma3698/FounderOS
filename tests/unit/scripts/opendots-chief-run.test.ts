@@ -349,3 +349,33 @@ describe("chief-run: merges are founder-named and agent:approved, and the script
     expect(chief(["--status", name]).out).toMatch(/^✓ merged owner\/sandbox#16/);
   });
 });
+
+describe("chief-run: live findings 2026-10-12", () => {
+  it("verifies ACTION closed on GitHub (claude closed #24 and chief-run called the line unreadable)", () => {
+    world([issue(24, ["agent:blocked"], { state: "CLOSED" }), issue(25, ["agent:blocked"])]);
+    claudeDone("Closed #24.\nACTION closed owner/sandbox 24\nACTION closed owner/sandbox 25\n");
+    const out = chief(["Issue 24 in sandbox: close it as done."]).out;
+    expect(out).toContain("✓ closed owner/sandbox#24");
+    expect(out).toContain("✗ closed owner/sandbox#25: state is open");
+    expect(out).not.toContain("unreadable");
+  });
+
+  it("gives claude the previous turn as context, so a follow-up need not repeat the repo", () => {
+    claudeDone("Ready to merge: PR 23 in owner/sandbox.\n");
+    chief(["what is waiting on me?"]);
+    claudeDone("ok\n");
+    chief(["Merge PR 23."]);
+    const prompt = claudeArgs()[2] ?? "";
+    expect(prompt).toContain("PREVIOUS TURN");
+    expect(prompt).toContain("what is waiting on me?");
+    expect(prompt).toContain("Ready to merge: PR 23 in owner/sandbox.");
+    expect(prompt.indexOf("PREVIOUS TURN")).toBeLessThan(prompt.indexOf("Merge PR 23."));
+  });
+
+  it("the brief asks for the blocker question on every blocked item, and lists the closed action", () => {
+    const brief = readFileSync(join(BRIEFS, "chief.md"), "utf8");
+    expect(brief).toMatch(/agent:blocked[^\n]*question/);
+    expect(brief).toContain("ACTION closed <repo> <number>");
+  });
+});
+

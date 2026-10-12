@@ -98,7 +98,7 @@ beforeEach(() => {
   bin("gh", fakeScript("opendots-gh.sh"));
   bin("run-bg", fakeScript("opendots-run-bg.sh"));
   bin("tmux", "#!/bin/sh\nexit 0\n");
-  bin("git", `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE/git.log"\n[ -e "$FAKE/fetch-fails" ] && { echo "fatal: could not read from remote" >&2; exit 128; }\nexit 0\n`);
+  bin("git", `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE/git.log"\n[ -e "$FAKE/fetch-fails" ] && { echo "fatal: could not read from remote" >&2; exit 128; }\ncase "$*" in *checkout*) [ -e "$FAKE/checkout-fails" ] && { echo "fatal: git checkout: --detach does not take a path argument 'origin/beta'" >&2; exit 128; } ;; esac\nexit 0\n`);
   writeFileSync(join(dir, "repos"), `# team repos\n${REPO}\n`);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -742,6 +742,19 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
     expect(prompt).not.toMatch(/may run: .*\brm\b/);
   });
 
+  // Live 2026-10-12: the Builder's FounderOS clone tracked only main, so `checkout --detach origin/beta` failed
+  // under `|| true` and claude would have started from main.
+  it("tracks every branch of the clone, and blocks instead of starting claude when the base cannot be checked out", () => {
+    world([issue(3, ["agent:build"])]);
+    writeFileSync(join(fake, "checkout-fails"), "");
+    const r = shift("builder");
+    expect(readFileSync(join(fake, "git.log"), "utf8")).toContain("config remote.origin.fetch +refs/heads/*:refs/remotes/origin/*");
+    expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #3\. Builder: could not check out origin\/beta/);
+    expect(item("issue", 3).labels).toEqual(["agent:blocked"]);
+    expect(item("issue", 3).comments[0]).toContain("does not take a path argument");
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
   it("rejects an unknown engine, an empty task, and a task for another role", () => {
     world([]);
     expect(shift("builder", "--engine", "gpt", "--task", TASK).status).toBe(2);
@@ -809,6 +822,34 @@ describe("team-shift: progress in between and reasoning at the end", () => {
     expect(shift("builder", "--progress").out).toBe("Builder: no run open.");
   });
 
+  // Live 2026-10-12: a direct task finished, the 15-min cron collected it into the Shift conversation, and the
+  // founder's "progress?" in his own chat got only "no run open".
+  it("--progress with no run open shows how the last run ended (Done block)", () => {
+    world([issue(4, ["agent:in-pr"])]);
+    writeJob("builder", "issue", 4);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "WHAT I DID: added slugify\nWHY: asked\nWHAT'S LEFT: nothing\nRESULT: https://github.com/owner/sandbox/pull/9\n");
+    shift("builder");
+    const lines = shift("builder", "--progress").out.split("\n");
+    expect(lines[0]).toMatch(/^Builder: no run open\. Last run, ended \d{4}-\d\d-\d\d \d\d:\d\d UTC:$/);
+    expect(lines.slice(1)).toEqual([
+      "Done: owner/sandbox issue #4.", "WHAT I DID: added slugify", "WHY: asked", "WHAT'S LEFT: nothing",
+      "RESULT: https://github.com/owner/sandbox/pull/9",
+    ]);
+  });
+
+  it("--progress with no run open shows a blocked last run and its question", () => {
+    world([issue(4, ["agent:building"])]);
+    writeJob("builder", "issue", 4);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "Should I close it as done?\n");
+    shift("builder");
+    const out = shift("builder", "--progress").out;
+    expect(out).toMatch(/Last run, ended .* UTC:\nBlocked: owner\/sandbox issue #4\. Builder: claude finished but did not hand/);
+    expect(out).toContain("Should I close it as done?");
+    expect(out.split("\n").length).toBeLessThanOrEqual(8);
+  });
+
   it("Done prints the run's reasoning block (the last one), not just RESULT", () => {
     world([issue(4, ["agent:in-pr"])]);
     writeJob("builder", "issue", 4);
@@ -827,5 +868,12 @@ describe("team-shift: progress in between and reasoning at the end", () => {
   it("every run's brief asks for the four-line ending", () => {
     const team = readFileSync(join(BRIEFS, "team.md"), "utf8");
     for (const l of ["WHAT I DID:", "WHY:", "WHAT'S LEFT:", "RESULT:"]) expect(team).toContain(l);
+  });
+
+  // Live 2026-10-12: FounderOS's suite was OOM-killed (exit 137) in the 2 GB computer; one worker passes in 217 s.
+  it("the brief tells every run to test with one worker and how to get pnpm", () => {
+    const team = readFileSync(join(BRIEFS, "team.md"), "utf8");
+    expect(team).toContain("--maxWorkers=1");
+    expect(team).toContain("npx -y pnpm@10");
   });
 });

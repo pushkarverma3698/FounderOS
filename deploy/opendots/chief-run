@@ -34,9 +34,15 @@ denied=("Bash(gh pr merge:*)" "Bash(gh api:*)" "Bash(gh auth:*)" "Bash(gh repo:*
   "Bash(curl:*)" "Bash(wget:*)" Edit Write NotebookEdit)
 
 usage() { sed -n '3,4p' "$0" >&2; exit 2; }
+# The previous turn (request + reply, under 3 h old) goes into the prompt, so "merge PR 23" right after a status that
+# listed it needs no repo. It is context only: merge() still needs the PR number in this turn's request.
 prompt_for() { # request
-  printf '%s\n\nTEAM REPOS (the only ones you may touch): %s\nTHE FOUNDER'"'"'S REQUEST (his exact words):\n%s\n' \
-    "$(cat "$BRIEFS/chief.md")" "${REPOS[*]-}" "$1"
+  local prev="" t
+  if [[ -s $DIR/last-turn.txt ]] && read -r t < "$DIR/last-turn.txt" && (($(date +%s) - t < 10800)); then
+    prev=$(printf 'PREVIOUS TURN (context only; the request below is what to do now):\n%s\n\n' "$(tail -n +2 "$DIR/last-turn.txt")")
+  fi
+  printf '%s\n\nTEAM REPOS (the only ones you may touch): %s\n%sTHE FOUNDER'"'"'S REQUEST (his exact words):\n%s\n' \
+    "$(cat "$BRIEFS/chief.md")" "${REPOS[*]-}" "$prev" "$1"
 }
 start_run() { # name engine
   local run prompt
@@ -113,6 +119,8 @@ if [[ $state == running ]]; then
   exit 0
 fi
 [[ -n $note ]] && echo "$note"
+{ date +%s; echo "The founder asked: $request"; echo "You replied:"
+  grep -v '^[[:space:]]*$' <<<"$log" | tail -n 30 || true; } > "$DIR/last-turn.txt"
 if [[ $state != exit=0 && -z $actions ]]; then
   echo "$engine stopped with $state. Last lines:"
   tail -n 15 <<<"$log"
@@ -155,7 +163,7 @@ merge() { # repo n
 check() { # one ACTION line
   local kind repo n label extra j c
   read -r _ kind repo n label extra <<<"$1"
-  if [[ ! $kind =~ ^(issue-created|label|commented|merged)$ || ! $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ||
+  if [[ ! $kind =~ ^(issue-created|label|commented|merged|closed)$ || ! $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ||
     ! $n =~ ^[0-9]+$ || -n $extra ]] || [[ $kind == label && -z $label ]] || [[ $kind != label && -n $label ]]; then
     echo "✗ unreadable action: $1"; return
   fi
@@ -168,7 +176,10 @@ check() { # one ACTION line
       else echo "✗ commented $repo#$n: no comment since $since${c//[0-9]/}"; fi ;;
     *)
       j=$(gh api "repos/$repo/issues/$n" 2>&1) || { echo "✗ $kind $repo#$n: not found on GitHub ($(first "$j"))"; return; }
-      if [[ $kind == label ]]; then
+      if [[ $kind == closed ]]; then
+        if [[ $(jq -r .state <<<"$j") == closed ]]; then echo "✓ closed $repo#$n"
+        else echo "✗ closed $repo#$n: state is $(jq -r .state <<<"$j")"; fi
+      elif [[ $kind == label ]]; then
         if jq -e --arg l "$label" '[.labels[].name] | index($l)' <<<"$j" >/dev/null; then echo "✓ label $repo#$n $label"
         else echo "✗ label $repo#$n $label: labels are $(names <<<"$j")"; fi
       elif jq -e '.pull_request' <<<"$j" >/dev/null; then echo "✗ issue-created $repo#$n: that is a pull request"
