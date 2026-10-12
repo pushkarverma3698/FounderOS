@@ -110,9 +110,72 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 
 Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `changes`, `approved`, `blocked`.
 `team-shift` keeps one claude run per role (`/workspace/runs/shift-<role>.job`). Next shift: still running →
-"Working"; finished with the claim label moved → "Done" plus claude's `RESULT:` line; finished without moving it,
-failed, or over 90 min → the item is blocked with claude's last output. A lost run is restarted. A 4th review round
-blocks instead of starting.
+"Working"; finished with the claim label moved → "Done" plus claude's `RESULT:` line; failed → the item is
+blocked with claude's last output; finished without moving it, or over 90 min → continued first (see "Continued
+runs"), then blocked. A lost run is restarted. A 4th review round blocks instead of starting.
+
+**Continued runs:** a run that was stopped at the time limit, or ended without handing the item over, is not
+given up on. The next check starts claude again on the same item, in the same directory and on the same branch,
+at most `TEAM_CONTINUE_MAX` times (default 2) per item and role; the count is kept in
+`/workspace/runs/continued-<role>-<repo>-<kind>-<n>` and is cleared when the item is Done or blocked. The item
+keeps its claim label, the issue gets a "started ..." comment with the reason, and THIS SHIFT carries a
+`CONTINUING (i of N)` line. When the directory is on a named branch, the restart only fetches: no reset, clean or
+checkout, so the commits and files of the stopped run stay. Otherwise it is a clean checkout and the run is
+pointed at the open PR. The Builder commits and pushes after each step and keeps the plan as a checklist in the
+draft PR, so a continued run picks up from there. After the last continuation the item is blocked as before, and
+the block text says it was continued N times. Not continued: a claude usage limit (hands over to agy), any other
+failure (blocks), a lost run (restarts as before). `TEAM_CONTINUE_MAX=0` turns it off.
+
+**Stacked PRs:** a multi-part task runs to the end without a merge in between. The Architect writes
+`Builds on: #N` in a child issue that needs another child's code. That child waits in `agent:build` (the check
+prints `No work. Waiting: ...`) until #N has an open PR that is not blocked or sent back, then the Builder starts on
+that PR's branch and opens its own PR onto it. The Reviewer reviews each PR's own diff. Nobody merges: a PASS on a
+stacked PR prints `Merge order, first to last: #40 (approved), #41 (...)`, also sent on Telegram. Tell the Chief
+to merge them in that order; `chief-run` refuses a stacked PR while the one under it is open and moves it onto
+`beta` (or `main`) once that one is merged. Merge a stack through the Chief, not the GitHub button: the button
+merges a stacked PR into the other PR's branch.
+
+**Epic branch:** a big task is split into parts, and the Architect splits only when one Builder run cannot finish
+(the default is one PR). Each part is an issue with `Part of #P` in its body; `#P` carries `agent:epic`.
+
+1. The Builder's first part creates `feat/epic-P` on `origin` from the base branch (a failure blocks the item
+   with the error). Every part branches off it and opens its draft PR onto it, never into `beta` or `main`.
+   A part that also has a `Builds on` line stays stacked on that PR, and `team-shift` moves it onto the epic
+   branch when the PR under it is merged.
+2. The Reviewer reviews each part alone. On a PASS the PR carries `agent:approved`.
+3. `team-shift reviewer` merges an approved part itself, with no model run (`gh pr merge --merge`, no squash, the
+   branch is kept): it retargets PRs stacked on it, closes its issue, and prints `Done: ... RESULT: merged into
+   feat/epic-P (k of m parts)`. If the merge fails it swaps `agent:approved` for `agent:changes` and comments why,
+   and the Builder merges the epic branch in. The check shows `Due: ... (approved part: merge into feat/epic-P)`.
+4. When every part is closed and nothing is open onto the epic branch, it opens one final draft PR from
+   `feat/epic-P` to the base, labelled `agent:review`, with `Closes #P`. The Reviewer does an integration review
+   (the parts were reviewed alone), the Builder fixes on `feat/epic-P`, and the founder merges the final PR through
+   the Chief. `chief-run` refuses a part and closes issue `#P` after the final PR merges.
+
+The base is read again right before the merge: a PR that is no longer onto the epic branch is not merged and
+not touched. A draft part is marked ready first. A part whose merge fails a second time (the first failure is
+already a `team-shift: could not merge` comment on the PR) is blocked for the founder, with the `gh` error,
+instead of going round the Builder and the Reviewer again.
+
+Every step can be repeated: `agent:approved` comes off last, and the scan lists approved PRs that are already
+merged, so a GitHub error halfway is finished by the next shift.
+
+| Guardrail | Enforced by |
+|---|---|
+| Only `team-shift` merges, and only into `feat/epic-*` (roles keep `gh pr merge` and `gh api` denied) | `team-shift` (code) |
+| A part of an epic is never merged by the Chief | `chief-run` (code) |
+| `team-shift` merges only into the PR's epic branch: the base is re-read right before the merge | `team-shift` (code) |
+| A part whose merge fails twice is blocked for the founder | `team-shift` (code) |
+| A child is not handed out before what it builds on has a PR | `team-shift` queue scan (code) |
+| A dependency that is blocked, sent back with changes, or closed unmerged is not built on; neither is an issue still labelled blocked, building or build, even when its early draft PR is open | `team-shift` `dep_state` (code) |
+| A blocked issue with a `Builds on` line returns to `agent:build` once, when #N is ready | `team-shift` (code, marker comment) |
+| A Builder that re-queues an issue without a `Builds on` line gets it blocked | `team-shift` at collect (code) |
+| A stacked PR never merges into another PR's branch | `chief-run` (code) |
+| The Architect writes the `Builds on` line | `team/architect.md` (prompt only) |
+
+**GitHub errors:** the queue scan asks GitHub a second time when the first answer is an error page, and
+`shift-cron` wakes the paid Dot for a failing check only after 3 failures in a row (the count is in
+`shift-tasks.fail-<role>`), so a one-minute GitHub hiccup costs nothing.
 
 **Follow-up issues:** a role that finds a real problem outside its item (a separate bug, something that breaks
 the flow, a heavy task) files it as a new `agent:plan` issue in the same repo, with "found while working on #N" in
@@ -148,3 +211,24 @@ and that code can read every login in the computer: on 2026-10-10 `/workspace/.c
 were readable in all three. Prompts can't prevent this, and the gh token is the founder's, so the Architect can
 technically push too. Until per-role fine-grained GitHub tokens are installed (`dot-login gh`), use the team only
 on the founder's own repos, never on outside contributors' PRs. Computer network access is open.
+
+### Test services
+
+A computer has no docker, so a repo whose tests need Postgres or Redis cannot start its compose file. `team-services`
+runs them as local processes inside the computer: 127.0.0.1 only, throwaway data in `/tmp/team-services` (not
+`/workspace`), Postgres 16 with pgvector (`shared_buffers=32MB`, 20 connections) and Redis capped at 64 MB with no
+persistence. The Builder and the Reviewer may run it; the Architect may not.
+
+```
+team-services start postgres redis   # redis:6380 for a repo whose tests hardcode that port; running it again is a no-op
+team-services run npm test           # npm|npx|pnpm|node|python3|pytest|make, with the lines below exported
+team-services env                    # DATABASE_URL, TEST_DATABASE_URL (postgres://team:team@127.0.0.1:5432/team),
+                                     # REDIS_URL, REDIS_HOST, REDIS_PORT
+team-services status | stop          # stop deletes the data
+```
+
+`run` exists because the allowlist cannot pass `DATABASE_URL=... npm test`. Evidence for what is installed:
+FounderOS integration tests and the Oplify API tests use Postgres (Oplify also Redis on port 6380, set in its test
+helpers); no other repo of the 20 starts a service in its test command. FounderOS and Oplify integration tests skip
+when the database is unreachable, so a green run without `team-services start` tested nothing. Not covered: browsers
+for Playwright, ffmpeg and exiftool.

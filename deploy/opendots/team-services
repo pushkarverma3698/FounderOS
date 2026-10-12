@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Test services for a run. A computer cannot start docker, so Postgres and Redis run as local processes in it,
+# on 127.0.0.1 only, with throwaway data under $TEAM_SERVICES_ROOT (not /workspace, which survives restarts):
+#   team-services start <name>[:port]...   start and wait until it accepts connections; again is a no-op
+#   team-services stop [<name>...]         stop and delete its data (default: all)
+#   team-services status                   one line per service
+#   team-services env                      NAME=value connection lines of the running services
+#   team-services run <command...>         run npm|npx|pnpm|node|python3|pytest|make with those lines exported
+# postgres: port 5432, role, password and database "team", pgvector installed. redis: port 6379, no password.
+# A repo whose tests hardcode a port: name:port, e.g. redis:6380.
+set -euo pipefail
+ROOT=${TEAM_SERVICES_ROOT:-/tmp/team-services}
+PG_BIN=${TEAM_PG_BIN:-/usr/lib/postgresql/16/bin}
+PG_USER=${TEAM_PG_USER-postgres} # postgres refuses to run as root; set it empty to run it as the current user
+WAIT=${TEAM_SERVICES_WAIT:-30}
+HOST=127.0.0.1
+DB=team # the one test role, password and database: a throwaway local value, not a secret
+# 2 GB computer: small buffers, and no fsync because the data is thrown away.
+PG_SETTINGS="-c shared_buffers=32MB -c max_connections=20 -c work_mem=4MB -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c jit=off"
+usage() { sed -n '2,10p' "$0" >&2; exit 2; }
+
+pg_as() { if [[ -n $PG_USER ]]; then runuser -u "$PG_USER" -- "$@"; else "$@"; fi; }
+psql_q() { PGPASSWORD=$DB PGCONNECT_TIMEOUT=2 "$PG_BIN/psql" -X -h "$HOST" -p "$1" -U "$DB" -d "$2" -Atqc "$3"; }
+# Only root can hand the postgres user its directory; unprivileged (tests) the directory is already ours.
+give() { if [[ -n $PG_USER && $(id -u) -eq 0 ]]; then chown -R "$PG_USER" "$1"; fi; }
+
+is_up() { # is_up <name> <port>
+  case $1 in
+    postgres) psql_q "$2" postgres 'select 1' > /dev/null 2>&1 ;;
+    redis) [[ $(redis-cli -h "$HOST" -p "$2" ping 2> /dev/null) == PONG ]] ;;
+  esac
+}
+running_port() { # prints the port when the service answers
+  local p
+  p=$(cat "$ROOT/$1/port" 2> /dev/null) || return 1
+  is_up "$1" "$p" && echo "$p"
+}
+wait_up() { # wait_up <name> <port>: at most WAIT seconds
+  local i
+  for ((i = 0; i < WAIT * 5; i++)); do
+    if is_up "$1" "$2"; then return 0; fi
+    sleep 0.2
+  done
+  return 1
+}
+clear_dir() { # stop whatever a dead or half-started server left behind, then delete its directory
+  if [[ $1 == postgres && -f $ROOT/postgres/data/postmaster.pid ]]; then
+    pg_as "$PG_BIN/pg_ctl" -D "$ROOT/postgres/data" -m immediate stop > /dev/null 2>&1 || true
+  fi
+  if [[ $1 == redis && -f $ROOT/redis/redis.pid ]]; then kill "$(cat "$ROOT/redis/redis.pid")" 2> /dev/null || true; fi
+  rm -rf "${ROOT:?}/$1"
+}
+give_up() { # give_up <name> <port>: say why on stderr, then leave nothing running
+  echo "$1 did not accept connections on $HOST:$2 within ${WAIT}s; last log lines:" >&2
+  tail -n 15 "$ROOT/$1/$1.log" >&2 2> /dev/null || true
+  clear_dir "$1"
+  return 1
+}
+
+start_one() { # start_one <name> <wanted port or empty>
+  local name=$1 want=$2 dir=$ROOT/$1 up port
+  if up=$(running_port "$name"); then
+    if [[ -n $want && $want != "$up" ]]; then echo "$name already runs on port $up; team-services stop $name first" >&2; return 1; fi
+    echo "$name already running on $HOST:$up"
+    return 0
+  fi
+  clear_dir "$name"
+  install -d -m 755 "$ROOT" "$dir"
+  case $name in
+    postgres)
+      port=${want:-5432}
+      printf '%s\n' "$DB" > "$dir/pw"
+      give "$dir"
+      pg_as "$PG_BIN/initdb" -D "$dir/data" -U "$DB" -A scram-sha-256 --pwfile="$dir/pw" -E UTF8 --no-locale \
+        > "$dir/initdb.log" 2>&1 || { cat "$dir/initdb.log" >&2; return 1; }
+      rm -f "$dir/pw"
+      # -k: the unix socket lives in $dir, so nothing depends on /var/run/postgresql. -W: this script does the (bounded) waiting.
+      pg_as "$PG_BIN/pg_ctl" -D "$dir/data" -l "$dir/postgres.log" -W -o "-p $port -k $dir -c listen_addresses=$HOST $PG_SETTINGS" start > /dev/null \
+        || { give_up postgres "$port"; return 1; }
+      wait_up postgres "$port" || { give_up postgres "$port"; return 1; }
+      psql_q "$port" postgres "create database $DB" > /dev/null
+      ;;
+    redis)
+      port=${want:-6379}
+      # No persistence. noeviction (the default) so a full 64 MB fails a write loudly instead of dropping a queued job.
+      redis-server --daemonize yes --bind "$HOST" --port "$port" --dir "$dir" --pidfile "$dir/redis.pid" --logfile "$dir/redis.log" \
+        --save "" --appendonly no --maxmemory 64mb > /dev/null
+      wait_up redis "$port" || { give_up redis "$port"; return 1; }
+      ;;
+  esac
+  echo "$port" > "$dir/port"
+  echo "$name started on $HOST:$port"
+}
+
+stop_one() {
+  local name=$1 port
+  if port=$(running_port "$name"); then
+    case $name in
+      postgres) pg_as "$PG_BIN/pg_ctl" -D "$ROOT/postgres/data" -m fast -w -t "$WAIT" stop > /dev/null ;;
+      redis) redis-cli -h "$HOST" -p "$port" shutdown nosave > /dev/null 2>&1 || true ;;
+    esac
+    echo "$name stopped"
+  else
+    echo "$name not running"
+  fi
+  clear_dir "$name"
+}
+
+env_lines() {
+  local p any=""
+  if p=$(running_port postgres); then
+    any=1
+    printf 'DATABASE_URL=postgres://%s:%s@%s:%s/%s\nTEST_DATABASE_URL=postgres://%s:%s@%s:%s/%s\n' "$DB" "$DB" "$HOST" "$p" "$DB" "$DB" "$DB" "$HOST" "$p" "$DB"
+  fi
+  if p=$(running_port redis); then
+    any=1
+    printf 'REDIS_URL=redis://%s:%s\nREDIS_HOST=%s\nREDIS_PORT=%s\n' "$HOST" "$p" "$HOST" "$p"
+  fi
+  [[ -n $any ]] || { echo "no service is running; start one: team-services start postgres redis" >&2; return 1; }
+}
+
+parse() { # parse <name[:port]> -> PARSED_NAME, PARSED_PORT; usage on anything else
+  PARSED_NAME=${1%%:*} PARSED_PORT=""
+  if [[ $1 == *:* ]]; then PARSED_PORT=${1#*:}; fi
+  case $PARSED_NAME in postgres | redis) ;; *) echo "unknown service '$PARSED_NAME' (postgres, redis)" >&2; usage ;; esac
+  if [[ -n $PARSED_PORT ]]; then
+    [[ $PARSED_PORT =~ ^[0-9]+$ ]] && ((PARSED_PORT >= 1024 && PARSED_PORT <= 65535)) || { echo "bad port '$PARSED_PORT' (1024-65535)" >&2; usage; }
+  fi
+}
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  start)
+    (($#)) || usage
+    for a in "$@"; do parse "$a"; done # check every name before starting any
+    for a in "$@"; do
+      parse "$a"
+      start_one "$PARSED_NAME" "$PARSED_PORT"
+    done
+    ;;
+  stop)
+    for a in "$@"; do parse "$a"; done
+    if (($#)); then
+      for a in "$@"; do stop_one "${a%%:*}"; done
+    else
+      stop_one postgres
+      stop_one redis
+    fi
+    ;;
+  status)
+    for n in postgres redis; do
+      if p=$(running_port "$n"); then echo "$n running $HOST:$p"; else echo "$n stopped"; fi
+    done
+    ;;
+  env) env_lines ;;
+  run)
+    (($#)) || usage
+    case $1 in npm | npx | pnpm | node | python3 | pytest | make) ;; *) echo "run takes npm, npx, pnpm, node, python3, pytest or make, not '$1'" >&2; usage ;; esac
+    lines=$(env_lines)
+    while IFS= read -r line; do export "$line"; done <<< "$lines"
+    exec "$@"
+    ;;
+  *) usage ;;
+esac
