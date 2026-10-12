@@ -15,9 +15,9 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `team-lib.sh` | Shared by `team-shift` and `chief-run`: the usage-limit regex and the claude allowlist written as agy rules |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a scheduled shift turn may make 12 model calls and a chat turn (the Chief with you) 30 (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
-| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the 15-min `shift-cron` crontab line (`SHIFT_SECONDS`, default 900). Idempotent |
+| `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the every-minute `shift-cron` crontab line (`SHIFT_SECONDS`, default 60). Idempotent |
 | `home/` | Every computer's employee setup, installed by `setup-dots.sh`: `CLAUDE.md` (the laptop's engineering rules minus laptop-only lines) as `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and the skills `production-ready`, `pr-adversary`, `systematic-debugging`, `no-ai-slop` for claude (`~/.claude/skills`) and agy (`~/.gemini/config/skills`). Edit here, not in a computer |
-| `shift-cron` | Host cron, every 15 min: runs `team-shift <role> --check` in each computer (no model call) and runs a shift task only when it prints `Due:` or the check fails. Log: `/opt/opendots/shift-cron.log` |
+| `shift-cron` | Host cron, every minute: runs `team-shift <role> --check` in each computer (one GitHub call, no model call) and runs a shift task only when it prints `Due:` or the check fails. The same `Due:` line or failing check runs the task a second time after 2 min, then only every 15 min. Log: `/opt/opendots/shift-cron.log` |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
 
@@ -71,7 +71,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 
 ## Engineering team
 Three Dots act as employees, each with a computer holding `claude`, `agy` and `gh`. They talk to each other
-only through GitHub labels. Host cron (`shift-cron`) checks each role every 15 minutes with the read-only
+only through GitHub labels. Host cron (`shift-cron`) checks each role every minute with the read-only
 `team-shift <role> --check` and runs that Dot's "shift" task only when there is work, so an idle hour makes no
 OpenRouter call. A Dot is only a dispatcher: its shift runs `team-shift <role>` once and replies with the output, so the paid Dot model makes 2-3
 calls a shift. claude does the engineering (subscription, not OpenRouter) with the role brief from `team/` and an
@@ -92,8 +92,8 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 - **Start / stop:** shifts are created paused, and cron never wakes a paused task. Start each once in the app
   (Tasks → Run) or `POST /api/tasks/<id>/actions {"action":"run"}`. Kill switch: pause the three tasks (pausing
   also stops a running shift); to stop the checks too, delete the `# opendots-shift` line from `crontab -e`.
-- **Pace:** a shift that collects a finished run starts the next item at the next check, so each role does about
-  one item every 30 min plus claude's run time. Checks cost nothing while idle; to change the pace set
+- **Pace:** a hand-off (claim, collect, the next role, agy taking over at claude's usage limit) waits for the next
+  check, so about a minute each. Checks cost nothing while idle; to change the pace set
   `SHIFT_SECONDS` (3600, or a whole number of minutes that divides 60) and rerun `setup-dots.sh`.
 
 | Event | Remove | Add |
@@ -114,12 +114,12 @@ failed, or over 90 min → the item is blocked with claude's last output. A lost
 blocks instead of starting.
 
 **agy fallback:** when claude stops on its usage limit (`hit your ... limit`, `usage limit`, `quota reached`), the
-Builder and Reviewer start `agy --print` on the same item with the same brief and keep the claim; the job file
+role starts `agy --print` on the same item with the same brief and keep the claim; the job file
 records `agy` and later shifts report "agy run". agy has no `--allowedTools`, so `team-shift` writes the role's
 claude allowlist into `~/.gemini/antigravity-cli/settings.json` as `permissions.allow` / `deny` rules
 (`command(git push)`, `read_file(*)`, `write_file(*)` for the Builder only), keeping the file's other settings. No
-`--dangerously-skip-permissions`. The Architect's computer has no agy login, so its limit still blocks; a computer
-without `antigravity-oauth-token` blocks too, and a failed agy run blocks without a second fallback.
+`--dangerously-skip-permissions`. A computer without `antigravity-oauth-token` blocks, and a failed agy run
+blocks without a second fallback.
 
 **Scheduler behaviour (read in OpenDots source, pinned `625452e`, plus our patch):** one task runs at a time.
 Upstream, a recurring task schedules its next run only after a *completed* run; with the patch it also comes
