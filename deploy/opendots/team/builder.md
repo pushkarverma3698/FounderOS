@@ -9,3 +9,9 @@ or a PR sent back with changes (read the latest "Reviewer verdict: CHANGES" comm
   output) / NOT VERIFIED / Closes #N. Then on the issue swap agent:building for agent:in-pr, and label the PR
   agent:review.
 - Changes: push to the same PR, comment what you fixed, swap the PR's agent:building for agent:review.
+- Stacked (THIS SHIFT has a "Stacked:" line): the code you build on is in another open PR, already in your
+  checkout. That is never a reason to block. BASE is that PR's branch: branch off origin/BASE, and gh pr create
+  --draft --base BASE, so your PR shows only your own diff. Say "Stacked on #PR" in the PR body.
+- The issue needs code from another open issue or PR and THIS SHIFT has no "Stacked:" line: do not block. Add the
+  line "Builds on: #N" to the issue body (gh issue edit N --body), comment why, and swap agent:building for
+  agent:build. team-shift hands it back when #N has a PR to build on.

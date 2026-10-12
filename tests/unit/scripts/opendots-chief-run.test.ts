@@ -19,6 +19,8 @@ const FAKES = join(ROOT, "tests", "unit", "scripts", "fakes");
 const REPO = "owner/sandbox";
 
 interface Item {
+  head?: string;
+  base?: string;
   repo: string; number: number; kind: "issue" | "pr"; state: string; labels: string[];
   created_at: string; comments: { created_at: string }[]; closes?: number[];
 }
@@ -338,6 +340,36 @@ describe("chief-run: merges are founder-named and agent:approved, and the script
     claudeDone(`ACTION merged ${REPO} 16\n`);
     const r = chief(["merge PR 16"]);
     expect(r.out).toBe(`✗ merged ${REPO}#16: refused, PR 16 has no agent:approved (labels: agent:review)`);
+    expect(ghLog()).not.toContain("pr merge");
+  });
+
+  // Stacked PRs (team-shift): PR 41's base is PR 40's branch. Merged there, its code would never reach beta.
+  it("refuses a stacked PR while the PR under it is open", () => {
+    world([pr(40, ["agent:approved"], { head: "feat/a" }), pr(41, ["agent:approved"], { head: "feat/b", base: "feat/a" })]);
+    claudeDone(`ACTION merged ${REPO} 41\n`);
+    const r = chief(["merge PR 41"]);
+    expect(r.out).toBe(`✗ merged ${REPO}#41: refused, it is stacked on PR 40, which is not merged yet. Merge 40 first`);
+    expect(ghLog()).not.toContain("pr merge");
+    expect(find(41).state).toBe("OPEN");
+  });
+
+  it("merges a whole stack named in order: each PR moves onto beta once the one under it is merged", () => {
+    world([pr(40, ["agent:approved"], { head: "feat/a" }), pr(41, ["agent:approved"], { head: "feat/b", base: "feat/a" }),
+      pr(42, ["agent:approved"], { head: "feat/c", base: "feat/b" })]);
+    claudeDone(`ACTION merged ${REPO} 40\nACTION merged ${REPO} 41\nACTION merged ${REPO} 42\n`);
+    const r = chief(["merge 40, 41 and 42"]);
+    expect(r.out).toBe([40, 41, 42].map((n) => `✓ merged ${REPO}#${n} into beta https://github.com/${REPO}/pull/${n}`).join("\n"));
+    expect(ghLog()).toContain(`pr edit 41 -R ${REPO} --base beta`);
+    expect(ghLog()).toContain(`pr edit 42 -R ${REPO} --base beta`);
+    expect(ghLog()).not.toContain("pr edit 40");
+  });
+
+  it("a stacked PR that cannot be moved onto beta is not merged into the other PR's branch", () => {
+    world([pr(40, ["agent:approved"], { head: "feat/a", state: "MERGED" }), pr(41, ["agent:approved"], { head: "feat/b", base: "feat/a" })]);
+    writeFileSync(join(fake, "edit-fails"), "");
+    claudeDone(`ACTION merged ${REPO} 41\n`);
+    const r = chief(["merge PR 41"]);
+    expect(r.out).toMatch(/^✗ merged owner\/sandbox#41: could not move it onto beta after PR 40 was merged/);
     expect(ghLog()).not.toContain("pr merge");
   });
 
