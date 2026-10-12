@@ -145,6 +145,19 @@ merge() { # repo n
     if ! jq -e '[.labels[].name] | index("agent:approved")' <<<"$j" >/dev/null; then
       echo "✗ merged $repo#$n: refused, PR $n has no agent:approved (labels: $(names <<<"$j"))"; return
     fi
+    # A stacked PR (its base is another team PR's branch) merges after the PR under it, and then into that PR's
+    # base: merged into the branch itself, its code would never reach beta or main.
+    base=$(jq -r .baseRefName <<<"$j")
+    under=$(gh pr list -R "$repo" --head "$base" --state all --json number,state,baseRefName,labels --jq \
+      '[.[] | select(.state != "CLOSED" and any(.labels[].name; startswith("agent:")))] | sort_by(.number) | last // empty
+        | "\(.number) \(.state) \(.baseRefName)"' 2>&1) ||
+      { echo "✗ merged $repo#$n: could not check what it is stacked on ($(first "$under"))"; return; }
+    if [[ -n $under ]]; then
+      read -r i st base <<<"$under"
+      if [[ $st != MERGED ]]; then echo "✗ merged $repo#$n: refused, it is stacked on PR $i, which is not merged yet. Merge $i first"; return; fi
+      err=$(gh pr edit "$n" -R "$repo" --base "$base" 2>&1) ||
+        { echo "✗ merged $repo#$n: could not move it onto $base after PR $i was merged ($(first "$err"))"; return; }
+    fi
     err=$(gh pr merge "$n" -R "$repo" --merge 2>&1) || true
     j=$(gh pr view "$n" -R "$repo" --json state,labels,baseRefName,url,closingIssuesReferences 2>&1) ||
       { echo "✗ merged $repo#$n: could not re-read the PR ($(first "$j"))"; return; }

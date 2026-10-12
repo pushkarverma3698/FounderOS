@@ -113,6 +113,28 @@ Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `c
 failed, or over 90 min → the item is blocked with claude's last output. A lost run is restarted. A 4th review round
 blocks instead of starting.
 
+**Stacked PRs:** a multi-part task runs to the end without a merge in between. The Architect writes
+`Builds on: #N` in a child issue that needs another child's code. That child waits in `agent:build` (the check
+prints `No work. Waiting: ...`) until #N has an open PR that is not blocked or sent back, then the Builder starts on
+that PR's branch and opens its own PR onto it. The Reviewer reviews each PR's own diff. Nobody merges: a PASS on a
+stacked PR prints `Merge order, first to last: #40 (approved), #41 (...)`, also sent on Telegram. Tell the Chief
+to merge them in that order; `chief-run` refuses a stacked PR while the one under it is open and moves it onto
+`beta` (or `main`) once that one is merged. Merge a stack through the Chief, not the GitHub button: the button
+merges a stacked PR into the other PR's branch.
+
+| Guardrail | Enforced by |
+|---|---|
+| A child is not handed out before what it builds on has a PR | `team-shift` queue scan (code) |
+| A dependency that is blocked, sent back with changes, or closed unmerged is not built on | `team-shift` `dep_state` (code) |
+| A blocked issue with a `Builds on` line returns to `agent:build` once, when #N is ready | `team-shift` (code, marker comment) |
+| A Builder that re-queues an issue without a `Builds on` line gets it blocked | `team-shift` at collect (code) |
+| A stacked PR never merges into another PR's branch | `chief-run` (code) |
+| The Architect writes the `Builds on` line | `team/architect.md` (prompt only) |
+
+**GitHub errors:** the queue scan asks GitHub a second time when the first answer is an error page, and
+`shift-cron` wakes the paid Dot for a failing check only after 3 failures in a row (the count is in
+`shift-tasks.fail-<role>`), so a one-minute GitHub hiccup costs nothing.
+
 **Follow-up issues:** a role that finds a real problem outside its item (a separate bug, something that breaks
 the flow, a heavy task) files it as a new `agent:plan` issue in the same repo, with "found while working on #N" in
 the body, and names it in its comment and in WHAT'S LEFT; the Architect picks it up like any other issue. The

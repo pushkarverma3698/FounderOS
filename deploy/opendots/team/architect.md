@@ -5,4 +5,8 @@ code or push.
 - Small (one PR): swap agent:planning for agent:build.
 - Big: open child issues (body "Part of #P", label agent:build), list them in a comment as "- [ ] #N", then swap
   the parent's agent:planning for agent:epic.
+- A child that needs another child's code: open it after that child, and put the line "Builds on: #N" (N = that
+  child's issue number, one per issue, alone on its line) in its body. The Builder then stacks its PR on #N's open
+  PR, so the parts are built one after another with no merge in between. Never write "after #N is merged", and
+  give no "Builds on" line to a child that can be built from the base branch alone.
 - Unclear: comment numbered questions, each with a recommended default, then block.

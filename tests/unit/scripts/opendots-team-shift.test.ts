@@ -21,7 +21,7 @@ const FAKES = join(ROOT, "tests", "unit", "scripts", "fakes");
 
 
 
-interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[]; title?: string; body?: string; state?: string }
+interface Item { repo: string; kind: "issue" | "pr"; number: number; labels: string[]; createdAt: string; comments: string[]; title?: string; body?: string; state?: string; head?: string; base?: string }
 
 let dir: string;
 let fake: string;
@@ -62,6 +62,7 @@ function shift(role: string, ...extra: string[]): { out: string; status: number 
       TEAM_WORK: join(dir, "work"),
       TEAM_LOCAL_RULES: join(dir, "rules"),
       HOME: join(dir, "home"),
+      TEAM_RETRY_SLEEP: "0",
     },
   });
   return { out: r.stdout.trim(), status: r.status, err: r.stderr };
@@ -566,6 +567,7 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     for (const [role, c] of Object.entries(checks)) {
       writeFileSync(join(fake, `check-${role}`), `${c.out}\n`);
       if (c.rc) writeFileSync(join(fake, `check-${role}.rc`), String(c.rc));
+      else rmSync(join(fake, `check-${role}.rc`), { force: true });
     }
     for (const [task, status] of Object.entries(statuses)) writeFileSync(join(fake, `task-${task}`), status);
     bin("curl", fakeScript("opendots-curl.sh"));
@@ -597,9 +599,27 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
     expect(r.out).not.toContain(TOKEN);
   });
 
-  it("a failing check wakes the Dot so the error reaches the founder", () => {
-    const r = cron({ architect: { out: "gh: authentication required", rc: 1 }, builder: { out: "No work" }, reviewer: { out: "No work" } });
-    expect(r.runs).toEqual(['POST /tasks/task-a/actions {"action":"run"}']);
+  // Live 2026-10-12 12:17-13:18Z: GitHub answered the scan with an HTML error page about 25 times in an hour ("invalid
+  // character '<' looking for beginning of value"), and every one bought a paid Dot turn. The next minute's check is free.
+  it("a check that fails once or twice is tried again next minute without a paid wake; the third in a row wakes the Dot", () => {
+    const failing = { architect: { out: "invalid character '<' looking for beginning of value", rc: 1 }, builder: { out: "No work" }, reviewer: { out: "No work" } };
+    const first = cron(failing);
+    expect(first.runs).toEqual([]);
+    expect(first.calls).toEqual([]);
+    expect(first.out).toContain("(check exit 1) -> failed check 1 of 3 in a row, no wake yet");
+    expect(cron(failing).runs).toEqual([]);
+    const third = cron(failing);
+    expect(third.runs).toEqual(['POST /tasks/task-a/actions {"action":"run"}']);
+    expect(third.out).toContain("(check exit 1) -> woke task-a");
+  });
+
+  it("a check that works again starts the count over", () => {
+    const failing = { architect: { out: "gh: Bad Gateway", rc: 1 } };
+    cron(failing); cron(failing);
+    expect(cron({ architect: { out: "No work" } }).runs).toEqual([]);
+    expect(cron(failing).runs).toEqual([]);
+    expect(cron(failing).runs).toEqual([]);
+    expect(cron(failing).runs).toHaveLength(1);
   });
 
   // 2026-10-12: the cron runs every minute. A Due line its Dot cannot clear must not buy a paid turn every minute.
@@ -633,6 +653,7 @@ describe("shift-cron: wakes a Dot only when there is work", () => {
 
   it("a failing check is not repeated to the founder every minute", () => {
     const failing = { reviewer: { out: "gh: authentication required", rc: 1 } };
+    cron(failing); cron(failing);
     expect(cron(failing).runs).toHaveLength(1);
     expect(cron(failing).runs).toEqual([]);
   });
@@ -1169,5 +1190,177 @@ describe("team-shift: follow-up issues", () => {
     writeFileSync(join(fake, "state"), "exit=0\n");
     expect(shift("architect", "--check").out).toMatch(/^Due: /);
     expect(item("issue", 13).state).toBeUndefined();
+  });
+});
+
+/**
+ * Stacked PRs (live 2026-10-12 13:15-13:26Z, opendots-sandbox #35): the Architect split a task into four parts, part A
+ * became PR #40 in 5 minutes, and the Builder then blocked parts B-D because their code was only in that open PR.
+ * A child now names what it builds on; the scan holds it until that has a PR, and the Builder stacks on the PR's branch.
+ */
+describe("team-shift: a multi-part task runs as stacked PRs", () => {
+  const prompt = (): string => claudeArgs()[2] ?? "";
+  const gitLog = (): string => readFileSync(join(fake, "git.log"), "utf8");
+  const child = (number: number, on: number, labels = ["agent:build"]): Item =>
+    ({ ...issue(number, labels, `2026-10-10T10:${number}:00Z`), body: `Part of #35 (Part B).\nBuilds on: #${on}\n\nGoal: stats command.` });
+  const depPr = (number: number, closes: number, labels: string[], more: Partial<Item> = {}): Item =>
+    ({ ...pr(number, labels), body: `What changed: x\n\nCloses #${closes}`, head: `feat/part-${closes}`, ...more });
+
+  it("the briefs: the Architect writes the Builds on line, the Builder stacks instead of blocking, the Reviewer reviews against the base", () => {
+    const brief = (role: string): string => readFileSync(join(BRIEFS, `${role}.md`), "utf8").replace(/\s+/g, " ");
+    expect(brief("architect")).toContain('"Builds on: #N"');
+    expect(brief("architect")).toMatch(/never write "after #N is merged"/i);
+    expect(brief("builder")).toMatch(/Stacked.*never a reason to block.*--base BASE/);
+    expect(brief("builder")).toMatch(/do not block\. Add the line "Builds on: #N"/);
+    expect(brief("reviewer")).toMatch(/Stacked PR.*own diff against that base/);
+    expect(readFileSync(join(BRIEFS, "chief.md"), "utf8").replace(/\s+/g, " ")).toMatch(/merge order/);
+  });
+
+  it("a child whose dependency has no PR yet is not handed to the Builder, and the check says what it waits for", () => {
+    world([issue(36, ["agent:in-pr"]), child(37, 36), child(38, 37)]);
+    const r = shift("builder", "--check");
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (no PR yet); owner/sandbox issue #38 builds on #37 (no PR yet)");
+    expect(shift("builder").out).toMatch(/^No work\. Waiting: /);
+    expect(item("issue", 37).labels).toEqual(["agent:build"]);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("an issue queued behind a waiting child is still handed out", () => {
+    world([issue(36, ["agent:plan"]), child(37, 36), issue(50, ["agent:build"], "2026-10-11T10:00:00Z")]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #50 (agent:build)");
+  });
+
+  it("the dependency has an open PR: the Builder starts at that PR's branch and is told to open its PR onto it", () => {
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, ["agent:review"]), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:build)");
+    const r = shift("builder");
+    expect(r.out, r.err).toMatch(/^Started: owner\/sandbox issue #37, claude run /);
+    expect(item("issue", 37).labels).toEqual(["agent:building"]);
+    expect(prompt()).toContain("Base branch: feat/part-36.");
+    expect(prompt()).toContain("Stacked: this issue builds on #36, whose code is in open PR #40 (branch feat/part-36), not merged yet.");
+    expect(prompt()).toContain("gh pr create --draft --base feat/part-36");
+    expect(gitLog()).toContain("checkout -q --detach origin/feat/part-36");
+  });
+
+  it("a dependency PR that is blocked or sent back with changes is not built on", () => {
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, ["agent:changes"]), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox pr #40 (agent:changes)");
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, ["agent:blocked"]), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is blocked)");
+    world([issue(36, ["agent:blocked"]), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (it is blocked)");
+  });
+
+  it("a merged or closed dependency means the normal base, with no stack", () => {
+    // GitHub does not close the issue when its PR merges into a non-default branch: the merged PR is what counts.
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, ["agent:approved"], { state: "MERGED" }), child(37, 36)]);
+    expect(shift("builder").out).toMatch(/^Started: owner\/sandbox issue #37/);
+    expect(prompt()).toContain("Base branch: beta.");
+    expect(prompt()).not.toContain("Stacked: this issue");
+    rmSync(join(runs, "shift-builder.job"));
+    world([{ ...issue(36, []), state: "CLOSED" }, child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:build)");
+  });
+
+  it("Builds on may name a PR; a number that does not exist does not hold the issue back", () => {
+    world([depPr(28, 26, ["agent:approved"], { head: "feat/json" }), child(37, 28)]);
+    expect(shift("builder").out).toMatch(/^Started: owner\/sandbox issue #37/);
+    expect(prompt()).toContain("Base branch: feat/json.");
+    rmSync(join(runs, "shift-builder.job"));
+    world([child(37, 999)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:build)");
+    world([depPr(28, 26, [], { state: "CLOSED" }), child(37, 28)]);
+    expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #28 (that PR was closed without merging)");
+  });
+
+  it("a dependency GitHub cannot show right now fails the check instead of handing the child out early", () => {
+    world([issue(36, ["agent:in-pr"]), child(37, 36)]);
+    writeFileSync(join(fake, "api-fails"), "");
+    const r = shift("builder", "--check");
+    expect(r.status).not.toBe(0);
+    expect(r.err).toContain("HTTP 502");
+  });
+
+  it("a claimed child whose dependency lost its PR goes back to the queue instead of being started", () => {
+    world([issue(36, ["agent:in-pr"]), child(37, 36, ["agent:building"])]);
+    const r = shift("builder");
+    expect(r.out).toBe("Waiting: owner/sandbox issue #37 builds on #36 (no PR yet). It is back in the build queue.");
+    expect(item("issue", 37).labels).toEqual(["agent:build"]);
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("the Reviewer gets a stacked PR with its own base, and is told to review only its diff", () => {
+    world([depPr(40, 36, ["agent:approved"]), depPr(41, 37, ["agent:review"], { base: "feat/part-36" })]);
+    expect(shift("reviewer").out).toMatch(/^Started: owner\/sandbox pr #41/);
+    expect(prompt()).toContain("Base branch: feat/part-36.");
+    expect(prompt()).toContain("Stacked PR: its base feat/part-36 is the branch of another open PR, not merged yet.");
+    expect(gitLog()).toContain("checkout -q --detach origin/feat/part-36");
+  });
+
+  it("a PASS on a stacked PR prints the merge order for the founder, and keeps it for --progress and Telegram", () => {
+    world([depPr(40, 36, ["agent:approved"]), depPr(41, 37, ["agent:approved"], { base: "feat/part-36" }),
+      depPr(42, 38, ["agent:review"], { base: "feat/part-37" }), pr(60, ["agent:approved"])]);
+    writeJob("reviewer", "pr", 41);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "RESULT: PASS\n");
+    const r = shift("reviewer");
+    expect(r.out, r.err).toBe([
+      "Done: owner/sandbox pr #41. RESULT: PASS",
+      "Merge order, first to last: #40 (approved), #41 (approved), #42 (not approved yet). A PR merges only after the one before it.",
+    ].join("\n"));
+    expect(readFileSync(join(runs, "last-reviewer.txt"), "utf8")).toContain("Merge order, first to last: #40 (approved), #41 (approved), #42");
+  });
+
+  it("the last PASS of a stack says every part is approved", () => {
+    world([depPr(40, 36, ["agent:approved"]), depPr(41, 37, ["agent:approved"], { base: "feat/part-36" })]);
+    writeJob("reviewer", "pr", 41);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "RESULT: PASS\n");
+    expect(shift("reviewer").out).toContain("Merge order, first to last: #40 (approved), #41 (approved). All approved: say merge for each, in this order.");
+  });
+
+  // Finding 2: #37-#39 stayed agent:blocked after their dependency moved; the founder had to re-label each one.
+  it("a blocked child goes back to the build queue once, when what it builds on is ready", () => {
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, ["agent:approved"]), child(37, 36, ["agent:blocked"])]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:blocked, #36 it builds on is ready)");
+    expect(item("issue", 37).labels).toEqual(["agent:blocked"]);
+    const r = shift("builder");
+    expect(r.out, r.err).toMatch(/^Started: owner\/sandbox issue #37/);
+    expect(item("issue", 37).labels).toEqual(["agent:building"]);
+    expect(item("issue", 37).comments[0]).toMatch(/^team-shift: back in the build queue, because #36/);
+    // Blocked a second time: it now waits for the founder.
+    rmSync(join(runs, "shift-builder.job"));
+    const again = items().map((i) => (i.number === 37 ? { ...i, labels: ["agent:blocked"] } : i));
+    writeFileSync(join(fake, "items.json"), JSON.stringify(again));
+    expect(shift("builder", "--check").out).toBe("No work");
+  });
+
+  it("a blocked child stays blocked while its dependency is not ready, and so does a blocked issue with no Builds on line", () => {
+    world([issue(36, ["agent:plan"]), child(37, 36, ["agent:blocked"]), issue(9, ["agent:blocked"])]);
+    expect(shift("builder", "--check").out).toBe("No work");
+    expect(shift("builder").out).toBe("No work");
+    expect(item("issue", 37).labels).toEqual(["agent:blocked"]);
+  });
+
+  it("a Builder that puts an issue back in the queue without a Builds on line gets it blocked, not handed out again", () => {
+    world([issue(37, ["agent:build"])]);
+    writeJob("builder", "issue", 37);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "RESULT: waiting for part A\n");
+    expect(shift("builder").out).toMatch(/^Blocked: owner\/sandbox issue #37\. Builder: put this issue back in the build queue without/);
+    expect(item("issue", 37).labels).toEqual(["agent:blocked"]);
+    world([child(37, 36)]);
+    writeJob("builder", "issue", 37);
+    expect(shift("builder").out).toBe("Done: owner/sandbox issue #37. RESULT: waiting for part A");
+    expect(item("issue", 37).labels).toEqual(["agent:build"]);
+  });
+
+  it("the scan asks GitHub a second time when the first answer is its HTML error page", () => {
+    world([issue(4, ["agent:plan"])]);
+    writeFileSync(join(fake, "graphql-fails-once"), "");
+    const r = shift("architect", "--check");
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toBe("Due: owner/sandbox issue #4 (agent:plan)");
   });
 });

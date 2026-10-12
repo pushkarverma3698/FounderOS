@@ -27,11 +27,14 @@ case "$kind $sub" in
   "issue list"|"pr list")
     [[ -z $label && -e $FAKE/list-fails ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     jq -c --arg r "$repo" --arg k "$kind" --arg l "$label" \
-      '[.[] | select(.repo==$r and .kind==$k and ($l=="" or (.labels|index($l)))) | {number, createdAt, body: (.body // ""), state: (.state // "OPEN")}]' "$S" | jq -r "$q" ;;
+      '[.[] | select(.repo==$r and .kind==$k and ($l=="" or (.labels|index($l)))) | {number, createdAt, body: (.body // ""), state: (.state // "OPEN"),
+        headRefName: (.head // "branch-\(.number)"), baseRefName: (.base // "beta"), labels: [.labels[] | {name: .}]}] | sort_by(-.number)' "$S" | jq -r "$q" ;;
   "issue view"|"pr view")
     [[ $json == body && -e $FAKE/view-body-fails ]] && { echo "GraphQL: Could not resolve" >&2; exit 1; }
-    jq -c --arg r "$repo" --arg k "$kind" --argjson n "$n" \
-      '.[] | select(.repo==$r and .kind==$k and .number==$n) | {labels: [.labels[] | {name: .}], comments: [.comments[] | {body: .}], body: (.body // "")}' "$S" | jq -r "$q" ;;
+    base=main; [[ -f $FAKE/has-beta ]] && base=beta
+    jq -c --arg r "$repo" --arg k "$kind" --argjson n "$n" --arg base "$base" \
+      '.[] | select(.repo==$r and .kind==$k and .number==$n) | {number, labels: [.labels[] | {name: .}], comments: [.comments[] | {body: .}], body: (.body // ""),
+        state: (.state // "OPEN"), headRefName: (.head // "branch-\(.number)"), baseRefName: (.base // $base)}' "$S" | jq -r "$q" ;;
   "issue edit"|"pr edit")
     a=$(printf '%s\n' ${adds[@]+"${adds[@]}"} | jq -R . | jq -sc .)
     d=$(printf '%s\n' ${rems[@]+"${rems[@]}"} | jq -R . | jq -sc .)
@@ -57,20 +60,30 @@ case "$kind $sub" in
   "api graphql")
     # team-shift's queue scan: one "rNNN: repository(...)" line per repo, one "sN: issues|pullRequests(labels:[..." per slot.
     [[ -e $FAKE/graphql-fails ]] && { echo "gh: Could not resolve to a Repository" >&2; exit 1; }
+    # GitHub's HTML error page, once: the next call answers.
+    if [[ -e $FAKE/graphql-fails-once ]]; then rm "$FAKE/graphql-fails-once"; echo "invalid character '<' looking for beginning of value" >&2; exit 1; fi
     re_repo='^(r[0-9]+): repository\(owner:"([^"]+)", name:"([^"]+)"\)'
-    re_slot='^(s[0-9]+): (issues|pullRequests)\(labels:\["([^"]+)"\], states:OPEN, first:1, orderBy:\{field:CREATED_AT, direction:ASC\}\)'
+    re_slot='^(s[0-9]+): (issues|pullRequests)\(labels:\["([^"]+)"\], states:OPEN, first:([0-9]+), orderBy:\{field:CREATED_AT, direction:ASC\}\)'
     out='{}'; r=""
     while IFS= read -r line; do
       if [[ $line =~ $re_repo ]]; then r=${BASH_REMATCH[1]}; repo=${BASH_REMATCH[2]}/${BASH_REMATCH[3]}
       elif [[ $line =~ $re_slot ]]; then
         s=${BASH_REMATCH[1]}; k=issue; l=${BASH_REMATCH[3]}
         if [[ ${BASH_REMATCH[2]} == pullRequests ]]; then k=pr; fi
-        nodes=$(jq -c --arg r "$repo" --arg k "$k" --arg l "$l" \
-          '[.[] | select(.repo==$r and .kind==$k and (.labels|index($l)))] | sort_by(.createdAt) | .[:1] | map({number})' "$S")
+        nodes=$(jq -c --arg r "$repo" --arg k "$k" --arg l "$l" --argjson first "${BASH_REMATCH[4]}" \
+          '[.[] | select(.repo==$r and .kind==$k and (.state // "OPEN") == "OPEN" and (.labels|index($l)))] | sort_by(.createdAt) | .[:$first]
+            | map({number, body: (.body // ""), comments: {nodes: [.comments[] | {body: .}]}})' "$S")
         out=$(jq -c --arg r "$r" --arg s "$s" --argjson n "$nodes" '.[$r][$s] = {nodes: $n}' <<<"$out")
       fi
     done <<<"$query"
     jq -c '{data: .}' <<<"$out" | jq -r "$q" ;;
+  "api repos/"*"/issues/"*) # team-shift's dependency lookup: an issue or a PR by number
+    [[ -e $FAKE/api-fails ]] && { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
+    r=$(cut -d/ -f2,3 <<<"$sub") num=${sub##*/}
+    it=$(jq -c --arg r "$r" --argjson n "$num" '.[] | select(.repo==$r and .number==$n)' "$S")
+    [[ -n $it ]] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    jq -c '{number, state: (if (.state // "OPEN") == "OPEN" then "open" else "closed" end), labels: [.labels[] | {name: .}]} +
+      (if .kind=="pr" then {pull_request: {}} else {} end)' <<<"$it" | jq -r "$q" ;;
   "api "*) [[ -f $FAKE/has-beta ]] ;;
   "repo view") echo main ;;
   *) echo "fake gh: unhandled $kind $sub" >&2; exit 9 ;;
