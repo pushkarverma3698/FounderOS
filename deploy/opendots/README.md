@@ -9,6 +9,8 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `install.sh` | Install or update: clone, secrets, build all images, start, health check |
 | `computer.Dockerfile` | Agent computer image |
 | `compose.turicks.yml` | Points the supervisor at that image |
+| `add-dot.sh` | Agency scaling: onboard a new autonomous employee in 1 command with dedicated container, credentials, rules, and skills |
+| `dot-task` | Task & routine management CLI: schedule, run, pause, cancel OpenDots tasks or background loop routines |
 | `team-shift` | One engineering shift in one shell call: `team-shift architect\|builder\|reviewer` reports or collects the role's claude run, else claims the oldest queued item and starts claude on it with the role brief (`team/`) and a per-role tool allowlist |
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
 | `chief-run` | The Chief of Staff's one command per chat turn: `chief-run '<founder's words>'` runs claude haiku (agy at claude's usage limit) with `team/chief.md` and a gh allowlist scoped to `TEAM_REPOS`, then checks every `ACTION` line on GitHub and prints ✓/✗. It merges itself, only a PR the founder named that has `agent:approved`. Past 55 s: `still running`, then `chief-run --status chief-<id>` |
@@ -21,6 +23,32 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `shift-notify` | Host cron, every minute: sends the founder one Telegram message when a role finishes or blocks an item (the role's `RESULT:` line, or the blocking question with a link). Reads each computer's `/workspace/runs/last-<role>.txt`; no model call, no GitHub call. Bot token and chat id come from `/opt/founderos/.env` (`OPENDOTS_NOTIFY_ENV`). A failed send is retried the next minute. To stop the messages, delete the `# opendots-notify` crontab line. Log: `/opt/opendots/shift-notify.log` |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
+
+## 2026 AI Agent Factory Architecture
+
+OpenDots operates as an autonomous multi-employee AI agency factory designed for running one-man companies with high leverage and minimal cost:
+
+1. **Two-Tier Model Cascade (Reasoning Layer):**
+   - **Tier 1 (Sub-second OpenRouter failover):** `deepseek/deepseek-v4.1-flash` -> `z-ai/glm-5.3-flash` -> `moonshotai/kimi-k3`.
+   - **Tier 2 (Application-level failover):** `google/gemini-3.8-flash` -> `google/gemini-2.5-flash`.
+   - OpenRouter orchestrates high-speed, cheap reasoning (fractions of a cent per turn) for agent thoughts, tool decisions, and conversational triage.
+2. **Fixed-Cost Autonomous Heavy Muscle (Execution Layer):**
+   - Each Dot has its own isolated Docker workstation container (`opendots-computer-*`).
+   - Superpower CLIs (`claude` and `agy`) run directly inside the container shell for deep multi-file implementation, bug fixes, refactors, and test runs under fixed subscriptions.
+   - Every Dot is an empowered engineer: while having role specialties (Chief: operations, Architect: specs, Builder: coding, Reviewer: verification), all agents have full terminal access and can run scripts, inspect code, and dispatch runs.
+3. **Agency Scaling (`add-dot.sh`):**
+   - Spin up new specialized employees in 1 command:
+     ```bash
+     bash /opt/opendots/deploy/add-dot.sh "DevOps" "You are the DevOps Engineer..." Everyday
+     ```
+   - Automatically provisions container, copies pre-authenticated credentials (`claude`, `agy`, `gh`), installs skills (`production-ready`, `no-ai-slop`), configures git identity, and connects shared brain.
+4. **Autonomous Tasks & Routines (`dot-task`):**
+   - Agents and the founder can schedule, trigger, and inspect background routines:
+     ```bash
+     dot-task list
+     dot-task create "Check PR status and summarize" --interval 3600
+     dot-task loop "pr-monitor" 1800 "gh pr list"
+     ```
 
 ## Shared brain
 `setup-dots.sh` connects the brain once the host runs `deploy/founderos-hub-http.service` (`src/mcp/hub-http.ts`,
