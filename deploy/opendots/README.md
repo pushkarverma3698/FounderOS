@@ -69,7 +69,7 @@ allowlist: nobody may merge, force-push, rebase or call `gh api`; only the Build
 PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRouter credit in one afternoon.
 
 - **Give them work:** ask the Architect in chat, or open an issue labelled `agent:plan` in a repo listed in
-  `TEAM_REPOS` (default `pushkarverma3698/opendots-sandbox`). Add repos with
+  `TEAM_REPOS` (default: the 20 repos listed in `setup-dots.sh`, Oplify and turickai included). Change the list with
   `TEAM_REPOS="owner/a owner/b" bash /opt/opendots/deploy/setup-dots.sh`.
 - **Your part:** tell the Chief of Staff which `agent:approved` PR to merge (`chief-run` merges it, then closes
   the issue with a link to the PR; claude itself has no merge permission), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
