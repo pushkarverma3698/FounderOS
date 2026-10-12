@@ -3,7 +3,12 @@
 FROM opendots-computer:b6932d3
 
 ARG CLAUDE_CODE_VERSION=2.1.287
-RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client tmux jq \
+# Test services (team-services): Postgres 16 with pgvector and Redis are installed but never started, and no default
+# cluster is created. policy-rc.d (exit 101) stops the package scripts starting them; it is removed again afterwards.
+RUN printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d \
+  && mkdir -p /etc/postgresql-common && echo 'create_main_cluster = false' > /etc/postgresql-common/createcluster.conf \
+  && apt-get update && apt-get install -y --no-install-recommends git openssh-client tmux jq postgresql-16 postgresql-16-pgvector redis-server \
+  && rm /usr/sbin/policy-rc.d \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update && apt-get install -y --no-install-recommends gh \
@@ -18,6 +23,7 @@ COPY team-shift /usr/local/bin/team-shift
 COPY chief-run /usr/local/bin/chief-run
 COPY team-lib.sh /usr/local/bin/team-lib.sh
 COPY team-stream /usr/local/bin/team-stream
+COPY team-services /usr/local/bin/team-services
 # claude's role briefs, read by team-shift and chief-run.
 COPY team /usr/local/share/team
 

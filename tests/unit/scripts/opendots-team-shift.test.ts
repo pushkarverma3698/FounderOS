@@ -249,6 +249,13 @@ describe("team-shift: claude permissions", () => {
     }
   });
 
+  it("the Builder and the Reviewer may run team-services (test Postgres and Redis); the Architect may not", () => {
+    expect(permissions("builder", issue(5, ["agent:build"])).allowed).toContain("Bash(team-services:*)");
+    rmSync(join(runs, "shift-reviewer.job"), { force: true });
+    expect(permissions("reviewer", pr(5, ["agent:review"])).allowed).toContain("Bash(team-services:*)");
+    expect(permissions("architect", issue(6, ["agent:plan"])).allowed).not.toContain("Bash(team-services:*)");
+  });
+
   it("every role may search the shared brain, and none may write to it (issue and PR text is untrusted)", () => {
     for (const [role, start] of [
       ["architect", issue(3, ["agent:plan"])],
