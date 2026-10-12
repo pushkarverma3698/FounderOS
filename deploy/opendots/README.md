@@ -16,9 +16,19 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a scheduled shift turn may make 12 model calls and a chat turn (the Chief with you) 30 (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
 | `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the 15-min `shift-cron` crontab line (`SHIFT_SECONDS`, default 900). Idempotent |
+| `home/` | Every computer's employee setup, installed by `setup-dots.sh`: `CLAUDE.md` (the laptop's engineering rules minus laptop-only lines) as `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and the skills `production-ready`, `pr-adversary`, `systematic-debugging`, `no-ai-slop` for claude (`~/.claude/skills`) and agy (`~/.gemini/config/skills`). Edit here, not in a computer |
 | `shift-cron` | Host cron, every 15 min: runs `team-shift <role> --check` in each computer (no model call) and runs a shift task only when it prints `Due:` or the check fails. Log: `/opt/opendots/shift-cron.log` |
 | `dot-login` | In the computer, driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the proved login, `logout`, `status` |
 | `seed-cli-logins.sh` | Fallback over SSH: log a computer into claude (pasted `claude setup-token` token) and agy (the VPS's antigravity login) |
+
+## Shared brain
+`setup-dots.sh` connects the brain once the host runs `deploy/founderos-hub-http.service` (`src/mcp/hub-http.ts`,
+`/etc/founderos/hub-http.env`, `http://172.21.0.1:3100/mcp`, reachable only from the `opendots-computers` network):
+- claude in every computer gets the `turicks-brain` MCP with the **brain-only** token. Computers run repo code as
+  root, so any code run there can read that token: it can search and write memories, never mail or calendar.
+  Shifts may call only `search_memory` and `get_memory`.
+- The Chief Dot gets a `turicks-brain` Connection with the full token (calendar and mail reads), kept in the app's
+  SQLite. Reads run on their own; brain writes and `call_connected_tool` stay on Ask first.
 
 ## Founder steps, once
 1. Tailscale: open the login URL printed by `sudo tailscale up --hostname=turicks-dots` on the VPS, and
