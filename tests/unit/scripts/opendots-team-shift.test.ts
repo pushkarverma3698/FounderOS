@@ -979,6 +979,53 @@ describe("team-shift builder --task: a direct task from the founder's chat", () 
   });
 });
 
+describe("team-shift --inspect: direct inspection without issue filing", () => {
+  const QUERY = "Check all open issues and summarize recent commits";
+  function agyLogin(): void {
+    spawnSync("mkdir", ["-p", join(dir, "home", ".gemini", "antigravity-cli")]);
+    writeFileSync(join(dir, "home", ".gemini", "antigravity-cli", "antigravity-oauth-token"), "x");
+  }
+
+  it("runs claude inspection synchronously when completed quickly, without filing issues", () => {
+    world([issue(3, ["agent:build"])]);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "Found 1 open issue: #3\nRESULT: 1 issue open\n");
+    const r = shift("builder", "--inspect", "--engine", "claude", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("Done: owner/sandbox inspection.");
+    expect(r.out).toContain("Found 1 open issue: #3");
+    expect(items()).toHaveLength(1); // No new issue filed!
+    expect(existsSync(join(runs, "shift-builder.job"))).toBe(false); // Job was cleaned up!
+    const args = claudeArgs();
+    expect(args[2]).toContain("INSPECTION RULES:");
+    expect(args[2]).toContain("DO NOT create GitHub issues");
+  });
+
+  it("runs agy inspection when engine is agy", () => {
+    agyLogin();
+    world([]);
+    writeFileSync(join(fake, "state"), "exit=0\n");
+    writeFileSync(join(fake, "log"), "RESULT: all clear\n");
+    const r = shift("builder", "--inspect", "--engine", "agy", "--repo", "sandbox", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("Done: owner/sandbox inspection.");
+    const all = argv();
+    expect(all.slice(all.indexOf("agy"), all.indexOf("agy") + 2)).toEqual(["agy", "--new-project"]);
+  });
+
+  it("reports background running status when inspection exceeds wait duration", () => {
+    world([]);
+    writeFileSync(join(fake, "state"), "running\n");
+    const r = shiftWith({ TEAM_INSPECT_WAIT: "0" }, "builder", "--inspect", "--task", QUERY);
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toMatch(/^Started: owner\/sandbox inspection, claude run /);
+    expect(existsSync(join(runs, "shift-builder.job"))).toBe(true);
+
+    const p = shift("builder", "--progress");
+    expect(p.out).toContain("inspecting owner/sandbox");
+  });
+});
+
 describe("team-shift: progress in between and reasoning at the end", () => {
   it("claude streams its steps (stream-json through a readable filter), still without skip-permissions", () => {
     world([issue(1, ["agent:build"])]);

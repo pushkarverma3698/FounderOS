@@ -30,11 +30,12 @@ set -euo pipefail
 usage() { sed -n '4,5p' "$0" >&2; exit 2; }
 role=${1:-}
 shift || true
-check="" progress="" engine="" task="" task_repo=""
+check="" progress="" inspect="" engine="" task="" task_repo=""
 while (($#)); do
   case "$1" in
     --check) check=1; shift ;;
     --progress) progress=1; shift ;;
+    --inspect) inspect=1; shift ;;
     --engine | --task | --repo)
       (($# >= 2)) || usage
       case "$1" in --engine) engine=$2 ;; --task) task=$2 ;; --repo) task_repo=$2 ;; esac
@@ -42,9 +43,9 @@ while (($#)); do
     *) usage ;;
   esac
 done
-if [[ -n $engine$task$task_repo ]]; then
+if [[ -n $engine$task$task_repo || -n $inspect ]]; then
   engine=${engine:-claude}
-  [[ $role == builder && $engine =~ ^(claude|agy)$ && -n ${task//[[:space:]]/} && -z $check$progress ]] || usage
+  [[ ($role == builder || -n $inspect) && $engine =~ ^(claude|agy)$ && -n ${task//[[:space:]]/} && -z $check$progress ]] || usage
 fi
 RUNS=${TEAM_RUNS:-/workspace/runs}
 REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
@@ -55,6 +56,8 @@ LIMIT_MIN=${TEAM_RUN_LIMIT_MIN:-90}
 CONTINUE_MAX=${TEAM_CONTINUE_MAX:-2}
 [[ $CONTINUE_MAX =~ ^[0-9]+$ ]] || CONTINUE_MAX=2
 FOLLOW_MAX=2
+INSPECT_WAIT=${TEAM_INSPECT_WAIT:-30}
+[[ $INSPECT_WAIT =~ ^[0-9]+$ ]] || INSPECT_WAIT=30
 mkdir -p "$RUNS"
 
 case "$role" in
@@ -234,6 +237,38 @@ continue_run() { # kind repo n engine cap-or-exit0
 }
 # LIMIT_RE, AGY_DIR and agy_settings (the role allowlist as agy rules) are shared with chief-run.
 . "$(dirname "$0")/team-lib.sh"
+
+load_team_repos() {
+  team=()
+  [[ -f $REPOS_FILE ]] || return 0
+  while read -r r; do [[ -z $r || $r == \#* ]] || team+=("$r"); done < "$REPOS_FILE"
+}
+
+resolve_repo() {
+  local input="$1" repo=""
+  local lower_input
+  lower_input=$(tr '[:upper:]' '[:lower:]' <<<"$input")
+  case "$lower_input" in
+    oplify|oplify-api) input="OplifyMessage/oplify-messaging-api" ;;
+    oplify-app) input="OplifyMessage/oplify-messaging-app" ;;
+    founderos|fos) input="pushkarverma3698/FounderOS" ;;
+    turicks) input="turickai/turicks-web" ;;
+    sandbox) input="pushkarverma3698/opendots-sandbox" ;;
+  esac
+  for r in ${team[@]+"${team[@]}"}; do
+    if [[ $r == "$input" || $r == */"$input" ]]; then repo=$r; break; fi
+  done
+  if [[ -z $repo ]]; then
+    local matches=()
+    for r in ${team[@]+"${team[@]}"}; do
+      local lower_r
+      lower_r=$(tr '[:upper:]' '[:lower:]' <<<"$r")
+      if [[ $lower_r == *"$lower_input"* ]]; then matches+=("$r"); fi
+    done
+    if ((${#matches[@]} == 1)); then repo=${matches[0]}; fi
+  fi
+  printf '%s' "$repo"
+}
 
 ensure_labels() { # repo: create the team labels once per repo
   local marker="$RUNS/.labels-${1//\//_}" l
@@ -497,10 +532,121 @@ if [[ -n $progress ]]; then
     exit 0
   fi
   read -r repo kind n name started engine _ < "$job"
-  echo "$Role: ${engine:-claude} on $repo $kind #$n, $((($(date +%s) - started) / 60)) min, $(run-bg status "$name" | head -n1). Last steps:"
+  if [[ $kind == inspect ]]; then
+    echo "$Role: ${engine:-claude} inspecting $repo, $((($(date +%s) - started) / 60)) min, $(run-bg status "$name" | head -n1). Last steps:"
+  else
+    echo "$Role: ${engine:-claude} on $repo $kind #$n, $((($(date +%s) - started) / 60)) min, $(run-bg status "$name" | head -n1). Last steps:"
+  fi
   run-bg tail "$name" 200 2>/dev/null | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 4 |
     while IFS= read -r l; do if ((${#l} > 160)); then echo "${l:0:159}…"; else echo "$l"; fi; done || true
   exit 0
+fi
+
+# --inspect: run an ad-hoc inspection/query directly via claude or agy without filing an issue or branch.
+if [[ -n $inspect ]]; then
+  if [[ -f $job ]]; then
+    read -r repo kind n name started engine0 _ < "$job"
+    if [[ $(run-bg status "$name" | head -n1) != running ]]; then
+      closed=$("$0" "$role" 2>&1 || true)
+      [[ -z $closed ]] || trap 'printf "Earlier run, now closed:\n%s\n" "$closed"' EXIT
+    fi
+  fi
+  if [[ -f $job ]]; then
+    read -r repo kind n name started engine0 _ < "$job"
+    if [[ $kind == inspect ]]; then
+      echo "Busy: $repo inspection, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    else
+      echo "Busy: $repo $kind #$n, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    fi
+    exit 0
+  fi
+  load_team_repos
+  repo=""
+  if [[ -z $task_repo && ${#team[@]} == 1 ]]; then
+    repo=${team[0]}
+  elif [[ -n $task_repo ]]; then
+    repo=$(resolve_repo "$task_repo")
+  fi
+  list=$(IFS=,; echo "${team[*]-}" | sed 's/,/, /g')
+  if [[ -z $repo && -z $task_repo ]]; then echo "Say which repo. Team repos: $list."; exit 0; fi
+  if [[ -z $repo ]]; then echo "Not a team repo: $task_repo. Team repos: $list."; exit 0; fi
+  if [[ $engine == agy && ! -s $AGY_DIR/antigravity-oauth-token ]]; then
+    echo "agy: this computer has no agy login, so inspection could not start. Run dot-login agy start first."; exit 0
+  fi
+
+  dir=$WORK/${repo##*/}
+  if ! err=$({ [[ -d $dir/.git ]] || gh repo clone "$repo" "$dir"; } 2>&1 &&
+    git -C "$dir" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' 2>&1 &&
+    git -C "$dir" fetch -q origin 2>&1); then
+    echo "Could not prepare $dir: $err"; exit 0
+  fi
+  base=$(base_of "$repo")
+  git -C "$dir" reset -q --hard 2>/dev/null || true
+  git -C "$dir" clean -fdq 2>/dev/null || true
+  git -C "$dir" checkout -q --detach "origin/$base" 2>/dev/null || true
+  command -v team-services >/dev/null 2>&1 && team-services start postgres redis >/dev/null 2>&1 || true
+
+  if [[ -r $LOCAL_RULES/${repo%%/*}.md ]]; then
+    mkdir -p "$dir/.git/info"; touch "$dir/.git/info/exclude"
+    for f in CLAUDE.local.md AGENTS.md GEMINI.md; do
+      if ! grep -qxF "$f" "$dir/.git/info/exclude"; then
+        [[ ! -e $dir/$f ]] || continue
+        echo "$f" >> "$dir/.git/info/exclude"
+      fi
+      cp "$LOCAL_RULES/${repo%%/*}.md" "$dir/$f"
+    done
+  fi
+
+  cmds=""
+  for t in "${READ_TOOLS[@]}" "${CHECK_TOOLS[@]}"; do if [[ $t == "Bash("* ]]; then t=${t#"Bash("}; cmds+="${t%":*)"}, "; fi; done
+  name="shift-$role-inspect-$(tr -c 'a-zA-Z0-9_\n-' - <<<"${repo##*/}")-$(date +%s)"
+  inspect_prompt="Repository: $repo. Base branch: $base.
+Work directory: $dir (already checked out at origin/$base).
+Shell commands you may run: ${cmds%, }.
+Task from founder:
+$task
+
+INSPECTION RULES:
+- You are answering an ad-hoc inspection or query for the founder.
+- This is strictly READ-ONLY. DO NOT edit files, DO NOT commit, DO NOT push, DO NOT create pull requests, and DO NOT create GitHub issues.
+- Investigate using allowed read and check tools (e.g. git, gh issue list, gh pr list, code reading, running test suites with team-services).
+- State your findings clearly, factually, and concisely.
+- Conclude your output with a clear RESULT line summarizing your answer."
+
+  if [[ $engine == agy ]]; then
+    agy_settings
+    run=(agy --new-project --print "$inspect_prompt" --print-timeout "${LIMIT_MIN}m" --output-format text)
+  else
+    inspect_allowed=("${READ_TOOLS[@]}" "${CHECK_TOOLS[@]}")
+    run=(team-stream claude -p "$inspect_prompt" --output-format stream-json --verbose
+      --allowedTools "${inspect_allowed[@]}" --disallowedTools "${denied[@]}")
+  fi
+
+  run-bg start "$name" sh -c 'cd "$0" && exec "$@"' "$dir" "${run[@]}" >/dev/null
+  printf '%s %s %s %s %s %s %s\n' "$repo" "inspect" "0" "$name" "$(date +%s)" "$engine" "0" > "$job"
+
+  waited=0
+  while ((waited < INSPECT_WAIT)); do
+    state=$(run-bg status "$name" | head -n1)
+    if [[ $state != running ]]; then break; fi
+    sleep 1
+    ((waited++))
+  done
+  state=$(run-bg status "$name" | head -n1)
+  if [[ $state != running ]]; then
+    rm -f "$job"
+    log=$(run-bg tail "$name" 400 2>/dev/null | tr -d '\r')
+    echo "Done: $repo inspection."
+    if [[ -n $log ]]; then
+      echo "$log"
+    else
+      echo "No output recorded."
+    fi
+    exit 0
+  else
+    echo "Started: $repo inspection, $engine run $name. Check progress with team-shift $role --progress."
+    exit 0
+  fi
 fi
 
 # --task: file the founder's task as a claimed issue and start the engine he named. One Builder run at a time.
@@ -516,34 +662,19 @@ if [[ -n $task ]]; then
   fi
   if [[ -f $job ]]; then
     read -r repo kind n name started engine0 _ < "$job"
-    echo "Busy: $repo $kind #$n, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    if [[ $kind == inspect ]]; then
+      echo "Busy: $repo inspection, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    else
+      echo "Busy: $repo $kind #$n, ${engine0:-claude} run $name, $((($(date +%s) - started) / 60)) min. Ask again when it is done."
+    fi
     exit 0
   fi
-  team=()
-  while read -r r; do [[ -z $r || $r == \#* ]] || team+=("$r"); done < "$REPOS_FILE"
+  load_team_repos
   repo=""
   if [[ -z $task_repo && ${#team[@]} == 1 ]]; then
     repo=${team[0]}
   elif [[ -n $task_repo ]]; then
-    lower_input=$(tr '[:upper:]' '[:lower:]' <<<"$task_repo")
-    case "$lower_input" in
-      oplify|oplify-api) task_repo="OplifyMessage/oplify-messaging-api" ;;
-      oplify-app) task_repo="OplifyMessage/oplify-messaging-app" ;;
-      founderos|fos) task_repo="pushkarverma3698/FounderOS" ;;
-      turicks) task_repo="turickai/turicks-web" ;;
-      sandbox) task_repo="pushkarverma3698/opendots-sandbox" ;;
-    esac
-    for r in ${team[@]+"${team[@]}"}; do
-      if [[ $r == "$task_repo" || $r == */"$task_repo" ]]; then repo=$r; break; fi
-    done
-    if [[ -z $repo ]]; then
-      matches=()
-      for r in ${team[@]+"${team[@]}"}; do
-        lower_r=$(tr '[:upper:]' '[:lower:]' <<<"$r")
-        if [[ $lower_r == *"$lower_input"* ]]; then matches+=("$r"); fi
-      done
-      if ((${#matches[@]} == 1)); then repo=${matches[0]}; fi
-    fi
+    repo=$(resolve_repo "$task_repo")
   fi
   list=$(IFS=,; echo "${team[*]-}" | sed 's/,/, /g')
   if [[ -z $repo && -z $task_repo ]]; then echo "Say which repo. Team repos: $list."; exit 0; fi
@@ -571,22 +702,54 @@ if [[ -f $job ]]; then
   engine=${engine:-claude}
   state=$(run-bg status "$name" | head -n1)
   age=$((($(date +%s) - started) / 60))
-  if [[ $state == running ]] && ((age < LIMIT_MIN)); then echo "Working: $repo $kind #$n, $engine run $name, $age min."; exit 0; fi
-  if [[ -n $check ]]; then echo "Due: $repo $kind #$n, run $name is $state."; exit 0; fi
+  if [[ $state == running ]] && ((age < LIMIT_MIN)); then
+    if [[ $kind == inspect ]]; then
+      echo "Working: $repo inspection, $engine run $name, $age min."
+    else
+      echo "Working: $repo $kind #$n, $engine run $name, $age min."
+    fi
+    exit 0
+  fi
+  if [[ -n $check ]]; then
+    if [[ $kind == inspect ]]; then
+      echo "Due: $repo inspection, run $name is $state."
+    else
+      echo "Due: $repo $kind #$n, run $name is $state."
+    fi
+    exit 0
+  fi
   follow="" order=""
   # A count GitHub refuses fails the shift with the job kept: the next shift counts again (no silent skip).
-  if [[ $state != unknown ]]; then follow=$(follow_ups "$kind" "$repo" "$n" "${cap:-$FOLLOW_MAX}"); fi
+  if [[ $state != unknown && $kind != inspect ]]; then follow=$(follow_ups "$kind" "$repo" "$n" "${cap:-$FOLLOW_MAX}"); fi
   case "$state" in
     running) # over the limit
       tmux kill-session -t "run-$name" 2>/dev/null || true
+      if [[ $kind == inspect ]]; then
+        rm -f "$job"
+        echo "$Role: $engine inspection ran over $LIMIT_MIN min and was stopped. Last output:"
+        run-bg tail "$name" 50 | tr -d '\r'
+        exit 0
+      fi
       if can_continue "$kind" "$repo" "$n"; then continue_run "$kind" "$repo" "$n" "$engine" cap
       else
         { echo "$Role: $engine ran over $LIMIT_MIN min and was stopped$(continued_note "$kind" "$repo" "$n"). Last output:"; last_output "$name"; } |
           block "$kind" "$repo" "$n"
       fi ;;
     unknown) # the computer restarted and the run is gone: start it again
-      rm -f "$job"; start "$kind" "$repo" "$n" "" "$engine" ;;
+      rm -f "$job"
+      if [[ $kind == inspect ]]; then
+        echo "$Role: inspection run was lost."
+        exit 0
+      fi
+      start "$kind" "$repo" "$n" "" "$engine" ;;
     *) # finished: a run that handed the item over is done, whatever its exit code
+      if [[ $kind == inspect ]]; then
+        rm -f "$job"
+        log=$(run-bg tail "$name" 400 2>/dev/null | tr -d '\r')
+        done=$(printf 'Done: %s inspection.\n%s' "$repo" "$log")
+        printf '%s\n' "$done"; printf '%s\n' "$done" | remember
+        exit 0
+      fi
       now=$(labels "$kind" "$repo" "$n")
       # Back in the build queue with nothing to wait for would be handed out again every minute.
       if [[ $role == builder && $kind == issue ]] && grep -qx agent:build <<<"$now" &&
