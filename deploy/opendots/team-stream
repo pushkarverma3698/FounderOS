@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# claude's --output-format stream-json as readable log lines, so `team-shift --progress` can show what a run is
+# doing while it runs (AG-064). One line per tool call ("> Bash: npm test"), assistant text as it is, an error
+# result (the usage-limit text) as it is. Lines that are not JSON pass through unchanged.
+#   team-stream claude -p ... --output-format stream-json --verbose   run it, filter, exit with claude's code
+#   ... | team-stream                                                 filter stdin
+set -o pipefail
+F='(fromjson? | objects) // {type: "raw", line: .}
+| if .type == "raw" then .line
+  elif .type == "assistant" then .message.content[]?
+    | if .type == "text" then .text
+      elif .type == "tool_use" then
+        "> \(.name): \(.input.command // .input.file_path // .input.pattern // .input.path // (.input | tostring))"
+        | gsub("\\s+"; " ") | .[:200]
+      else empty end
+  elif .type == "result" and (.is_error == true or .subtype != "success") then .result // .subtype
+  else empty end'
+if (($#)); then "$@" | jq --unbuffered -Rr "$F"; else jq --unbuffered -Rr "$F"; fi
