@@ -174,8 +174,8 @@ case "$group $sub" in
   "pr create")
     need_repo
     number=$(jq -r --arg r "$repo" '100 + (.repos[$r].prs | length)' "$STATE")
-    mutate --arg r "$repo" --arg h "$(flag --head)" --argjson n "$number" --arg b "$(flag --body || true)" \
-      '.repos[$r].prs += [{number: $n, headRefName: $h, isDraft: true, comments: [], body: $b}]'
+    mutate --arg r "$repo" --arg h "$(flag --head)" --argjson n "$number" --arg b "$(flag --body || true)" --arg base "$(flag --base || true)" \
+      '.repos[$r].prs += [{number: $n, headRefName: $h, isDraft: true, comments: [], body: $b} + (if $base == "" then {} else {baseRefName: $base} end)]'
     printf 'https://github.com/%s/pull/%s\n' "$repo" "$number"
     ;;
 
@@ -194,6 +194,16 @@ case "$group $sub" in
     if body=$(flag --body); then
       mutate --arg r "$repo" --arg n "$num" --arg b "$body" '(.repos[$r].prs[] | select((.number | tostring) == $n) | .body) = $b'
     fi
+    if base=$(flag --base); then
+      mutate --arg r "$repo" --arg n "$num" --arg b "$base" '(.repos[$r].prs[] | select((.number | tostring) == $n) | .baseRefName) = $b'
+    fi
+    ;;
+
+  "pr ready")
+    # `gh pr ready N` marks it ready; `--undo` puts it back to draft.
+    need_repo
+    undo=true; for a in "${ARGS[@]}"; do [ "$a" = "--undo" ] && undo=false; done
+    mutate --arg r "$repo" --arg n "$num" --argjson d "$undo" '(.repos[$r].prs[] | select((.number | tostring) == $n) | .isDraft) = ($d | not)'
     ;;
 
   "label list")
@@ -229,6 +239,14 @@ case "$group $sub" in
   # gh api repos/<owner>/<name>/branches/<branch>: a repo has the branches in its state's `branches`
   # list (default: just main). A missing one is gh's real 404 text, which the daemon tells apart from
   # an API outage.
+  # gh api repos/<owner>/<name>/git/matching-refs/heads/<prefix>: the repo's `remoteBranches` (default none) that start with
+  # <prefix>, as the REST array of {ref}, with --jq applied.
+  "api repos/"*"/git/matching-refs/heads/"*)
+    [ "$(jq -r '.failApi // false' "$STATE")" = true ] && die "HTTP 502: Bad Gateway (https://api.github.com/repos)"
+    slug="${sub#repos/}"; slug="${slug%%/git/*}"; prefix="${sub##*/git/matching-refs/heads/}"
+    jq -c --arg r "$slug" --arg p "$prefix" '[(.repos[$r].remoteBranches // [])[] | select(startswith($p)) | {ref: ("refs/heads/" + .)}]' "$STATE" | emit
+    ;;
+
   "api repos/"*)
     [ "$(jq -r '.failApi // false' "$STATE")" = true ] && die "HTTP 502: Bad Gateway (https://api.github.com/repos)"
     slug="${sub#repos/}"; slug="${slug%%/branches/*}"; branch="${sub##*/branches/}"

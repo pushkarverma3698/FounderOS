@@ -103,6 +103,8 @@ export interface PrSpec {
   readonly headRefName: string;
   readonly headRefOid?: string;
   readonly isDraft?: boolean;
+  /** The PR's base branch. Absent means main, as the fake `gh` reports it. */
+  readonly baseRefName?: string;
   /** OPEN (default), MERGED or CLOSED. Only an OPEN PR is listed, as `gh pr list --state open` does. */
   readonly state?: "OPEN" | "MERGED" | "CLOSED";
   readonly comments?: readonly string[];
@@ -149,12 +151,15 @@ interface RepoState {
   labels: string[];
   /** Branches `gh api repos/<slug>/branches/<name>` finds. Absent means just `main`. */
   branches?: string[];
+  /** Branches `gh api repos/<slug>/git/matching-refs/heads/<prefix>` finds. Absent means none. */
+  remoteBranches?: string[];
   issues: Record<string, { title: string; body: string; labels: string[]; state: string; comments: { body: string }[] }>;
   prs: {
     number: number;
     headRefName: string;
     headRefOid?: string;
     isDraft?: boolean;
+    baseRefName?: string;
     state?: string;
     comments: { body: string }[];
     labels?: string[];
@@ -475,6 +480,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
       headRefName: spec.headRefName,
       headRefOid: spec.headRefOid ?? "a".repeat(40),
       isDraft: spec.isDraft ?? true,
+      ...(spec.baseRefName ? { baseRefName: spec.baseRefName } : {}),
       state: spec.state ?? "OPEN",
       comments: (spec.comments ?? []).map((body) => ({ body })),
       ...(spec.checks ? { checks: spec.checks.map((c) => ({ ...c })) } : {}),
@@ -494,6 +500,14 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     git(["-C", ws, "fetch", "-q", "origin"]);
     git(["-C", ws, "push", "-q", "origin", "origin/main:refs/heads/beta"]);
     git(["-C", ws, "fetch", "-q", "origin"]);
+  }
+
+  /** Branches that exist on the remote, as far as the dispatcher's one-agent-per-issue lock can see. */
+  addRemoteBranches(slug: string, names: readonly string[]): void {
+    const s = this.readGh();
+    const r = this.repoState(s, slug);
+    r.remoteBranches = [...(r.remoteBranches ?? []), ...names];
+    this.writeGh(s);
   }
 
   setRepoLabels(slug: string, labels: readonly string[]): void {

@@ -1074,7 +1074,12 @@ merge_cleared() {
     return 0
   fi
   base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
-  if [[ "$repo_owner" == "OplifyMessage" ]]; then
+  if [[ "$base" == "production" || "$base" == "prod" ]]; then
+    # A reviewed PR reaching here is never a promotion (those are skipped before the gate), so one aimed at the production
+    # branch is an agent mistake: nothing is marked ready or merged.
+    merge_result="skipped — base is $base; agent PRs target the integration branch, a human retargets or promotes"
+    log "$repo_name#$pr cleared but aimed at $base — not marked ready, not merged"
+  elif [[ "$repo_owner" == "OplifyMessage" ]]; then
     # Employer repo. founderOS reviews, fixes, and marks ready — a human
     # merges from GitHub or the phone, every time, no exceptions.
     merge_result="not attempted — $repo_owner is an employer org; a human merges"

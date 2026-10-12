@@ -254,9 +254,10 @@ notify_long() {
 #   gh-token.sh     the bot's GITHUB_TOKEN as GH_TOKEN + a git credential helper; as_antigravity_gh passes it on stdin
 #   dispatch-repos.sh  dispatch_repos_print: the repo list, asked of the TypeScript allowlist
 #   pr-moves.sh     ensure_moves_line: an agent PR with no `Moves:` line gets `Moves: A` for the PR scope check
+#   agent-guard.sh  one agent per issue (guard_issue_conflict) and the PR checked after a run (guard_after_pr: base, draft, merged)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in tg-quiet.sh down-state.sh gh-token.sh dispatch-repos.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh; do
+for _lib in tg-quiet.sh down-state.sh gh-token.sh dispatch-repos.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh pass-p.sh executor-prompt.sh pr-moves.sh agent-guard.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -1019,6 +1020,24 @@ claim_and_implement() {
     return 2
   fi
 
+  # One agent per issue, in code. An issue that already has an open agent PR, or whose brief points at an issue an agent
+  # holds or has branched for, is refused BEFORE anything is claimed (Oplify #115/#117/#119, 2026-10-11: three agents,
+  # three branches, one bug). Unreadable GitHub = skip the tick, never guess.
+  local conflict="" conflict_rc=0
+  conflict="$(guard_issue_conflict "$issue" "$body")" || conflict_rc=$?
+  if [[ "$conflict_rc" -eq 0 ]]; then
+    log "#${issue} REFUSED — another agent already has this work: ${conflict}"
+    if [[ "$DRY_RUN" -ne 1 ]]; then
+      gh issue edit "$issue" --repo "$REPO" --remove-label agent:ready --add-label agent:failed >/dev/null 2>&1 || true
+      gh issue comment "$issue" --repo "$REPO" --body "agent-dispatch refused to start: ${conflict}. One agent per issue. Close or finish the other work first, or run \`agent-dispatch --issue ${issue}\` by hand if the overlap is intended." >/dev/null 2>&1 || true
+      notify "🛑 agent-dispatch: #${issue} on ${REPO} not started — ${conflict}"
+    fi
+    return 2
+  elif [[ "$conflict_rc" -ne 1 ]]; then
+    log "#${issue} could not check for other agent work (GitHub unreadable) — skipped this tick"
+    return 3
+  fi
+
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY RUN would claim #${issue} '${title}' -> branch ${branch}$([[ "$engine" == agy ]] || printf ' (by %s)' "$ename")"
     return 0
@@ -1039,6 +1058,12 @@ claim_and_implement() {
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX)"
   set_integration_branch
   local target_branch="$INTEGRATION_BRANCH"
+  if guard_forbidden_base "$target_branch"; then
+    log "#${issue} FATAL: integration branch resolved to ${target_branch}, which agents may never target — releasing claim"
+    finish_issue "$issue" agent:failed
+    rm -f "$prompt_file"
+    return 1
+  fi
 
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
@@ -1050,7 +1075,9 @@ $(emit_fenced_issue_text "$title" "$body")
 You are already on branch ${branch}, checked out from origin/${target_branch}, in your isolated workspace.
 Commit on this branch; do not create, rename or switch branches (the dispatcher finds your PR by this exact
 name). Push with \`git push -u origin HEAD\`. Do not touch anything outside this repository checkout.
-Open the PR as a draft targeting ${target_branch}. Stop once the PR is open — do not keep iterating.
+Open the PR as a draft targeting ${target_branch}, and put \`Fixes #${issue}\` on its own line in the PR body. Use a title that
+names what this issue asks for. Change only what the issue asks for. Never merge, approve or mark a PR ready, never target
+production or main, and never push to any branch but ${branch}. Stop once the PR is open — do not keep iterating.
 Look at how existing tests are written in this repo before writing new ones.
 Verify with only the test files you added or changed, plus \`pnpm lint && pnpm verify:arch\`. Do not run the full
 \`pnpm test\` or \`pnpm gate\`: CI and the reviewer run them, and the full suite alone takes about 7 minutes of your budget.
@@ -1176,6 +1203,21 @@ EOF2
 )" >/dev/null
     notify "⚠️ agent-dispatch: #${issue} FAILED — no verifiable PR after ${ename} ran. Last line of the run: ${last_line:-<empty>}. See ~/.claude/agent-dispatch.log"
     agy_progress_outcome "❌ No PR landed (${engine} exit ${agy_exit}, ${new_commits:-0} commit(s)). #${issue} is agent:failed. ${last_line:+Last line: ${last_line}}"
+    rm -f "$agy_log"
+    return 1
+  fi
+
+  # The net under the prompt: whatever the run did, the PR must be a draft on the integration branch and unmerged.
+  local guard_rc=0 guard_out=""
+  guard_out="$(guard_after_pr "$pr_number" "$target_branch")" || guard_rc=$?
+  if [[ -n "$guard_out" ]]; then
+    log "#${issue} PR #${pr_number} guard: ${guard_out//$'\n'/; }"
+    gh issue comment "$issue" --repo "$REPO" --body "agent-dispatch corrected the agent's PR #${pr_number}: ${guard_out//$'\n'/; }." >/dev/null 2>&1 || true
+  fi
+  if [[ "$guard_rc" -ne 0 ]]; then
+    finish_issue "$issue" agent:failed
+    notify "🛑 agent-dispatch: #${issue} PR #${pr_number} on ${REPO} broke the agent rules and is NOT handed to review — ${guard_out//$'\n'/; }"
+    agy_progress_outcome "🛑 PR #${pr_number} broke the agent rules (${guard_out//$'\n'/; }). #${issue} is agent:failed."
     rm -f "$agy_log"
     return 1
   fi
