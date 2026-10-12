@@ -106,7 +106,8 @@ ws=$(api GET /workspace)
 space=$(jq -r '.spaces[] | select(.name=="Everyday") | .id' <<<"$ws")
 [[ -n $space ]] || { echo "no Everyday space" >&2; exit 1; }
 dot_id() { jq -r --arg n "$1" '.dots[] | select(.name==$n) | .id' <<<"$ws" | head -1; }
-body() { jq -nc --arg n "$1" --arg i "$2" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, skillDeliveryEnabled:true}'; }
+slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//'; }
+body() { local s; s=$(slug "$1"); jq -nc --arg n "$1" --arg i "$2" --arg l "$s" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, learningContainerId:$l, skillDeliveryEnabled:true}'; }
 SHELL_PERMS='{"enabled":true,"browser":true,"files":true,"shell":true}'
 
 upsert() { # name instructions [old name] -> id
