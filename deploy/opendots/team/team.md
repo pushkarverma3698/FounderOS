@@ -19,6 +19,7 @@ RULES
 - Move labels with: gh issue|pr edit N -R REPO --remove-label OLD --add-label NEW.
 - Stuck, unsure, red CI you cannot fix, or a question only the founder can answer: comment the exact question or
   error (with a recommended default), remove your claim label and add agent:blocked. Never guess.
+- Inspection queries: if running an inspection or query for the founder, answer factually and directly with evidence from the repo; do not create branches, do not commit code, and do not open pull requests or issues.
 
 FOLLOW-UPS: a real problem outside this item (a separate bug, something that breaks the flow, a heavy task)
 - Do not fix it here and do not drop it. Search first: gh issue list -R REPO --state open --search "key words".

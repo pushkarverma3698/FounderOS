@@ -55,8 +55,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 ## Operating
 - Status: `cd /opt/opendots/app && docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml ps`
 - Model: `OPENAI_MODEL` in `.env` (OpenRouter, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`), then rerun `install.sh`.
-  The model is jev-router, which picks a model and reasoning effort per request, so it can't be pinned. Some of its
-  picks need OpenRouter's 18+ confirmation (OpenRouter → Settings → Preferences); without it those turns fail with a 403.
+  Recommended: `OPENAI_MODEL=deepseek/deepseek-v4.1-flash,google/gemini-2.5-flash` for high-speed primary execution with automatic Gemini flash fallback. Alternatively `typesafe/jev-router` which picks model and reasoning per request (some picks need OpenRouter 18+ confirmation).
 - Output limit: a model reply may be 16,000 tokens (reasoning included). A reply that hits the limit ends the turn
   as failed with "The model's reply was cut off at the output limit." A cut-off tool call is never run, and a
   shift retries one interval later. Upstream's 2,200 cut coding replies off mid-file and still reported "completed".
