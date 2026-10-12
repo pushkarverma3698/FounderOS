@@ -30,7 +30,7 @@ case "$kind" in
   pr)
     case "$sub" in
       view) it=$(one "$repo" "$n"); [[ -n $it ]] || { echo "no pull requests found" >&2; exit 1; }
-        jq -c --arg r "$repo" '{state, labels: [.labels[] | {name: .}], baseRefName: (.base // "beta"),
+        jq -c --arg r "$repo" '{state, labels: [.labels[] | {name: .}], baseRefName: (.base // "beta"), headRefName: (.head // "branch-\(.number)"),
           url: "https://github.com/\($r)/pull/\(.number)", closingIssuesReferences: [(.closes // [])[] | {number: .}]}' <<<"$it" ;;
       list) jq -c --arg r "$repo" --arg h "$head" '[.[] | select(.repo==$r and .kind=="pr" and (.head // "") == $h)
           | {number, state, baseRefName: (.base // "beta"), labels: [.labels[] | {name: .}]}]' "$S" | jq -r "$q" ;;
@@ -41,7 +41,12 @@ case "$kind" in
       *) echo "fake gh: unhandled pr $sub" >&2; exit 9 ;;
     esac ;;
   issue)
-    [[ $sub == close ]] || { echo "fake gh: unhandled issue $sub" >&2; exit 9; }
-    set_state "$repo" "$n" CLOSED ;;
+    case "$sub" in
+      view) it=$(one "$repo" "$n"); [[ -n $it ]] || { echo "no issues found" >&2; exit 1; }
+        jq -c '{state}' <<<"$it" | jq -r "$q" ;;
+      close) [[ -e $FAKE/close-fails ]] && { echo "GraphQL: Resource not accessible" >&2; exit 1; }
+        set_state "$repo" "$n" CLOSED ;;
+      *) echo "fake gh: unhandled issue $sub" >&2; exit 9 ;;
+    esac ;;
   *) echo "fake gh: unhandled $kind $sub" >&2; exit 9 ;;
 esac
