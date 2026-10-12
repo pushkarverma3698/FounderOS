@@ -60,7 +60,8 @@ if [[ -z "$space" ]]; then
 fi
 
 dot_id=$(jq -r --arg n "$NAME" '.dots[] | select(.name==$n) | .id' <<<"$ws" | head -1)
-body() { jq -nc --arg n "$NAME" --arg i "$INSTRUCTIONS" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, skillDeliveryEnabled:true}'; }
+slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//'; }
+body() { local s; s=$(slug "$NAME"); jq -nc --arg n "$NAME" --arg i "$INSTRUCTIONS" --arg l "$s" '{name:$n, instructions:$i, researchAllowed:true, memoryAllowed:true, learningContainerId:$l, skillDeliveryEnabled:true}'; }
 SHELL_PERMS='{"enabled":true,"browser":true,"files":true,"shell":true}'
 
 if [[ -z "$dot_id" ]]; then
