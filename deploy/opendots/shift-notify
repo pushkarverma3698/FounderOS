@@ -48,8 +48,10 @@ https://github.com/$repo/$path/${n%.}"
     mark="✅ $who finished"
     # The engine can block the item itself: the run then ends "Done" with a RESULT that says blocked.
     if grep -qi '^blocked' <<< "$result"; then mark="⛔ $who is blocked and needs you"; fi
+    order=$(grep '^Merge order' <<< "$out" | tail -n1) # team-shift: the PR is one of a stack
     text="$mark: $what
-${result:-$(sed -n '2,$p' <<< "$out")}"
+${result:-$(sed -n '2,$p' <<< "$out")}${result:+${order:+
+$order}}"
   fi
   if send "${text:0:3500}"; then echo "$sum" > "$seen"; echo "$(now) $role: sent ($head)"
   else echo "$(now) $role: Telegram send failed, trying again next run ($head)"; fi

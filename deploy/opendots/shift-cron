@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Host cron (installed by setup-dots.sh): the only clock for the engineering shifts. For each role it runs the free,
 # read-only `team-shift <role> --check` in the Dot's computer and wakes the Dot's shift task (one paid OpenRouter
-# turn) only when the check prints "Due:" or fails, so the founder sees the error. "No work" and "Working:" cost
-# nothing. A paused or cancelled task is never woken: pausing the three tasks stays the kill switch.
+# turn) only when the check prints "Due:" or fails FAIL_WAKE times in a row, so the founder sees an error that
+# stays. "No work" and "Working:" cost nothing. A paused or cancelled task is never woken: pausing the three tasks stays the kill switch.
 # It runs every minute, so a hand-off waits a minute, not 15. The same Due line (or the same failing check) wakes its
 # Dot a second time 2 min later (a wake can die on a 502 before the model runs), then only every REWAKE_MIN: a Dot
 # that cannot clear it costs 4 paid turns an hour, not 60.
@@ -10,6 +10,7 @@ set -uo pipefail
 APP=${OPENDOTS_APP:-/opt/opendots/app}
 TASKS=${OPENDOTS_SHIFT_TASKS:-/opt/opendots/shift-tasks} # "role dot-id task-id" per line
 REWAKE_MIN=15
+FAIL_WAKE=3
 exec 9>"$TASKS.lock"
 flock -n 9 || exit 0 # an earlier run is still checking (a check may take 60 s per role)
 T=$(grep '^OWNER_TOKEN=' "$APP/.env" | cut -d= -f2-)
@@ -21,6 +22,15 @@ while read -r role dot task; do
   out=$(timeout 60 docker exec "opendots-computer-$dot" team-shift "$role" --check 2>&1); rc=$?
   line="$(date -u +%FT%TZ) $role: $(printf '%s' "$out" | tail -n1)"
   woke=$TASKS.woke-$role # line 1: what last woke this role's task, line 2: how often; gone once idle or working
+  # A failing check (GitHub answering with an error page) is free to try again next minute: only FAIL_WAKE in a
+  # row wake the Dot, so the founder still sees an error that stays.
+  fails=$TASKS.fail-$role
+  if ((rc == 0)); then rm -f "$fails"
+  else
+    f=$(cat "$fails" 2>/dev/null); [[ $f =~ ^[0-9]+$ ]] || f=0
+    echo "$((++f))" > "$fails"
+    if ((f < FAIL_WAKE)); then echo "$line (check exit $rc) -> failed check $f of $FAIL_WAKE in a row, no wake yet"; continue; fi
+  fi
   if ((rc == 0)) && [[ $out != Due:* ]]; then rm -f "$woke"; echo "$line"; continue; fi
   ((rc == 0)) || line="$line (check exit $rc)"
   n=0

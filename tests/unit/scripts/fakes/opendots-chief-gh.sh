@@ -5,12 +5,14 @@ set -euo pipefail
 S=$FAKE/items.json
 printf '%s\n' "$*" >> "$FAKE/gh.log"
 kind=$1; sub=${2:-}; shift 2 || true
-n=""; repo=""; q="."
+n=""; repo=""; q="."; head=""; newbase=""
 while (($#)); do
   case "$1" in
     -R) repo=$2; shift 2 ;;
     --jq) q=$2; shift 2 ;;
-    --json | --comment) shift 2 ;;
+    --json | --comment | --state) shift 2 ;;
+    --head) head=$2; shift 2 ;;
+    --base) newbase=$2; shift 2 ;;
     --merge) shift ;;
     *) [[ -z $n ]] && n=$1; shift ;;
   esac
@@ -28,14 +30,23 @@ case "$kind" in
   pr)
     case "$sub" in
       view) it=$(one "$repo" "$n"); [[ -n $it ]] || { echo "no pull requests found" >&2; exit 1; }
-        jq -c --arg r "$repo" '{state, labels: [.labels[] | {name: .}], baseRefName: "beta",
+        jq -c --arg r "$repo" '{state, labels: [.labels[] | {name: .}], baseRefName: (.base // "beta"), headRefName: (.head // "branch-\(.number)"),
           url: "https://github.com/\($r)/pull/\(.number)", closingIssuesReferences: [(.closes // [])[] | {number: .}]}' <<<"$it" ;;
+      list) jq -c --arg r "$repo" --arg h "$head" '[.[] | select(.repo==$r and .kind=="pr" and (.head // "") == $h)
+          | {number, state, baseRefName: (.base // "beta"), labels: [.labels[] | {name: .}]}]' "$S" | jq -r "$q" ;;
+      edit) [[ -e $FAKE/edit-fails ]] && { echo "GraphQL: Base branch was modified" >&2; exit 1; }
+        jq --arg r "$repo" --argjson n "$n" --arg b "$newbase" 'map(if .repo==$r and .number==$n then .base=$b else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
       merge) [[ -e $FAKE/merge-fails ]] && { echo "X Pull request $repo#$n is not mergeable: the merge commit cannot be cleanly created." >&2; exit 1; }
         set_state "$repo" "$n" MERGED ;;
       *) echo "fake gh: unhandled pr $sub" >&2; exit 9 ;;
     esac ;;
   issue)
-    [[ $sub == close ]] || { echo "fake gh: unhandled issue $sub" >&2; exit 9; }
-    set_state "$repo" "$n" CLOSED ;;
+    case "$sub" in
+      view) it=$(one "$repo" "$n"); [[ -n $it ]] || { echo "no issues found" >&2; exit 1; }
+        jq -c '{state}' <<<"$it" | jq -r "$q" ;;
+      close) [[ -e $FAKE/close-fails ]] && { echo "GraphQL: Resource not accessible" >&2; exit 1; }
+        set_state "$repo" "$n" CLOSED ;;
+      *) echo "fake gh: unhandled issue $sub" >&2; exit 9 ;;
+    esac ;;
   *) echo "fake gh: unhandled $kind $sub" >&2; exit 9 ;;
 esac

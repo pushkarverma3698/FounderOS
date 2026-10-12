@@ -4,6 +4,10 @@
 # claude's usage-limit lines (deploy/lib/claude-run.sh); the weekly limit can exit 0.
 LIMIT_RE='hit your .*limit|usage limit|limit reached|quota reached|RESOURCE_EXHAUSTED'
 AGY_DIR=$HOME/.gemini/antigravity-cli
+# Epic branch (README "Epic branch"): the parts of a big task merge into feat/epic-<P> (P = the parent issue), and
+# one final PR carries that branch to the repo's base.
+EPIC_RE='^feat/epic-[0-9]+$'
+part_of() { grep -oiE '(^|[^[:alnum:]])part of:? #[0-9]+' | head -n1 | grep -oE '[0-9]+$' || true; } # body on stdin -> P or nothing
 # agy has no --allowedTools: the claude allowlist becomes permissions.allow/deny in its settings.json
 # (rule syntax from the agy binary: command(<prefix>), read_file(*), write_file(*)). Other settings are kept.
 agy_settings() {
