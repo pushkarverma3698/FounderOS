@@ -6,8 +6,8 @@
 # With a claude job of this role open: report it running, or collect it (check it handed the item over), else
 # block the item. Without one: claim the oldest item in the role's queue and start claude on it, or print "No work".
 # Labels carry the hand-offs (README.md). Repos: one owner/repo per line in $TEAM_REPOS_FILE.
-# When claude stops on its usage limit, the Builder and Reviewer hand the item to agy (same brief, the same allowlist
-# as settings.json rules); the Architect's computer has no agy login, so it blocks for the founder.
+# When claude stops on its usage limit, the role hands the item to agy (same brief, the same allowlist as
+# settings.json rules); a computer with no agy login blocks for the founder.
 # --check changes nothing and prints "No work", "Working: ..." or "Due: ...": the host cron (shift-cron) wakes the
 # paid Dot only on Due, so an idle shift costs nothing.
 # --progress changes nothing and prints the open run in at most 5 lines (claude's steps come from team-stream).
@@ -87,9 +87,6 @@ block() { # kind repo n
 }
 # The last outcome (Done block or Blocked lines, stdin), for --progress after the cron has collected the run.
 remember() { { date -u '+%Y-%m-%d %H:%M UTC'; cat; } > "$RUNS/last-$role.txt"; }
-oldest() { # kind repo label -> number or nothing
-  gh "$1" list -R "$2" --label "$3" --state open --json number,createdAt --jq 'sort_by(.createdAt) | .[0].number // empty'
-}
 base_of() { # repo -> beta when it exists, else the default branch
   if gh api "repos/$1/branches/beta" --silent >/dev/null 2>&1; then echo beta
   else gh repo view "$1" --json defaultBranchRef --jq .defaultBranchRef.name; fi
@@ -264,10 +261,10 @@ if [[ -f $job ]]; then
         fi
         printf '%s\n' "$done"; printf '%s\n' "$done" | remember
       elif [[ $engine == claude ]] && run-bg tail "$name" 30 | grep -qiE "$LIMIT_RE"; then
-        if [[ $role == architect ]]; then why="the Architect has no agy fallback"
-        elif [[ ! -s $AGY_DIR/antigravity-oauth-token ]]; then why="this computer has no agy login"
-        else rm -f "$job"; start "$kind" "$repo" "$n" "" agy "claude hit its usage limit"; exit 0; fi
-        { echo "$Role: claude stopped with $state on its usage limit, and $why. The founder switches this Dot's login or waits for the reset. Last output:"
+        if [[ -s $AGY_DIR/antigravity-oauth-token ]]; then
+          rm -f "$job"; start "$kind" "$repo" "$n" "" agy "claude hit its usage limit"; exit 0
+        fi
+        { echo "$Role: claude stopped with $state on its usage limit, and this computer has no agy login. The founder switches this Dot's login or waits for the reset. Last output:"
           last_output "$name"; } | block "$kind" "$repo" "$n"
       elif [[ $state == exit=0 ]]; then
         { echo "$Role: $engine finished but did not hand the item over (label $claim is still set). Last output:"
@@ -279,20 +276,32 @@ if [[ -f $job ]]; then
   exit 0
 fi
 
-# 2. No job: resume an item claimed for this role (its job was lost), else the oldest queued item.
-while read -r repo; do
-  [[ -z $repo || $repo == \#* ]] && continue
-  for q in "${queues[@]}"; do
-    kind=${q%%:*}
-    n=$(oldest "$kind" "$repo" "$claim")
-    if [[ -n $n && -n $check ]]; then echo "Due: $repo $kind #$n ($claim)"; exit 0; fi
-    if [[ -n $n ]]; then start "$kind" "$repo" "$n" ""; exit 0; fi
+# 2. No job: resume an item claimed for this role (its job was lost), else the oldest queued item. Repos in file
+# order; in a repo the claimed items come first, then the queues in order. One GraphQL call covers every repo and
+# label, so the check stays at a second or two with 20 repos (a gh list per repo and label took 51 s).
+repos=()
+while read -r repo; do [[ -z $repo || $repo == \#* ]] || repos+=("$repo"); done < "$REPOS_FILE"
+((${#repos[@]})) || { echo "No work"; exit 0; }
+slots=() # "kind label"
+for q in "${queues[@]}"; do slots+=("${q%%:*} $claim"); done
+for q in "${queues[@]}"; do slots+=("${q%%:*} ${q#*:}"); done
+query="query {"
+for i in "${!repos[@]}"; do
+  query+=$'\n'"$(printf 'r%03d' "$i"): repository(owner:\"${repos[i]%%/*}\", name:\"${repos[i]#*/}\") {"
+  for j in "${!slots[@]}"; do
+    read -r kind label <<<"${slots[j]}"
+    if [[ $kind == pr ]]; then field=pullRequests; else field=issues; fi
+    query+=$'\n'"s$j: $field(labels:[\"$label\"], states:OPEN, first:1, orderBy:{field:CREATED_AT, direction:ASC}) { nodes { number } }"
   done
-  for q in "${queues[@]}"; do
-    kind=${q%%:*} label=${q#*:}
-    n=$(oldest "$kind" "$repo" "$label")
-    if [[ -n $n && -n $check ]]; then echo "Due: $repo $kind #$n ($label)"; exit 0; fi
-    if [[ -n $n ]]; then start "$kind" "$repo" "$n" "$label"; exit 0; fi
-  done
-done < "$REPOS_FILE"
-echo "No work"
+  query+=$'\n'"}"
+done
+query+=$'\n'"}"
+# The aliases sort in scan order (gh's jq does not keep the query's key order): "repo-index slot number".
+hit=$(gh api graphql -f query="$query" --jq '[.data | to_entries[] | .key as $r | .value | to_entries[]
+  | select(.value.nodes[0]) | "\($r[1:]) \(.key[1:]) \(.value.nodes[0].number)"] | sort | .[0] // empty')
+[[ -n $hit ]] || { echo "No work"; exit 0; }
+read -r i j n <<<"$hit"
+repo=${repos[10#$i]}
+read -r kind label <<<"${slots[j]}"
+if [[ -n $check ]]; then echo "Due: $repo $kind #$n ($label)"; exit 0; fi
+if [[ $label == "$claim" ]]; then start "$kind" "$repo" "$n" ""; else start "$kind" "$repo" "$n" "$label"; fi

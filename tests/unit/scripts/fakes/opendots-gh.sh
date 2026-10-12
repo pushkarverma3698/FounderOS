@@ -5,7 +5,7 @@ S=$FAKE/items.json
 printf '%s\n' "$*" >> "$FAKE/gh.log"
 if [[ ${1:-} == repo && ${2:-} == clone ]]; then mkdir -p "$4/.git"; exit 0; fi
 kind=$1; sub=${2:-}; shift 2 || true
-n=""; repo=""; label=""; json=""; q="."; title=""; body=""; adds=(); rems=()
+n=""; repo=""; label=""; json=""; q="."; title=""; body=""; query=""; adds=(); rems=()
 while (($#)); do
   case "$1" in
     -R) repo=$2; shift 2 ;;
@@ -17,6 +17,7 @@ while (($#)); do
     --title) title=$2; shift 2 ;;
     --body) body=$2; shift 2 ;;
     --state|--body-file) shift 2 ;;
+    -f) query=${2#query=}; shift 2 ;;
     --force|--silent) shift ;;
     *) [[ -z $n ]] && n=$1; shift ;;
   esac
@@ -46,6 +47,23 @@ case "$kind $sub" in
       "$S" > "$S.tmp" && mv "$S.tmp" "$S"
     echo "https://github.com/$repo/issues/$n" ;;
   "label create") ;;
+  "api graphql")
+    # team-shift's queue scan: one "rNNN: repository(...)" line per repo, one "sN: issues|pullRequests(labels:[..." per slot.
+    [[ -e $FAKE/graphql-fails ]] && { echo "gh: Could not resolve to a Repository" >&2; exit 1; }
+    re_repo='^(r[0-9]+): repository\(owner:"([^"]+)", name:"([^"]+)"\)'
+    re_slot='^(s[0-9]+): (issues|pullRequests)\(labels:\["([^"]+)"\], states:OPEN, first:1, orderBy:\{field:CREATED_AT, direction:ASC\}\)'
+    out='{}'; r=""
+    while IFS= read -r line; do
+      if [[ $line =~ $re_repo ]]; then r=${BASH_REMATCH[1]}; repo=${BASH_REMATCH[2]}/${BASH_REMATCH[3]}
+      elif [[ $line =~ $re_slot ]]; then
+        s=${BASH_REMATCH[1]}; k=issue; l=${BASH_REMATCH[3]}
+        if [[ ${BASH_REMATCH[2]} == pullRequests ]]; then k=pr; fi
+        nodes=$(jq -c --arg r "$repo" --arg k "$k" --arg l "$l" \
+          '[.[] | select(.repo==$r and .kind==$k and (.labels|index($l)))] | sort_by(.createdAt) | .[:1] | map({number})' "$S")
+        out=$(jq -c --arg r "$r" --arg s "$s" --argjson n "$nodes" '.[$r][$s] = {nodes: $n}' <<<"$out")
+      fi
+    done <<<"$query"
+    jq -c '{data: .}' <<<"$out" | jq -r "$q" ;;
   "api "*) [[ -f $FAKE/has-beta ]] ;;
   "repo view") echo main ;;
   *) echo "fake gh: unhandled $kind $sub" >&2; exit 9 ;;
