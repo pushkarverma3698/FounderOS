@@ -49,7 +49,10 @@ function item(kind: string, n: number): Item {
   return found;
 }
 
-function shift(role: string, ...extra: string[]): { out: string; status: number | null; err: string } {
+/** TEAM_CONTINUE_MAX=0 keeps the pre-continuation behaviour: a run stopped at the cap, or finished without a hand-over, blocks at once. */
+const NO_CONTINUE = { TEAM_CONTINUE_MAX: "0" };
+const shift = (role: string, ...extra: string[]): { out: string; status: number | null; err: string } => shiftWith({}, role, ...extra);
+function shiftWith(env: Record<string, string>, role: string, ...extra: string[]): { out: string; status: number | null; err: string } {
   const r = spawnSync("bash", [SCRIPT, role, ...extra], {
     encoding: "utf8",
     env: {
@@ -63,6 +66,7 @@ function shift(role: string, ...extra: string[]): { out: string; status: number 
       TEAM_LOCAL_RULES: join(dir, "rules"),
       HOME: join(dir, "home"),
       TEAM_RETRY_SLEEP: "0",
+      ...env,
     },
   });
   return { out: r.stdout.trim(), status: r.status, err: r.stderr };
@@ -290,7 +294,7 @@ describe("team-shift: an open job", () => {
     writeJob("architect", "issue", 4);
     writeFileSync(join(fake, "state"), "exit=0\n");
     writeFileSync(join(fake, "log"), "I could not decide.\n");
-    const r = shift("architect");
+    const r = shiftWith(NO_CONTINUE, "architect");
     expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #4\. Architect: claude finished but did not hand the item over/);
     expect(item("issue", 4).labels).toEqual(["agent:blocked"]);
     expect(item("issue", 4).comments[0]).toContain("I could not decide.");
@@ -311,7 +315,7 @@ describe("team-shift: an open job", () => {
     world([pr(6, ["agent:reviewing"])]);
     writeJob("reviewer", "pr", 6, 91 * 60);
     writeFileSync(join(fake, "state"), "running\n");
-    expect(shift("reviewer").out).toContain("claude ran over 90 min and was stopped");
+    expect(shiftWith(NO_CONTINUE, "reviewer").out).toContain("claude ran over 90 min and was stopped");
     expect(item("pr", 6).labels).toEqual(["agent:blocked"]);
   });
 
@@ -1027,7 +1031,7 @@ describe("team-shift: progress in between and reasoning at the end", () => {
     writeJob("builder", "issue", 4);
     writeFileSync(join(fake, "state"), "exit=0\n");
     writeFileSync(join(fake, "log"), "Should I close it as done?\n");
-    shift("builder");
+    shiftWith(NO_CONTINUE, "builder");
     const out = shift("builder", "--progress").out;
     expect(out).toMatch(/Last run, ended .* UTC:\nBlocked: owner\/sandbox issue #4\. Builder: claude finished but did not hand/);
     expect(out).toContain("Should I close it as done?");
@@ -1258,6 +1262,30 @@ describe("team-shift: a multi-part task runs as stacked PRs", () => {
     expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is blocked)");
     world([issue(36, ["agent:blocked"]), child(37, 36)]);
     expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (it is blocked)");
+  });
+  const LATER = "2026-10-12T10:00:00Z"; // after the child, so the scan reaches the child first
+
+  // The Builder opens its draft PR early (builder.md), so an open PR that closes #N does not mean #N is finished.
+  it("an issue that is blocked or still being built is not built on, even though its early draft PR is open and unlabelled", () => {
+    world([issue(36, ["agent:blocked"]), depPr(40, 36, []), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("No work. Waiting: owner/sandbox issue #37 builds on #36 (it is blocked)");
+    world([issue(36, ["agent:building"], LATER), depPr(40, 36, []), child(37, 36, ["agent:building"])]);
+    expect(shift("builder").out).toBe("Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is not finished yet). It is back in the build queue.");
+    world([issue(36, ["agent:build"], LATER), depPr(40, 36, []), child(37, 36, ["agent:building"])]);
+    expect(shift("builder").out).toBe("Waiting: owner/sandbox issue #37 builds on #36 (its PR #40 is not finished yet). It is back in the build queue.");
+    expect(existsSync(join(fake, "started"))).toBe(false);
+  });
+
+  it("a blocked child stays blocked while the issue it builds on is itself blocked with an open draft PR", () => {
+    world([issue(36, ["agent:blocked"]), depPr(40, 36, []), child(37, 36, ["agent:blocked"])]);
+    expect(shift("builder", "--check").out).toBe("No work");
+  });
+
+  it("an issue whose PR is finished (agent:in-pr) is built on, and a merged PR is ready whatever the issue says", () => {
+    world([issue(36, ["agent:in-pr"]), depPr(40, 36, []), child(37, 36)]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:build)");
+    world([issue(36, ["agent:building"], LATER), depPr(40, 36, ["agent:approved"], { state: "MERGED" }), child(37, 36, ["agent:building"])]);
+    expect(shift("builder", "--check").out).toBe("Due: owner/sandbox issue #37 (agent:building)");
   });
 
   it("a merged or closed dependency means the normal base, with no stack", () => {

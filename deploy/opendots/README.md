@@ -110,9 +110,21 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 
 Issues carry `plan`, `build`, `in-pr`, `epic`, `blocked`; PRs carry `review`, `changes`, `approved`, `blocked`.
 `team-shift` keeps one claude run per role (`/workspace/runs/shift-<role>.job`). Next shift: still running →
-"Working"; finished with the claim label moved → "Done" plus claude's `RESULT:` line; finished without moving it,
-failed, or over 90 min → the item is blocked with claude's last output. A lost run is restarted. A 4th review round
-blocks instead of starting.
+"Working"; finished with the claim label moved → "Done" plus claude's `RESULT:` line; failed → the item is
+blocked with claude's last output; finished without moving it, or over 90 min → continued first (see "Continued
+runs"), then blocked. A lost run is restarted. A 4th review round blocks instead of starting.
+
+**Continued runs:** a run that was stopped at the time limit, or ended without handing the item over, is not
+given up on. The next check starts claude again on the same item, in the same directory and on the same branch,
+at most `TEAM_CONTINUE_MAX` times (default 2) per item and role; the count is kept in
+`/workspace/runs/continued-<role>-<repo>-<kind>-<n>` and is cleared when the item is Done or blocked. The item
+keeps its claim label, the issue gets a "started ..." comment with the reason, and THIS SHIFT carries a
+`CONTINUING (i of N)` line. When the directory is on a named branch, the restart only fetches: no reset, clean or
+checkout, so the commits and files of the stopped run stay. Otherwise it is a clean checkout and the run is
+pointed at the open PR. The Builder commits and pushes after each step and keeps the plan as a checklist in the
+draft PR, so a continued run picks up from there. After the last continuation the item is blocked as before, and
+the block text says it was continued N times. Not continued: a claude usage limit (hands over to agy), any other
+failure (blocks), a lost run (restarts as before). `TEAM_CONTINUE_MAX=0` turns it off.
 
 **Stacked PRs:** a multi-part task runs to the end without a merge in between. The Architect writes
 `Builds on: #N` in a child issue that needs another child's code. That child waits in `agent:build` (the check
@@ -155,7 +167,7 @@ merged, so a GitHub error halfway is finished by the next shift.
 | `team-shift` merges only into the PR's epic branch: the base is re-read right before the merge | `team-shift` (code) |
 | A part whose merge fails twice is blocked for the founder | `team-shift` (code) |
 | A child is not handed out before what it builds on has a PR | `team-shift` queue scan (code) |
-| A dependency that is blocked, sent back with changes, or closed unmerged is not built on | `team-shift` `dep_state` (code) |
+| A dependency that is blocked, sent back with changes, or closed unmerged is not built on; neither is an issue still labelled blocked, building or build, even when its early draft PR is open | `team-shift` `dep_state` (code) |
 | A blocked issue with a `Builds on` line returns to `agent:build` once, when #N is ready | `team-shift` (code, marker comment) |
 | A Builder that re-queues an issue without a `Builds on` line gets it blocked | `team-shift` at collect (code) |
 | A stacked PR never merges into another PR's branch | `chief-run` (code) |
