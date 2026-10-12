@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Host cron (installed by setup-dots.sh, every minute): tells the founder on Telegram when a role finishes or blocks
+# an item. OpenDots has no phone notifications of its own. Each computer keeps its role's last outcome in
+# /workspace/runs/last-<role>.txt (team-shift writes it); a new outcome is sent once, and a failed send is retried
+# on the next run. No model call and no GitHub call. The bot token and chat id are read from the FounderOS .env
+# and reach curl on stdin, so neither shows in the process list or the log.
+set -uo pipefail
+TASKS=${OPENDOTS_SHIFT_TASKS:-/opt/opendots/shift-tasks} # "role dot-id task-id" per line
+SEEN=${OPENDOTS_NOTIFY_STATE:-$(dirname "$TASKS")/notify-seen}
+ENV_FILE=${OPENDOTS_NOTIFY_ENV:-/opt/founderos/.env}
+mkdir -p "$SEEN"
+exec 9> "$SEEN/.lock"
+flock -n 9 || exit 0
+value() { grep "^$1=" "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d "\"'"; }
+TOKEN=$(value TELEGRAM_BOT_TOKEN) CHAT=$(value TELEGRAM_CHAT_ID)
+now() { date -u +%FT%TZ; }
+[[ -n $TOKEN && -n $CHAT ]] || { echo "$(now) no TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in $ENV_FILE: nothing sent"; exit 1; }
+send() { # text
+  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TOKEN" |
+    curl -fsS --max-time 15 -K - --data-urlencode "chat_id=$CHAT" --data-urlencode "text=$1" \
+      --data-urlencode disable_web_page_preview=true > /dev/null 2>&1
+}
+
+while read -r role dot _; do
+  [[ -z ${role:-} ]] && continue
+  seen=$SEEN/$role
+  # Line 1 is the time, line 2 "Done: <repo> <kind> #<n>." or "Blocked: <repo> <kind> #<n>. <why>", then the detail.
+  if ! out=$(timeout 20 docker exec "opendots-computer-$dot" cat "/workspace/runs/last-$role.txt" 2> /dev/null) ||
+    [[ -z $out ]]; then
+    [[ -e $seen ]] || echo none > "$seen" # no outcome yet: the first one is news
+    continue
+  fi
+  sum=$(printf '%s' "$out" | cksum)
+  if [[ ! -e $seen ]]; then echo "$sum" > "$seen"; continue; fi # first run: what is already there is old news
+  [[ $(cat "$seen") == "$sum" ]] && continue
+  head=$(sed -n 2p <<< "$out")
+  read -r state repo kind n _ <<< "$head"
+  who="$(tr '[:lower:]' '[:upper:]' <<< "${role:0:1}")${role:1}"
+  what="${repo##*/} $kind ${n%.}"
+  if [[ $state == Blocked: ]]; then
+    path=issues; [[ $kind == pr ]] && path=pull
+    n=${n#\#}
+    text="⛔ $who is blocked and needs you: $what
+$(sed -n '2,$p' <<< "$out" | sed "1s|^Blocked: $repo $kind #${n%.}\.* *||" | grep -v '^$')
+https://github.com/$repo/$path/${n%.}"
+  else
+    result=$(grep '^RESULT:' <<< "$out" | tail -n1 | sed 's/^RESULT: *//')
+    mark="✅ $who finished"
+    # The engine can block the item itself: the run then ends "Done" with a RESULT that says blocked.
+    if grep -qi '^blocked' <<< "$result"; then mark="⛔ $who is blocked and needs you"; fi
+    text="$mark: $what
+${result:-$(sed -n '2,$p' <<< "$out")}"
+  fi
+  if send "${text:0:3500}"; then echo "$sum" > "$seen"; echo "$(now) $role: sent ($head)"
+  else echo "$(now) $role: Telegram send failed, trying again next run ($head)"; fi
+done < "$TASKS"
