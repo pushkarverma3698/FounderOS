@@ -37,6 +37,7 @@ RUNS=${TEAM_RUNS:-/workspace/runs}
 REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
 BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
 WORK=${TEAM_WORK:-/workspace/repos}
+LOCAL_RULES=${TEAM_LOCAL_RULES:-/workspace/local-rules}
 LIMIT_MIN=${TEAM_RUN_LIMIT_MIN:-90}
 mkdir -p "$RUNS"
 
@@ -53,7 +54,8 @@ READ_TOOLS=(Read Glob Grep "Bash(ls:*)" "Bash(cat:*)" "Bash(head:*)" "Bash(tail:
   "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git rev-parse:*)" "Bash(git merge:*)"
   "Bash(git branch:*)" "Bash(gh repo clone:*)" "Bash(gh issue view:*)" "Bash(gh issue list:*)"
   "Bash(gh issue comment:*)" "Bash(gh issue edit:*)" "Bash(gh pr view:*)" "Bash(gh pr list:*)" "Bash(gh pr diff:*)"
-  "Bash(gh pr checks:*)" "Bash(gh pr comment:*)" "Bash(gh pr edit:*)" "Bash(gh pr checkout:*)")
+  "Bash(gh pr checks:*)" "Bash(gh pr comment:*)" "Bash(gh pr edit:*)" "Bash(gh pr checkout:*)"
+  mcp__turicks-brain__search_memory mcp__turicks-brain__get_memory) # brain reads only (home/CLAUDE.md)
 CHECK_TOOLS=("Bash(npm:*)" "Bash(npx:*)" "Bash(pnpm:*)" "Bash(node:*)" "Bash(python3:*)" "Bash(pytest:*)" "Bash(make:*)")
 denied=("Bash(gh pr merge:*)" "Bash(gh api:*)" "Bash(gh auth:*)" "Bash(git push --force:*)" "Bash(git push -f:*)"
   "Bash(git rebase:*)" "Bash(git reset --hard:*)" "Bash(git push origin main:*)" "Bash(git push origin beta:*)")
@@ -133,6 +135,19 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
     printf '%s\n' "$Role: could not check out origin/$base in $dir, so $engine was not started:" '```' "$err" '```' |
       block "$kind" "$repo" "$n"
     return
+  fi
+  # The founder's local rules for this owner (setup-dots.sh copies them in; never in git), as files claude and agy
+  # read at the repo root. Each is git-excluded, so no commit or `git clean` touches it. A name the repo already
+  # has is the repo's own file and stays as it is.
+  if [[ -r $LOCAL_RULES/${repo%%/*}.md ]]; then
+    mkdir -p "$dir/.git/info"; touch "$dir/.git/info/exclude"
+    for f in CLAUDE.local.md AGENTS.md GEMINI.md; do
+      if ! grep -qxF "$f" "$dir/.git/info/exclude"; then
+        [[ ! -e $dir/$f ]] || continue
+        echo "$f" >> "$dir/.git/info/exclude"
+      fi
+      cp "$LOCAL_RULES/${repo%%/*}.md" "$dir/$f"
+    done
   fi
   cmds=""
   for t in "${allowed[@]}"; do if [[ $t == "Bash("* ]]; then t=${t#"Bash("}; cmds+="${t%":*)"}, "; fi; done
