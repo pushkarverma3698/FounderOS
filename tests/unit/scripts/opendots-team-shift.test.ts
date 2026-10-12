@@ -49,7 +49,10 @@ function item(kind: string, n: number): Item {
   return found;
 }
 
-function shift(role: string, ...extra: string[]): { out: string; status: number | null; err: string } {
+/** TEAM_CONTINUE_MAX=0 keeps the pre-continuation behaviour: a run stopped at the cap, or finished without a hand-over, blocks at once. */
+const NO_CONTINUE = { TEAM_CONTINUE_MAX: "0" };
+const shift = (role: string, ...extra: string[]): { out: string; status: number | null; err: string } => shiftWith({}, role, ...extra);
+function shiftWith(env: Record<string, string>, role: string, ...extra: string[]): { out: string; status: number | null; err: string } {
   const r = spawnSync("bash", [SCRIPT, role, ...extra], {
     encoding: "utf8",
     env: {
@@ -63,6 +66,7 @@ function shift(role: string, ...extra: string[]): { out: string; status: number 
       TEAM_LOCAL_RULES: join(dir, "rules"),
       HOME: join(dir, "home"),
       TEAM_RETRY_SLEEP: "0",
+      ...env,
     },
   });
   return { out: r.stdout.trim(), status: r.status, err: r.stderr };
@@ -283,7 +287,7 @@ describe("team-shift: an open job", () => {
     writeJob("architect", "issue", 4);
     writeFileSync(join(fake, "state"), "exit=0\n");
     writeFileSync(join(fake, "log"), "I could not decide.\n");
-    const r = shift("architect");
+    const r = shiftWith(NO_CONTINUE, "architect");
     expect(r.out).toMatch(/^Blocked: owner\/sandbox issue #4\. Architect: claude finished but did not hand the item over/);
     expect(item("issue", 4).labels).toEqual(["agent:blocked"]);
     expect(item("issue", 4).comments[0]).toContain("I could not decide.");
@@ -304,7 +308,7 @@ describe("team-shift: an open job", () => {
     world([pr(6, ["agent:reviewing"])]);
     writeJob("reviewer", "pr", 6, 91 * 60);
     writeFileSync(join(fake, "state"), "running\n");
-    expect(shift("reviewer").out).toContain("claude ran over 90 min and was stopped");
+    expect(shiftWith(NO_CONTINUE, "reviewer").out).toContain("claude ran over 90 min and was stopped");
     expect(item("pr", 6).labels).toEqual(["agent:blocked"]);
   });
 
@@ -1020,7 +1024,7 @@ describe("team-shift: progress in between and reasoning at the end", () => {
     writeJob("builder", "issue", 4);
     writeFileSync(join(fake, "state"), "exit=0\n");
     writeFileSync(join(fake, "log"), "Should I close it as done?\n");
-    shift("builder");
+    shiftWith(NO_CONTINUE, "builder");
     const out = shift("builder", "--progress").out;
     expect(out).toMatch(/Last run, ended .* UTC:\nBlocked: owner\/sandbox issue #4\. Builder: claude finished but did not hand/);
     expect(out).toContain("Should I close it as done?");

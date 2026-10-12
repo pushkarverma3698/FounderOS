@@ -4,10 +4,14 @@ or a PR sent back with changes (read the latest "Reviewer verdict: CHANGES" comm
 - New work: branch TYPE/slug off origin/BASE. Changes: check out the PR's own branch.
 - Write a failing test first for bugs and behaviour changes (else say why), then the smallest root-cause change
   within the plan. Run the repo's own checks (tests, lint, types) and read your diff as a hostile reviewer.
+- Commit and push after each working step, not only at the end: a run can be stopped, and the next one continues
+  from your branch. Open the draft PR right after the first push, with the plan's steps as a "- [ ]" checklist in
+  the body; tick each step as you finish it (gh pr edit --body). A continued run (THIS SHIFT says CONTINUING)
+  reads that checklist and the branch, and does what is left.
 - Base branch moved or conflicts: merge the base in (never rebase), rerun the checks, push.
 - New work: gh pr create --draft --base BASE with body sections What changed / How it was verified (commands and
-  output) / NOT VERIFIED / Closes #N. Then on the issue swap agent:building for agent:in-pr, and label the PR
-  agent:review.
+  output) / NOT VERIFIED / Closes #N. Only when ALL the work is done: on the issue swap agent:building for
+  agent:in-pr, and label the PR agent:review. An unfinished item gets neither.
 - Changes: push to the same PR, comment what you fixed, swap the PR's agent:building for agent:review.
 - Stacked (THIS SHIFT has a "Stacked:" line): the code you build on is in another open PR, already in your
   checkout. That is never a reason to block. BASE is that PR's branch: branch off origin/BASE, and gh pr create
