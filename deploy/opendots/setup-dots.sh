@@ -137,6 +137,17 @@ for id in "$builder" "$architect" "$reviewer" "$chief"; do
   tar -C "$stage" -cf - .claude .gemini | docker exec -i -w /workspace "$(box "$id")" tar -xf - --no-same-owner --no-overwrite-dir
 done
 
+# Rules the founder keeps out of git (the Oplify instructions): /opt/opendots/local-rules/<owner>.md on this host
+# goes to /workspace/local-rules in every computer, and team-shift puts it in that owner's clones as git-excluded
+# files. Nothing here is committed anywhere.
+LOCAL_RULES=${TEAM_LOCAL_RULES:-/opt/opendots/local-rules}
+if compgen -G "$LOCAL_RULES/*.md" >/dev/null; then
+  for id in "$builder" "$architect" "$reviewer" "$chief"; do
+    tar -C "$LOCAL_RULES" -cf - $(cd "$LOCAL_RULES" && ls -- *.md) |
+      docker exec -i "$(box "$id")" sh -c 'mkdir -p /workspace/local-rules && tar -C /workspace/local-rules -xf - --no-same-owner'
+  done
+fi
+
 # The shared brain over HTTP (src/mcp/hub-http.ts, deploy/founderos-hub-http.service on the host), for claude in
 # every computer. The computers get the brain-only token: they run repo code as root, so that code can read whatever
 # token they hold. The Chief Dot gets the full token (adds calendar and mail reads) as an OpenDots Connection, stored

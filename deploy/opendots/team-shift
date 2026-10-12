@@ -37,6 +37,7 @@ RUNS=${TEAM_RUNS:-/workspace/runs}
 REPOS_FILE=${TEAM_REPOS_FILE:-/workspace/team-repos}
 BRIEFS=${TEAM_BRIEFS:-/usr/local/share/team}
 WORK=${TEAM_WORK:-/workspace/repos}
+LOCAL_RULES=${TEAM_LOCAL_RULES:-/workspace/local-rules}
 LIMIT_MIN=${TEAM_RUN_LIMIT_MIN:-90}
 mkdir -p "$RUNS"
 
@@ -134,6 +135,19 @@ start() { # kind repo n queue-label ("" = already claimed) [engine] [why another
     printf '%s\n' "$Role: could not check out origin/$base in $dir, so $engine was not started:" '```' "$err" '```' |
       block "$kind" "$repo" "$n"
     return
+  fi
+  # The founder's local rules for this owner (setup-dots.sh copies them in; never in git), as files claude and agy
+  # read at the repo root. Each is git-excluded, so no commit or `git clean` touches it. A name the repo already
+  # has is the repo's own file and stays as it is.
+  if [[ -r $LOCAL_RULES/${repo%%/*}.md ]]; then
+    mkdir -p "$dir/.git/info"; touch "$dir/.git/info/exclude"
+    for f in CLAUDE.local.md AGENTS.md GEMINI.md; do
+      if ! grep -qxF "$f" "$dir/.git/info/exclude"; then
+        [[ ! -e $dir/$f ]] || continue
+        echo "$f" >> "$dir/.git/info/exclude"
+      fi
+      cp "$LOCAL_RULES/${repo%%/*}.md" "$dir/$f"
+    done
   fi
   cmds=""
   for t in "${allowed[@]}"; do if [[ $t == "Bash("* ]]; then t=${t#"Bash("}; cmds+="${t%":*)"}, "; fi; done

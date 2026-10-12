@@ -81,6 +81,10 @@ PRs. Before 2026-10-11 the Dot did the work itself and spent ~$7.75 of OpenRoute
 - **Give them work:** ask the Architect in chat, or open an issue labelled `agent:plan` in a repo listed in
   `TEAM_REPOS` (default: the 20 repos listed in `setup-dots.sh`, Oplify and turickai included). Change the list with
   `TEAM_REPOS="owner/a owner/b" bash /opt/opendots/deploy/setup-dots.sh`.
+- **Rules that stay out of git** (the Oplify instructions): keep them on the VPS as
+  `/opt/opendots/local-rules/<owner>.md` (for Oplify: `scp ~/Oplify.in/CLAUDE.md founderos-vps:/opt/opendots/local-rules/OplifyMessage.md`)
+  and rerun `setup-dots.sh`. Every shift copies the file into that owner's clones as `CLAUDE.local.md`, `AGENTS.md`
+  and `GEMINI.md`, each listed in `.git/info/exclude`.
 - **Your part:** tell the Chief of Staff which `agent:approved` PR to merge (`chief-run` merges it, then closes
   the issue with a link to the PR; claude itself has no merge permission), and answer `agent:blocked` items through the Chief (it comments your answer and swaps
   `agent:blocked` for the queue label). Issues marked `agent:in-pr` whose PR merged into a non-default branch are
