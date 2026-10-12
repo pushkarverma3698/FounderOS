@@ -16,7 +16,8 @@ while (($#)); do
     --remove-label) rems+=("$2"); shift 2 ;;
     --title) title=$2; shift 2 ;;
     --body) body=$2; shift 2 ;;
-    --state|--body-file) shift 2 ;;
+    --comment) body=$2; shift 2 ;;
+    --state|--body-file|--limit|--reason) shift 2 ;;
     -f) query=${2#query=}; shift 2 ;;
     --force|--silent) shift ;;
     *) [[ -z $n ]] && n=$1; shift ;;
@@ -24,11 +25,13 @@ while (($#)); do
 done
 case "$kind $sub" in
   "issue list"|"pr list")
+    [[ -z $label && -e $FAKE/list-fails ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
     jq -c --arg r "$repo" --arg k "$kind" --arg l "$label" \
-      '[.[] | select(.repo==$r and .kind==$k and (.labels|index($l))) | {number, createdAt}]' "$S" | jq -r "$q" ;;
+      '[.[] | select(.repo==$r and .kind==$k and ($l=="" or (.labels|index($l)))) | {number, createdAt, body: (.body // ""), state: (.state // "OPEN")}]' "$S" | jq -r "$q" ;;
   "issue view"|"pr view")
+    [[ $json == body && -e $FAKE/view-body-fails ]] && { echo "GraphQL: Could not resolve" >&2; exit 1; }
     jq -c --arg r "$repo" --arg k "$kind" --argjson n "$n" \
-      '.[] | select(.repo==$r and .kind==$k and .number==$n) | {labels: [.labels[] | {name: .}], comments: [.comments[] | {body: .}]}' "$S" | jq -r "$q" ;;
+      '.[] | select(.repo==$r and .kind==$k and .number==$n) | {labels: [.labels[] | {name: .}], comments: [.comments[] | {body: .}], body: (.body // "")}' "$S" | jq -r "$q" ;;
   "issue edit"|"pr edit")
     a=$(printf '%s\n' ${adds[@]+"${adds[@]}"} | jq -R . | jq -sc .)
     d=$(printf '%s\n' ${rems[@]+"${rems[@]}"} | jq -R . | jq -sc .)
@@ -39,6 +42,10 @@ case "$kind $sub" in
     body=$(cat)
     jq --arg r "$repo" --arg k "$kind" --argjson n "$n" --arg b "$body" \
       'map(if .repo==$r and .kind==$k and .number==$n then .comments += [$b] else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
+  "issue close")
+    jq --arg r "$repo" --argjson n "$n" --arg b "$body" \
+      'map(if .repo==$r and .kind=="issue" and .number==$n then .state = "CLOSED" | .comments += [$b] else . end)' \
+      "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
   "issue create")
     [[ -e $FAKE/create-fails ]] && { echo "could not add label: 'agent:building' not found" >&2; exit 1; }
     n=$(jq '[.[].number] | max // 0 | . + 1' "$S")
