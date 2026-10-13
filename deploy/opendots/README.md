@@ -59,8 +59,9 @@ Applied by `install.sh` after a clean checkout; it fails loudly if upstream code
 ## Shared brain
 `setup-dots.sh` connects the brain once the host runs `deploy/founderos-hub-http.service` (`src/mcp/hub-http.ts`,
 `/etc/founderos/hub-http.env`, `http://172.21.0.1:3100/mcp`, reachable only from the `opendots-computers` network):
-- claude in every computer gets the `turicks-brain` MCP with the **brain-only** token: memories, never mail or
-  calendar.
+- claude and agy in every computer get the `turicks-brain` MCP with the **brain-only** token: memories, never mail or
+  calendar. agy's entry lives in `~/.gemini/config/mcp_config.json` (`agy mcp list` shows it); a rerun replaces the
+  laptop-era stdio entry the Builder's agy used to carry.
 - The Chief Dot gets a `turicks-brain` Connection with the full token (calendar and mail reads), kept in the app's
   SQLite. Reads run on their own; brain writes and `call_connected_tool` stay on Ask first.
 
