@@ -4,5 +4,10 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE/docker.log"
 case "${1:-}" in
   inspect) echo true ;;
-  exec) [[ " $* " == *" -i "* ]] && cat > /dev/null; exit 0 ;;
+  exec)
+    # The brain MCP step passes the hub token on stdin; keep it apart so a test can check it never reaches an argument.
+    if [[ " $* " == *" -i "* ]]; then
+      if [[ "$*" == *HUB_URL=* ]]; then cat >> "$FAKE/hub-stdin.log"; else cat > /dev/null; fi
+    fi
+    exit 0 ;;
 esac

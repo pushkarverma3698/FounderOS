@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function setup(tasks: Task[] = [], extraDots: string[][] = []) {
+function setup(tasks: Task[] = [], extraDots: string[][] = [], hubEnv?: string) {
   const dots = [["Chief of Staff", "chief"], ["Builder", "b"], ["Architect", "a"], ["Reviewer", "r"], ...extraDots];
   writeFileSync(join(fake, "workspace.json"), JSON.stringify({
     spaces: [{ name: "Everyday", id: "s1" }],
@@ -47,11 +47,12 @@ function setup(tasks: Task[] = [], extraDots: string[][] = []) {
   const r = spawnSync("bash", [SETUP], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
-      FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app") },
+      FAKE_OWNER_TOKEN: TOKEN, OPENDOTS_APP: join(dir, "app"), ...(hubEnv ? { OPENDOTS_HUB_ENV: hubEnv } : {}) },
   });
   const calls = existsSync(join(fake, "curl.log")) ? readFileSync(join(fake, "curl.log"), "utf8").trim().split("\n") : [];
   const docker = existsSync(join(fake, "docker.log")) ? readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n") : [];
-  return { status: r.status, out: r.stdout + r.stderr, calls, docker };
+  const hubStdin = existsSync(join(fake, "hub-stdin.log")) ? readFileSync(join(fake, "hub-stdin.log"), "utf8") : "";
+  return { status: r.status, out: r.stdout + r.stderr, calls, docker, hubStdin };
 }
 
 const instructions = (calls: string[], id: string): string => {
@@ -154,5 +155,49 @@ describe("setup-dots.sh", () => {
     expect(r.status, r.out).toBe(0);
     expect(r.calls.filter((c) => c.startsWith("POST /dots "))).toHaveLength(0);
     expect(r.calls.some((c) => c.includes('"name":"DevOps"'))).toBe(false);
+  });
+
+  // 2026-10-13: claude had the brain over HTTP in every computer, agy had none, and the Builder's agy still held the
+  // laptop-era stdio entry (node /opt/agent-rules/brain-mcp.mjs) that cannot start there. agy's format, checked in a
+  // computer: `agy mcp add --header "K: V" <name> <url>` writes {serverUrl, headers} to ~/.gemini/config/mcp_config.json.
+  describe("brain MCP for agy", () => {
+    const BRAIN = "brain-token-not-for-output";
+    const FULL = "full-token-not-for-output";
+    const hub = () => {
+      const path = join(dir, "hub-http.env");
+      writeFileSync(path, `HUB_HTTP_HOST=172.21.0.1\nHUB_HTTP_PORT=3100\nHUB_HTTP_TOKEN=${FULL}\nHUB_HTTP_BRAIN_TOKEN=${BRAIN}\n`);
+      return path;
+    };
+
+    it("replaces agy's old brain entry with the HTTP hub in every computer, the way claude gets it", () => {
+      const r = setup([], [["DevOps", "d"]], hub());
+      expect(r.status, r.out).toBe(0);
+      const script = r.docker.join("\n");
+      // The dead stdio entry goes first; `agy mcp add` then writes the HTTP server and its bearer header.
+      expect(script).toContain("agy mcp remove turicks-brain");
+      expect(script.indexOf("agy mcp add")).toBeGreaterThan(script.indexOf("agy mcp remove turicks-brain"));
+      expect(script).toContain('--header "Authorization: Bearer $t" turicks-brain "$HUB_URL"');
+      // One token delivery per computer (chief, b, a, r, d), over stdin.
+      expect(r.hubStdin.trim().split("\n")).toEqual(Array(5).fill(BRAIN));
+    });
+
+    it("keeps both tokens out of every argument and out of the output; the computers get the brain-only token", () => {
+      const r = setup([], [["DevOps", "d"]], hub());
+      expect(r.status, r.out).toBe(0);
+      for (const t of [BRAIN, FULL, TOKEN]) {
+        expect(r.docker.join("\n")).not.toContain(t);
+        expect(r.out).not.toContain(t);
+      }
+      expect(r.hubStdin).not.toContain(FULL);
+      expect(r.out).toContain("brain: claude and agy MCP in 5 computers");
+    });
+
+    it("fails the run, naming the computer, when a brain MCP cannot be added", () => {
+      writeFileSync(join(fake, "bin", "docker"), readFileSync(join(FAKES, "opendots-docker.sh"), "utf8").replace(
+        "    exit 0 ;;", '    [[ "$*" == *HUB_URL=* ]] && exit 1\n    exit 0 ;;'));
+      const r = setup([], [], hub());
+      expect(r.status).not.toBe(0);
+      expect(r.out).toContain("could not add the brain MCP in opendots-computer-");
+    });
   });
 });
