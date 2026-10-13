@@ -1,8 +1,16 @@
 diff --git a/src/client/App.tsx b/src/client/App.tsx
-index e5cc646..5e84729 100644
+index e5cc646..596853c 100644
 --- a/src/client/App.tsx
 +++ b/src/client/App.tsx
-@@ -143,7 +143,10 @@ export function App() {
+@@ -7,6 +7,7 @@ import {
+   ArrowUp,
+   ArrowUpRight,
+   BookOpen,
++  Bot,
+   Clock3,
+   Code2,
+   Folder,
+@@ -143,7 +144,10 @@ export function App() {
        setSelectedDot((previous) => previous || w.dots[0]?.id || '');
        setNotices((current) => applyRefreshResult(current, { ok: true }));
      } catch (e) {
@@ -14,7 +22,7 @@ index e5cc646..5e84729 100644
        setNotices((current) =>
          applyRefreshResult(
            current,
-@@ -264,6 +267,7 @@ export function App() {
+@@ -264,6 +268,7 @@ export function App() {
                setError('');
                await refresh();
              } catch (err) {
@@ -22,7 +30,7 @@ index e5cc646..5e84729 100644
                setError(
                  err instanceof Error
                    ? err.message
-@@ -287,7 +291,7 @@ export function App() {
+@@ -287,7 +292,7 @@ export function App() {
              {error}
            </p>
          )}
@@ -31,6 +39,175 @@ index e5cc646..5e84729 100644
        </main>
      );
    if (!state || !workspace || !dot)
+@@ -348,6 +353,58 @@ export function App() {
+           <Settings2 size={18} />
+         </button>
+       </nav>
++      <nav className="mobile-dock" aria-label="Mobile navigation">
++        <button
++          className={`mobile-dock-item ${view === 'chat' && !mobile ? 'active' : ''}`}
++          aria-label="Chat"
++          onClick={() => {
++            setView('chat');
++            setMobile(false);
++          }}
++        >
++          <MessageCircle size={20} />
++          <span>Chat</span>
++        </button>
++        <button
++          className={`mobile-dock-item ${mobile ? 'active' : ''}`}
++          aria-label="Dots"
++          onClick={() => setMobile(!mobile)}
++        >
++          <Bot size={20} />
++          <span>Dots</span>
++        </button>
++        <button
++          className={`mobile-dock-item ${view === 'space' && !mobile ? 'active' : ''}`}
++          aria-label="Spaces"
++          onClick={() => {
++            if (workspace.spaces[0]) openPage(workspace.spaces[0].id);
++            else setView('space');
++            setMobile(false);
++          }}
++        >
++          <Folder size={20} />
++          <span>Spaces</span>
++        </button>
++        <button
++          className={`mobile-dock-item ${view === 'tasks' && !mobile ? 'active' : ''}`}
++          aria-label="Activity"
++          onClick={() => {
++            setView('tasks');
++            setMobile(false);
++          }}
++        >
++          <Clock3 size={20} />
++          <span>Activity</span>
++        </button>
++        <button
++          className="mobile-dock-item"
++          aria-label="Settings"
++          onClick={() => setDialog({ type: 'settings' })}
++        >
++          <Settings2 size={20} />
++          <span>Settings</span>
++        </button>
++      </nav>
+       <button
+         className="mobile-menu icon-button"
+         aria-label="Open navigation"
+diff --git a/src/client/Chat.tsx b/src/client/Chat.tsx
+index 8ec3ce3..1092c1b 100644
+--- a/src/client/Chat.tsx
++++ b/src/client/Chat.tsx
+@@ -21,6 +21,8 @@ import {
+   ArrowUp,
+   Clock3,
+   Link2,
++  Mic,
++  MicOff,
+   Phone,
+   PhoneOff,
+   Square,
+@@ -99,9 +101,79 @@ export function Chat({
+   const [error, setError] = useState('');
+   const [loaded, setLoaded] = useState(false);
+   const [running, setRunning] = useState(false);
++  const [listening, setListening] = useState(false);
++  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+   const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
+   const sent = useRef(false);
+   const bottom = useRef<HTMLDivElement>(null);
++
++  const toggleDictation = () => {
++    if (listening) {
++      recognitionRef.current?.stop();
++      setListening(false);
++      return;
++    }
++    const SpeechRecognition =
++      (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
++        .SpeechRecognition ||
++      (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
++        .webkitSpeechRecognition;
++
++    if (!SpeechRecognition) {
++      if (voiceReady && voice.status === 'idle') {
++        void voice.start();
++      } else {
++        setError('Voice dictation is not supported in this browser.');
++      }
++      return;
++    }
++
++    try {
++      const recognition = new SpeechRecognition();
++      recognition.continuous = true;
++      recognition.interimResults = true;
++      recognition.lang = navigator.language || 'en-US';
++
++      const initialText = draft;
++      recognition.onresult = (event: { resultIndex: number; results: { length: number; [index: number]: { isFinal: boolean; [index: number]: { transcript: string } } } }) => {
++        let interim = '';
++        let final = '';
++        for (let i = event.resultIndex; i < event.results.length; i++) {
++          const item = event.results[i];
++          if (item.isFinal) {
++            final += item[0]?.transcript || '';
++          } else {
++            interim += item[0]?.transcript || '';
++          }
++        }
++        const combined = (final || interim).trim();
++        if (combined) {
++          setDraft(initialText ? `${initialText} ${combined}` : combined);
++        }
++      };
++
++      recognition.onerror = () => {
++        setListening(false);
++      };
++
++      recognition.onend = () => {
++        setListening(false);
++      };
++
++      recognition.start();
++      recognitionRef.current = recognition;
++      setListening(true);
++    } catch (e) {
++      setListening(false);
++      setError(e instanceof Error ? e.message : 'Could not start voice dictation.');
++    }
++  };
++
++  useEffect(() => {
++    return () => {
++      recognitionRef.current?.stop();
++    };
++  }, []);
+   useEffect(() => {
+     const subscription = copilotkit.subscribe({
+       onError: ({ error }) => setError(error.message),
+@@ -441,6 +513,16 @@ export function Chat({
+               }
+             }}
+           />
++          <button
++            type="button"
++            className={`mic-button icon-button ${listening ? 'listening' : ''}`}
++            aria-label={listening ? 'Stop voice dictation' : 'Start voice dictation'}
++            title={listening ? 'Listening… click to stop' : 'Voice dictation'}
++            onClick={toggleDictation}
++            disabled={paused}
++          >
++            {listening ? <MicOff size={18} /> : <Mic size={18} />}
++          </button>
+           {running ? (
+             <button
+               type="button"
 diff --git a/src/client/api.ts b/src/client/api.ts
 index db9fb2a..a27926e 100644
 --- a/src/client/api.ts
@@ -48,6 +225,210 @@ index db9fb2a..a27926e 100644
  }
  export class ApiError extends Error {
    constructor(
+diff --git a/src/client/style.css b/src/client/style.css
+index 75be32d..3226400 100644
+--- a/src/client/style.css
++++ b/src/client/style.css
+@@ -3490,7 +3490,7 @@ h3 {
+ @media (max-width: 700px) {
+   .template-app.app .sidebar {
+     transform: translateX(-100%);
+-    transition: none;
++    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+     visibility: hidden;
+   }
+   .template-app.app .sidebar.open {
+@@ -3504,6 +3504,11 @@ h3 {
+     left: 10px;
+     z-index: 20;
+     color: #333;
++    border-radius: 50%;
++    background: #ffffffd0;
++    backdrop-filter: blur(8px);
++    -webkit-backdrop-filter: blur(8px);
++    box-shadow: 0 2px 8px #00000010;
+   }
+ }
+ 
+@@ -4280,3 +4285,178 @@ h3 {
+   overflow-wrap: anywhere;
+   font-size: 11px;
+ }
++
++/* Mobile bottom dock and touch navigation */
++.mobile-dock {
++  display: none;
++}
++
++@media (max-width: 700px) {
++  .mobile-dock {
++    display: flex;
++    position: fixed;
++    left: 0;
++    right: 0;
++    bottom: 0;
++    z-index: 45;
++    height: calc(58px + env(safe-area-inset-bottom, 0px));
++    padding: 6px 12px calc(6px + env(safe-area-inset-bottom, 0px));
++    background: #ffffffec;
++    backdrop-filter: blur(20px);
++    -webkit-backdrop-filter: blur(20px);
++    border-top: 1px solid var(--line);
++    justify-content: space-around;
++    align-items: center;
++    box-shadow: 0 -4px 16px #00000008;
++  }
++  .mobile-dock-item {
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    justify-content: center;
++    background: transparent;
++    border: 0;
++    padding: 4px 12px;
++    border-radius: 12px;
++    color: #858b9e;
++    font-size: 10px;
++    font-weight: 500;
++    gap: 3px;
++    cursor: pointer;
++    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
++  }
++  .mobile-dock-item:active {
++    transform: scale(0.88);
++  }
++  .mobile-dock-item.active {
++    color: #367a70;
++    font-weight: 600;
++  }
++  .mobile-dock-item.active svg {
++    transform: translateY(-1px);
++    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
++  }
++  .template-app.app .workspace {
++    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
++  }
++  .template-app .live-chat {
++    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
++  }
++  .template-app .chat-composer {
++    margin: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
++  }
++}
++
++/* Refined composer styling and mic button */
++.template-app .chat-composer {
++  border-radius: 24px;
++  border: 1px solid #e0e2de;
++  background: #fff;
++  box-shadow: 0 4px 20px #0000000a;
++  transition: border-color 0.2s ease, box-shadow 0.2s ease;
++}
++.template-app .chat-composer:focus-within {
++  border-color: #75b9b4;
++  box-shadow: 0 6px 24px #75b9b422;
++}
++.chat-compose-row {
++  display: flex;
++  align-items: flex-end;
++  gap: 8px;
++  padding: 4px 6px 4px 10px;
++}
++.chat-compose-row textarea {
++  border: 0;
++  background: transparent;
++  padding: 10px 4px;
++  resize: none;
++  font-size: 14px;
++  line-height: 1.45;
++  min-height: 42px;
++  max-height: 140px;
++}
++.chat-compose-row .send-button {
++  background: #367a70;
++  color: #fff;
++  border-radius: 50%;
++  flex-shrink: 0;
++  width: 34px;
++  height: 34px;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  margin-bottom: 4px;
++  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.15s ease;
++}
++.chat-compose-row .send-button:not(:disabled):hover {
++  background: #2a635b;
++  transform: scale(1.06);
++}
++.chat-compose-row .send-button:not(:disabled):active {
++  transform: scale(0.9);
++}
++.chat-compose-row .mic-button {
++  color: #6a7182;
++  background: transparent;
++  border-radius: 50%;
++  flex-shrink: 0;
++  width: 34px;
++  height: 34px;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  margin-bottom: 4px;
++  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
++}
++.chat-compose-row .mic-button:hover:not(:disabled) {
++  color: #367a70;
++  background: #ebf5f3;
++  transform: scale(1.06);
++}
++.chat-compose-row .mic-button:active:not(:disabled) {
++  transform: scale(0.9);
++}
++.chat-compose-row .mic-button.listening {
++  color: #e53e3e;
++  background: #fff5f5;
++  animation: mic-pulse 1.4s infinite cubic-bezier(0.4, 0, 0.6, 1);
++}
++@keyframes mic-pulse {
++  0%, 100% {
++    transform: scale(1);
++    box-shadow: 0 0 0 0 #e53e3e66;
++  }
++  50% {
++    transform: scale(1.08);
++    box-shadow: 0 0 0 8px #e53e3e00;
++  }
++}
++
++/* Fluid spring animations for mobile & desktop */
++@keyframes spring-pop {
++  0% {
++    opacity: 0;
++    transform: translateY(12px) scale(0.97);
++  }
++  100% {
++    opacity: 1;
++    transform: translateY(0) scale(1);
++  }
++}
++.chat-message,
++.task-row,
++.page-review-card {
++  animation: spring-pop 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
++}
++.modal {
++  animation: spring-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
++}
++.nav-scrim {
++  animation: scrim-fade 0.2s ease both;
++  backdrop-filter: blur(4px);
++  -webkit-backdrop-filter: blur(4px);
++}
++@keyframes scrim-fade {
++  from { opacity: 0; }
++  to { opacity: 1; }
++}
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
 index 6191cc7..5b4ead6 100644
 --- a/src/server/dot-agent.ts
