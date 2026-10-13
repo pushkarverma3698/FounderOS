@@ -365,13 +365,14 @@ describe("setup-dots.sh: shift schedule", () => {
   const shiftTasks = (every: number | null) => ["Architect", "Builder", "Reviewer"].map((role) =>
     ({ id: `t-${role}`, prompt: shiftPrompt(role), status: "completed", intervalSeconds: every }));
 
-  function setup(tasks: { id: string; prompt: string; status: string; intervalSeconds: number | null }[], env: Record<string, string> = {}) {
+  function setup(tasks: { id: string; prompt: string; status: string; intervalSeconds: number | null }[],
+    env: Record<string, string> = {}, extraDots: string[][] = []) {
     spawnSync("mkdir", ["-p", join(dir, "app")]);
     writeFileSync(join(dir, "app", ".env"), `X=1\nOWNER_TOKEN=${TOKEN}\n`);
     bin("curl", fakeScript("opendots-curl.sh"));
     bin("docker", fakeScript("opendots-docker.sh"));
     bin("crontab", fakeScript("opendots-crontab.sh"));
-    const dots = [["Chief of Staff", "chief"], ["Builder", "b"], ["Architect", "a"], ["Reviewer", "r"]];
+    const dots = [["Chief of Staff", "chief"], ["Builder", "b"], ["Architect", "a"], ["Reviewer", "r"], ...extraDots];
     writeFileSync(join(fake, "workspace.json"), JSON.stringify({
       spaces: [{ name: "Everyday", id: "s1" }],
       dots: dots.map(([name, id]) => ({ name, id })),
@@ -464,7 +465,44 @@ describe("setup-dots.sh: shift schedule", () => {
     expect([...prompt].length).toBeLessThanOrEqual(2000);
     for (const s of ["team-shift builder --engine", "--task", "team-shift builder --progress", "dot-login status"])
       expect(prompt).toContain(s);
-    expect(prompt).toMatch(/never say the Chief/i);
+  });
+
+  // Audit 2026-10-13: Dots did paid tools' work by hand (164 shell calls for one Reviewer request), reported checks
+  // they never ran, and deflected to the Chief. Every prompt now leads claude/agy through run-bg, demands evidence,
+  // and keeps its request; the shift roles get back the SHIFT section their task prompt names.
+  const instructions = (calls: string[], id: string): string => {
+    const put = calls.find((c) => c.startsWith(`PUT /dots/${id} `));
+    return (JSON.parse(put?.slice(`PUT /dots/${id} `.length) ?? "{}") as { instructions?: string }).instructions ?? "";
+  };
+  it("gives every Dot a delegate-first prompt within 2000 characters, and each shift role its SHIFT rule", () => {
+    const r = setup(shiftTasks(null), {}, [["DevOps", "d"]]);
+    expect(r.status, r.out).toBe(0);
+    for (const id of ["chief", "b", "a", "r", "d"]) {
+      const prompt = instructions(r.calls, id);
+      expect([...prompt].length, id).toBeLessThanOrEqual(2000);
+      for (const s of ["claude -p", "run-bg start", "run-bg wait", "timeoutMs 60000", "agy", "NOT VERIFIED", "another Dot"])
+        expect(prompt, `${id}: ${s}`).toContain(s);
+      expect(prompt).not.toMatch(/never refuse|no filler/i);
+    }
+    for (const [id, role] of [["a", "Architect"], ["b", "Builder"], ["r", "Reviewer"]] as const) {
+      const prompt = instructions(r.calls, id);
+      expect(prompt).toContain(`"${role} shift:"`);
+      expect(prompt).toContain(`run team-shift ${role.toLowerCase()} once`);
+    }
+    expect(instructions(r.calls, "r")).toContain("pr-adversary");
+    // run-bg wait must return inside one 60 s shell call; the computers get the current copy without an image rebuild.
+    const waitSeconds = /for \(\(i = 0; i < (\d+); i\+\+\)\)/.exec(readFileSync(join(ROOT, "deploy", "opendots", "run-bg"), "utf8"));
+    expect(Number(waitSeconds?.[1])).toBeLessThanOrEqual(55);
+    const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
+    for (const box of ["chief", "b", "a", "r", "d"])
+      expect(docker).toContain(`exec -i opendots-computer-${box} sh -c cat > "/usr/local/bin/$1" && chmod 755 "/usr/local/bin/$1" sh run-bg`);
+  });
+
+  it("never creates a DevOps Dot that does not exist", () => {
+    const r = setup(shiftTasks(null));
+    expect(r.status, r.out).toBe(0);
+    expect(r.calls.filter((c) => c.startsWith("POST /dots "))).toHaveLength(0);
+    expect(r.calls.some((c) => c.includes('"name":"DevOps"'))).toBe(false);
   });
 
   it("SHIFT_SECONDS=3600 gives an hourly cron; a value cron cannot express is refused", () => {
