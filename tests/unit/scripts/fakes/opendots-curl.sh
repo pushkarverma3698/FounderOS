@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fake curl for the OpenDots owner API (opendots-team-shift.test.ts). Logs "METHOD PATH DATA" to $FAKE/curl.log;
+# Fake curl for the OpenDots owner API (opendots-setup-dots.test.ts). Logs "METHOD PATH DATA" to $FAKE/curl.log;
 # GET /workspace and /state answer from $FAKE/workspace.json and $FAKE/state.json; a POST that creates returns an id.
 set -euo pipefail
 method=GET url="" data="" auth=""

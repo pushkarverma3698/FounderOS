@@ -73,6 +73,18 @@ export const TOMBSTONES: string[] = [
   "src/infra/composio.ts",
   "src/infra/providers/google-composio.ts",
   "src/infra/providers/linkedin-composio.ts",
+  // The OpenDots GitHub-label pipeline (founder 2026-10-13, "simplify the setup"): a hand-built scheduler, queue and
+  // dispatcher over features OpenDots already has (scheduled tasks, each Dot's computer). Dots lead claude/agy
+  // directly through run-bg; recurring work is an OpenDots scheduled task.
+  "deploy/opendots/team-shift",
+  "deploy/opendots/chief-run",
+  "deploy/opendots/team-lib.sh",
+  "deploy/opendots/team-stream",
+  "deploy/opendots/team",
+  "deploy/opendots/shift-cron",
+  "deploy/opendots/shift-notify",
+  "deploy/opendots/add-dot.sh",
+  "deploy/opendots/seed-cli-logins.sh",
   "src/types/composio.d.ts",
   // The jobs-only cut (founder decision 2026-10-10, docs/plans/2026-10-10-opendots-migration.md
   // Phase 3): prod runs src/jobs/main.ts and nothing else. The kernel, the planner, the coding
