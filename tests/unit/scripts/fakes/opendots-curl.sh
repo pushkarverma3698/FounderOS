@@ -7,7 +7,8 @@ method=GET url="" data="" auth=""
 while (($#)); do
   case "$1" in
     -X) method=$2; shift 2 ;;
-    --data) data=$2; shift 2 ;;
+    # Read `--data @-` like real curl does: a writer piping into an unread stdin dies of SIGPIPE (exit 141).
+    --data) data=$2; [[ $data == @- ]] && data=$(cat); shift 2 ;;
     -H) [[ $2 == Authorization:* ]] && auth=$2; shift 2 ;;
     http*) url=$1; shift ;;
     *) shift ;;

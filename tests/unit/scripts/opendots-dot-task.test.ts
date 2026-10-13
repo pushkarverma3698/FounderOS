@@ -63,6 +63,24 @@ describe("dot-task", () => {
     expect(r.out).toContain("no run yet");
   });
 
+  // 2026-10-13: run/pause/cancel printed the app's raw JSON (the whole task record) before the one line meant for the
+  // founder, which buries the answer on a phone.
+  it.each(["run", "pause", "cancel"])("%s prints only its own confirmation line, never the API's JSON", (action) => {
+    const r = dotTask(action, "t1");
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toBe(`task t1: ${action} requested\n`);
+  });
+
+  it("run fails loudly, without its confirmation line, when the API refuses", () => {
+    const bad = spawnSync("bash", [DOT_TASK, "run", "t1"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${join(fake, "bin")}:${process.env["PATH"] ?? ""}`, FAKE: fake,
+        FAKE_OWNER_TOKEN: "other", OPENDOTS_TOKEN: TOKEN, OPENDOTS_API: "http://127.0.0.1:4310/api" },
+    });
+    expect(bad.status).not.toBe(0);
+    expect(bad.stdout).not.toContain("requested");
+  });
+
   it("has no loop: recurring work is a scheduled task, not a second scheduler", () => {
     const r = dotTask("loop", "x", "60", "true");
     expect(r.status).toBe(2);
