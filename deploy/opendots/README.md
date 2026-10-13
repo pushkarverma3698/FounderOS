@@ -15,7 +15,7 @@ Each Dot's computer is `opendots-computer-turicks:1`: the pinned OpenBot compute
 | `team/` | claude's briefs: `team.md` (shared rules) plus one file per role |
 | `chief-run` | The Chief of Staff's one command per chat turn: `chief-run '<founder's words>'` runs claude haiku (agy at claude's usage limit) with `team/chief.md` and a gh allowlist scoped to `TEAM_REPOS`, then checks every `ACTION` line on GitHub and prints ✓/✗. It merges itself, only a PR the founder named that has `agent:approved`. Past 55 s: `still running`, then `chief-run --status chief-<id>` |
 | `team-lib.sh` | Shared by `team-shift` and `chief-run`: the usage-limit regex and the claude allowlist written as agy rules |
-| `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 60 s) until `exit=` |
+| `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 55 s; call it with `timeoutMs` 60000) until `exit=` |
 | `opendots-turicks.patch` | Our OpenDots changes, applied by `install.sh` after a clean checkout: a turn or task may last 15 min (upstream: 90 s); a scheduled shift turn may make 12 model calls and a chat turn (the Chief with you) 30 (upstream: 5), and a turn still asking for tools at that limit fails instead of ending as completed; a recurring task retries one interval after a failed or interrupted run (upstream: waits for Run); a scheduled shift sends the model only its own turn; a model reply may be 16,000 tokens (upstream: 2,200), and a reply cut off at that limit fails the turn instead of ending it as completed; the web app remembers the owner token in `localStorage` (upstream: `sessionStorage`, so every new tab asked again) |
 | `setup-dots.sh` | Creates or updates the Chief of Staff and the engineering team (Architect, Builder, Reviewer): prompts, computers, logins, paused shift tasks without an interval, `/opt/opendots/shift-tasks` and the every-minute `shift-cron` crontab line (`SHIFT_SECONDS`, default 60). Idempotent |
 | `home/` | Every computer's employee setup, installed by `setup-dots.sh`: `CLAUDE.md` (the laptop's engineering rules minus laptop-only lines) as `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and the skills `production-ready`, `pr-adversary`, `systematic-debugging`, `no-ai-slop` for claude (`~/.claude/skills`) and agy (`~/.gemini/config/skills`). Edit here, not in a computer |
@@ -34,8 +34,8 @@ OpenDots operates as an autonomous multi-employee AI agency factory designed for
    - OpenRouter orchestrates high-speed, cheap reasoning (fractions of a cent per turn) for agent thoughts, tool decisions, and conversational triage.
 2. **Fixed-Cost Autonomous Heavy Muscle (Execution Layer):**
    - Each Dot has its own isolated Docker workstation container (`opendots-computer-*`).
-   - Superpower CLIs (`claude` and `agy`) run directly inside the container shell for deep multi-file implementation, bug fixes, refactors, and test runs under fixed subscriptions.
-   - Every Dot is an empowered engineer: while having role specialties (Chief: operations, Architect: specs, Builder: coding, Reviewer: verification), all agents have full terminal access and can run scripts, inspect code, and dispatch runs.
+   - `claude` and `agy` (fixed subscriptions) do the work: code, tests, installs, setup, debugging, review. Each Dot does cheap reads (`gh`, `git log`) itself, writes a brief to `/workspace/runs/<name>.md`, starts `run-bg start <name> claude -p "$(cat ...)"`, waits with `run-bg wait`, checks one key claim, and reports with the command it ran or NOT VERIFIED. The shared rules are `TOOLS`, `LEAD` and `TRUTH` in `setup-dots.sh`.
+   - Role specialties: Chief (merges via `chief-run`, the Everyday page), Architect (plans), Builder (`team-shift builder --task`), Reviewer (pr-adversary reviews), DevOps (servers, routines). No Dot sends the founder to another Dot.
 3. **Agency Scaling (`add-dot.sh`):**
    - Spin up new specialized employees in 1 command:
      ```bash
@@ -91,7 +91,7 @@ OpenDots operates as an autonomous multi-employee AI agency factory designed for
   `native_finish_reason` (`max_output_tokens`, `MAX_TOKENS`), the whole budget used, and tool arguments that do not
   parse.
 - Dot instructions (system prompts), max 2000 characters each (the script refuses longer). For a quick try, edit in the app: "…" next to the Dot,
-  then "Role instructions". To keep a change, edit `CHIEF` or `dot_prompt` in `setup-dots.sh` (the engineers' working rules are in `team/`, baked into the image), copy it to
+  then "Role instructions". To keep a change, edit the shared parts (`TOOLS`, `LEAD`, `TRUTH`) or a role's prompt (`CHIEF`, `ARCHITECT`, `BUILDER`, `REVIEWER`, `DEVOPS`; DevOps is updated only if it exists) in `setup-dots.sh` (the engineers' working rules are in `team/`, baked into the image), copy it to
   `/opt/opendots/deploy/`, and run `ssh founderos-vps 'bash /opt/opendots/deploy/setup-dots.sh'`. That script overwrites
   edits made in the app, so this file is the source of truth.
 - Restart a computer to pick up a rebuilt image: `POST /api/dots/<id>/computer/stop`, then `.../start` (owner token, JSON body `{}`).
