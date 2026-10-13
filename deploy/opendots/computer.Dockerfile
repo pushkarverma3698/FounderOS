@@ -15,7 +15,7 @@ RUN printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d && chmod +x /us
   && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && rm -rf /root/.npm /tmp/* /var/lib/apt/lists/*
 
-# Engineer tools for the Builder and Reviewer (allowed in team-shift CHECK_TOOLS). No docker: a computer has no docker
+# Engineer tools for every computer. No docker: a computer has no docker
 # socket, because the host's socket is root on the VPS. Browsers go in a shared path so every user can run them.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libimage-exiftool-perl sqlite3 imagemagick poppler-utils \
   && rm -rf /var/lib/apt/lists/* \
@@ -27,16 +27,11 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 COPY agy /usr/local/bin/agy
 COPY run-bg /usr/local/bin/run-bg
 COPY dot-login /usr/local/bin/dot-login
-COPY team-shift /usr/local/bin/team-shift
-COPY chief-run /usr/local/bin/chief-run
-COPY team-lib.sh /usr/local/bin/team-lib.sh
-COPY team-stream /usr/local/bin/team-stream
+COPY dot-task /usr/local/bin/dot-task
 COPY team-services /usr/local/bin/team-services
-# claude's role briefs, read by team-shift and chief-run.
-COPY team /usr/local/share/team
 
 # The Dot's shell is non-interactive, so no profile file is sourced: a wrapper hands claude the
-# `claude setup-token` token that seed-cli-logins.sh stores on the persistent volume.
+# `claude setup-token` token that dot-login stores on the persistent volume.
 RUN ln -s "$(readlink -f /usr/local/bin/claude)" /usr/local/bin/claude-bin && rm /usr/local/bin/claude \
   && printf '%s\n' '#!/bin/sh' \
      't=${HOME:-/workspace}/.claude-token' \

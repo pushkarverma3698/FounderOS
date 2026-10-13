@@ -1,38 +1,13 @@
 #!/usr/bin/env bash
 # Create or update the Dots through the app's owner API. Idempotent; run on the VPS:
 #   bash /opt/opendots/deploy/setup-dots.sh
-# Chief of Staff = the default Dot, renamed; each chat turn runs chief-run (claude haiku does the gh work, agy when
-# claude is at its limit), so its computer gets the Builder's claude, agy and gh logins.
-# Architect, Builder, Reviewer = the engineering team: each has a computer and a "shift" task that runs team-shift
-# (claude does the work), and they hand work over with GitHub labels. A host cron (shift-cron, every SHIFT_SECONDS)
-# wakes a shift task only when `team-shift --check` finds work, so an idle shift makes no paid model call. The Builder is the old Engineer Dot (renamed); the others
-# get copies of its logins once. Reruns never overwrite a login a Dot already has (dot-login switches it).
-# Shift tasks are created PAUSED; cron never wakes a paused task. Start one in the app (Tasks → Run) or:
-# POST /api/tasks/<id>/actions {"action":"run"}.
+# Chief of Staff (the default Dot, renamed), Architect, Builder (the old Engineer Dot), Reviewer and, when it exists,
+# DevOps. Each is an employee with its own computer: it leads claude and agy there (run-bg) and owns the founder's
+# request end to end. The Builder's claude, agy and gh logins are copied once into the other computers; reruns never
+# overwrite a login a computer already has (dot-login switches it). Recurring work uses OpenDots scheduled tasks.
 set -euo pipefail
 APP=${OPENDOTS_APP:-/opt/opendots/app}
-# Whitespace-separated owner/repo the team may work in: every unarchived, non-fork repo the founder can push to
-# (founder 2026-10-12: "so that i can work on any repo"). The computers' gh login is his own, so it reaches his
-# account, OplifyMessage/* and turickai/*. The prompts never list them (the Chief prompt is capped at 2000
-# characters); team-shift and chief-run read them from /workspace/team-repos. Not pushkarverma3698/turicks-web:
-# issues are off there, and team-shift --check fails for every repo when one repo has no issues.
-REPOS=${TEAM_REPOS:-"
-  pushkarverma3698/opendots-sandbox pushkarverma3698/FounderOS pushkarverma3698/linkedin-growth-engine-v2
-  pushkarverma3698/fos-journey-sandbox pushkarverma3698/turicks-new-experience
-  pushkarverma3698/House-of-Hulda-Website-frontend pushkarverma3698/clean-ai pushkarverma3698/claude-code-setup
-  pushkarverma3698/Website-Builder-Tool pushkarverma3698/rag-document-qa pushkarverma3698/pushkarverma3698
-  OplifyMessage/oplify-messaging-api OplifyMessage/oplify-messaging-app
-  turickai/turicks-web turickai/turicks-demo turickai/leadpulse-backend turickai/leadpulse-frontend
-  turickai/Co-Working-Space-Website turickai/transporter-app turickai/.github"}
-# Idle checks are free (one GitHub call per role), so every minute: a 15-min clock made a one-line task take
-# 50 min, nearly all of it hand-offs waiting for the next tick (2026-10-12).
-SHIFT_SECONDS=${SHIFT_SECONDS:-60}
-SHIFT_TASKS=${OPENDOTS_SHIFT_TASKS:-$(dirname "$APP")/shift-tasks}
 HERE=$(cd "$(dirname "$0")" && pwd)
-m=$((SHIFT_SECONDS / 60))
-if ((m == 60)); then CRON_AT="0 * * * *"
-elif ((m * 60 == SHIFT_SECONDS && m > 0 && 60 % m == 0)); then CRON_AT="*/$m * * * *"
-else echo "SHIFT_SECONDS=$SHIFT_SECONDS: use 3600 or a whole number of minutes that divides 60" >&2; exit 1; fi
 T=$(grep '^OWNER_TOKEN=' "$APP/.env" | cut -d= -f2-)
 api() { curl -fsS -X "$1" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
   "http://127.0.0.1:4310/api$2" ${3:+--data "$3"}; }
@@ -41,23 +16,21 @@ api() { curl -fsS -X "$1" -H "Authorization: Bearer $T" -H 'Content-Type: applic
 # paid experts, so every Dot leads them instead of doing the work itself. Audit 2026-10-13: under the 10-12 prompts
 # ("do it yourself, claude/agy optional") one Reviewer request took 164 shell calls and 2 claude runs, and Dots
 # reported checks they never ran; under the 10-11 prompts ("only via team-shift") they refused everything else.
-TOOLS='Your computer (computer_exec) has gh, git, claude, agy, run-bg, team-shift and team-services, installed and logged in (dot-login status; dot-login <cli> start). Skip computer_snapshot and pwd/which probing.'
+TOOLS='Your computer (computer_exec) has gh, git, claude, agy, run-bg, team-services and dot-task, installed and logged in (dot-login status; dot-login <cli> start). Skip computer_snapshot and pwd/which probing.'
 # run-bg wait returns within 55 s, so it fits one computer_exec call at timeoutMs 60000 (the default is 30000).
 LEAD='HOW YOU WORK: claude and agy are your senior engineers and you lead them. They are paid and far stronger than you at code and shell, so use them like an expert:
 1. Cheap reads you do in one call: gh issue|pr list|view|checks, git log, run-bg list.
 2. Everything else goes to them: code, tests, installs, setup, debugging, review, explaining code, judging two runs. In one call write a brief to /workspace/runs/<name>.md (goal, repo, done when, evidence to return) and run-bg start <name> claude -p "$(cat /workspace/runs/<name>.md)". Default claude; agy for a second opinion or when claude is at its limit.
 3. Wait with run-bg wait <name> (timeoutMs 60000), again until exit=. Never sleep. Past 10 min, reply with the run name and its last line, and check next turn.
-4. Check one key claim yourself (PR exists, tests exit 0), then report. A failed run: fix the brief or the computer and rerun; never redo the work by hand.'
+4. Check one key claim yourself (PR exists, tests exit 0), then report. A failed run: fix the brief or the computer and rerun; never redo the work by hand.
+5. Before anything new is built, the brief asks what already exists (repo, framework, OpenDots, issues); build only what is missing.'
 TRUTH='TRUTH: every "done", "checked" or "works" names the command you ran this turn and its result; anything else is NOT VERIFIED - <reason>. Never send the founder to another Dot: his request is yours. No external messages or purchases without his yes.'
 STYLE='Result first, short, numbered (he has ADHD).'
-# The shift task's prompt is "<Role> shift: follow your SHIFT rules ..." (below); team-shift hands the item to claude.
-shift_rule() { printf 'SHIFT: a message starting "%s shift:" means: run team-shift %s once (timeoutMs 60000) and reply with its output in at most 3 lines. No other command.' "$1" "$2"; }
 
-# The Chief does merges through chief-run (AG-063), which checks every action on GitHub.
 CHIEF="You are the founder's Engineering Chief of Staff across his GitHub repos.
 $TOOLS
 $LEAD
-Merges and team GitHub actions he names: run chief-run '<his exact words>' with timeoutMs 60000, no computer_snapshot first. On \"still running: chief-<id>\", check chief-run --status chief-<id>.
+A merge he names: gh pr checks <n> green, then gh pr merge <n> --merge; report the commit. Red: name the check, no merge.
 Keep the Everyday page \"Chief of Staff\" in 5 numbered lines: top 3 today, waiting on, decisions, done this week. Calendar, mail, past decisions: turicks-brain tools.
 $TRUTH Never guess personal facts; ask.
 $STYLE Keep ✓, ✗ and NOT VERIFIED lines intact."
@@ -65,16 +38,14 @@ $STYLE Keep ✓, ✗ and NOT VERIFIED lines intact."
 ARCHITECT="You are the Systems Architect on the founder's team across his GitHub repos.
 $TOOLS
 $LEAD
-Plans come from claude reading the real code: Goal, Done when, Files, Steps, Test plan, Risks, Out of scope, filed as an agent:build issue; an epic is split into child issues (Part of #P). Quick code questions: team-shift architect --inspect --engine claude|agy --repo <repo> --task '<question>'.
-$(shift_rule Architect architect)
+Plans come from claude reading the real code: Goal, Done when, Files, Steps, Test plan, Risks, Out of scope, filed as a GitHub issue; an epic is split into child issues (Part of #P).
 $TRUTH
 $STYLE"
 
 BUILDER="You are a Senior Software Engineer on the founder's team across his GitHub repos.
 $TOOLS
 $LEAD
-A code change in a repo: team-shift builder --engine claude|agy --repo <repo> --task '<his exact words>' (files the issue and branch; claude opens the draft PR; the Reviewer picks it up). Progress: team-shift builder --progress.
-$(shift_rule Builder builder)
+A code change: the brief names the repo, his exact words, a branch off the integration branch (beta if it exists) and done-when; claude writes a failing test first where it applies, runs the repo's CI commands and opens a draft PR. Report the PR URL and gh pr checks.
 $TRUTH
 $STYLE"
 
@@ -82,14 +53,14 @@ REVIEWER="You are the Staff Code Reviewer on the founder's team across his GitHu
 $TOOLS
 $LEAD
 A review he asks for: brief claude to review the PR with its pr-adversary skill, run the repo's tests on real services (team-services start postgres redis) and return a verdict with evidence; relay it word for word. agy: an independent second review. A stand-in (PGlite, mocks) is named as one, never passed off as the real check.
-$(shift_rule Reviewer reviewer)
 $TRUTH
 $STYLE"
 
-# DevOps was added by add-dot.sh; this script refreshes its prompt when it exists and never creates it.
-DEVOPS="You are the DevOps Engineer on the founder's team: servers, uptime, container health, and routines (dot-task, run-bg).
+# DevOps: this script refreshes its prompt and computer when it exists and never creates it.
+DEVOPS="You are the DevOps Engineer on the founder's team: servers, uptime, container health.
 $TOOLS
 $LEAD
+Recurring work is an OpenDots scheduled task: dot-task create '<prompt>' --interval <seconds>; dot-task list|run|pause|cancel.
 $TRUTH
 $STYLE"
 
@@ -126,15 +97,20 @@ architect=$(upsert Architect "$ARCHITECT")
 reviewer=$(upsert Reviewer "$REVIEWER")
 for id in "$builder" "$architect" "$reviewer"; do api PATCH "/dots/$id/computer/permissions" "$SHELL_PERMS" >/dev/null; done
 devops=$(dot_id DevOps)
-[[ -z $devops ]] || api PUT "/dots/$devops" "$(body DevOps "$DEVOPS")" >/dev/null
+ALL=("$builder" "$architect" "$reviewer" "$chief")
+if [[ -n $devops ]]; then
+  api PUT "/dots/$devops" "$(body DevOps "$DEVOPS")" >/dev/null
+  api PATCH "/dots/$devops/computer/permissions" "$SHELL_PERMS" >/dev/null
+  ALL+=("$devops")
+fi
 
-# Computers: start them, then copy the Builder's logins into the other two (never printed).
+# Computers: start them, then copy the Builder's logins into the others (never printed).
 box() { echo "opendots-computer-$1"; }
 up() { [[ $(docker inspect -f '{{.State.Running}}' "$(box "$1")" 2>/dev/null) == true ]]; }
-for id in "$builder" "$architect" "$reviewer" "$chief"; do
+for id in "${ALL[@]}"; do
   up "$id" || api POST "/dots/$id/computer/start" '{}' >/dev/null
 done
-for id in "$builder" "$architect" "$reviewer" "$chief"; do
+for id in "${ALL[@]}"; do
   for _ in $(seq 60); do up "$id" && break; sleep 2; done
   up "$id" || { echo "computer for $id did not start" >&2; exit 1; }
 done
@@ -144,13 +120,11 @@ copy() { # to-id files...
   local to=$1; shift
   docker exec -w /workspace "$(box "$builder")" tar -cf - "$@" | docker exec -i -w /workspace "$(box "$to")" tar -xf - --no-same-owner --skip-old-files
 }
-copy "$architect" "${LOGINS[@]}" "${AGY[@]}"
-copy "$reviewer" "${LOGINS[@]}" "${AGY[@]}"
-copy "$chief" "${LOGINS[@]}" "${AGY[@]}" # chief-run: claude, agy when claude is at its limit
+for id in "${ALL[@]:1}"; do copy "$id" "${LOGINS[@]}" "${AGY[@]}"; done
 # Refresh the helpers without an image rebuild; the copy lasts until the computer is recreated, and reruns redo it.
 # A new file renamed over the old one: older images have run-bg owned by ubuntu, which root cannot write to without
-# CAP_DAC_OVERRIDE (the computers drop all capabilities), but root owns /usr/local/bin, and a rename never truncates
-# a running script.
+# CAP_DAC_OVERRIDE (unprivileged computers drop all capabilities), but root owns /usr/local/bin, and a rename never
+# truncates a running script.
 helpers() {
   local tool
   for tool in dot-task run-bg; do
@@ -159,8 +133,7 @@ helpers() {
       'f=/usr/local/bin/$1; cat > "$f.new" && chmod 755 "$f.new" && mv -f "$f.new" "$f"' sh "$tool" < "$HERE/$tool"
   done
 }
-[[ -z $devops ]] || ! up "$devops" || helpers "$devops"
-for id in "$builder" "$architect" "$reviewer" "$chief"; do
+for id in "${ALL[@]}"; do
   docker exec -e HOME=/workspace "$(box "$id")" sh -c '
     login=$(gh api user -q .login) && git config --global user.name "$login" &&
     git config --global user.email "$(gh api user -q "\"\(.id)+\(.login)@users.noreply.github.com\"")" &&
@@ -203,7 +176,7 @@ stage=$(mktemp -d); trap 'rm -r "$stage"' EXIT
 mkdir -p "$stage/.claude" "$stage/.gemini/config"
 cp "$HERE/home/CLAUDE.md" "$stage/.claude/CLAUDE.md"; cp "$HERE/home/CLAUDE.md" "$stage/.gemini/GEMINI.md"
 cp -R "$HERE/home/skills" "$stage/.claude/skills"; cp -R "$HERE/home/skills" "$stage/.gemini/config/skills"
-for id in "$builder" "$architect" "$reviewer" "$chief"; do
+for id in "${ALL[@]}"; do
   # GEMINI.md was a symlink to the laptop-era /opt/agent-rules, which no computer has.
   docker exec -w /workspace "$(box "$id")" sh -c \
     'rm -f .gemini/GEMINI.md; for s; do rm -r -f ".claude/skills/$s" ".gemini/config/skills/$s"; done' sh $(ls "$HERE/home/skills")
@@ -211,11 +184,11 @@ for id in "$builder" "$architect" "$reviewer" "$chief"; do
 done
 
 # Rules the founder keeps out of git (the Oplify instructions): /opt/opendots/local-rules/<owner>.md on this host
-# goes to /workspace/local-rules in every computer, and team-shift puts it in that owner's clones as git-excluded
-# files. Nothing here is committed anywhere.
+# goes to /workspace/local-rules in every computer; home/CLAUDE.md tells claude and agy to read it for that owner's
+# repos. Nothing here is committed anywhere.
 LOCAL_RULES=${TEAM_LOCAL_RULES:-/opt/opendots/local-rules}
 if compgen -G "$LOCAL_RULES/*.md" >/dev/null; then
-  for id in "$builder" "$architect" "$reviewer" "$chief"; do
+  for id in "${ALL[@]}"; do
     tar -C "$LOCAL_RULES" -cf - $(cd "$LOCAL_RULES" && ls -- *.md) |
       docker exec -i "$(box "$id")" sh -c 'mkdir -p /workspace/local-rules && tar -C /workspace/local-rules -xf - --no-same-owner'
   done
@@ -230,7 +203,7 @@ if [[ -r $HUB_ENV ]]; then
   hub_var() { grep "^$1=" "$HUB_ENV" | cut -d= -f2- || true; }
   port=$(hub_var HUB_HTTP_PORT)
   HUB_URL="http://$(hub_var HUB_HTTP_HOST):${port:-3100}/mcp"
-  for id in "$builder" "$architect" "$reviewer" "$chief"; do
+  for id in "${ALL[@]}"; do
     hub_var HUB_HTTP_BRAIN_TOKEN | docker exec -i -e HOME=/workspace -e HUB_URL="$HUB_URL" "$(box "$id")" sh -c '
       t=$(cat); claude mcp remove -s user turicks-brain >/dev/null 2>&1
       claude mcp add-json -s user turicks-brain \
@@ -248,42 +221,22 @@ if [[ -r $HUB_ENV ]]; then
   for tool in search_memory get_memory gmail_search calendar_events list_connected_tools; do
     api PATCH "/connections/$conn/tools/$tool" '{"enabled":true,"requiresApproval":false}' >/dev/null
   done
-  echo "brain: claude MCP in 4 computers, Chief connection $conn"
+  echo "brain: claude MCP in ${#ALL[@]} computers, Chief connection $conn"
 else
   echo "brain: $HUB_ENV not readable, skipped (install deploy/founderos-hub-http.service first)"
 fi
 
-# team-shift and chief-run read the repos they may work in from /workspace/team-repos (one per line).
-for id in "$builder" "$architect" "$reviewer" "$chief"; do
-  printf '%s\n' $REPOS | docker exec -i "$(box "$id")" sh -c 'cat > /workspace/team-repos'
-done
-
-# Shifts: one task per role, in its own "Shift" conversation, with no interval: shift-cron wakes it. Created paused;
-# never duplicated (a role's task is found by its prompt, which names the role).
-state=$(api GET /state)
-shifts=""
-for pair in "Architect:$architect" "Builder:$builder" "Reviewer:$reviewer"; do
-  name=${pair%%:*} id=${pair#*:}
-  conv=$(api GET /workspace | jq -r --arg d "$id" '.conversations[] | select(.dotId==$d and .title=="Shift") | .id' | head -1)
-  [[ -n $conv ]] || conv=$(api POST /conversations "$(jq -nc --arg d "$id" '{dotId:$d, title:"Shift"}')" | jq -r .id)
-  SHIFT="$name shift: follow your SHIFT rules for one item, or reply \"No work\"."
-  read -r task every < <(jq -r --arg p "$SHIFT" \
-    '[.tasks[] | select(.prompt==$p and .status!="cancelled")][0] // empty | "\(.id) \(.intervalSeconds)"' <<<"$state") || true
-  if [[ -z ${task:-} ]]; then
-    task=$(api POST /tasks "$(jq -nc --arg p "$SHIFT" --arg c "$conv" '{prompt:$p, threadId:$c}')" | jq -r .id)
-    api POST "/tasks/$task/actions" '{"action":"pause"}' >/dev/null
-  elif [[ $every != null ]]; then # an existing task keeps its paused/completed state
-    api PUT "/tasks/$task/schedule" '{"intervalSeconds":null}' >/dev/null
-  fi
-  shifts+="$(tr '[:upper:]' '[:lower:]' <<<"$name") $id $task"$'\n'
-  echo "$name dot=$id shift-task=$task conversation=$conv"
-done
-printf '%s' "$shifts" > "$SHIFT_TASKS"
-cron_line="$CRON_AT bash $HERE/shift-cron >> $(dirname "$SHIFT_TASKS")/shift-cron.log 2>&1 # opendots-shift"
+# Retired 2026-10-13 (founder: "simplify the setup"): the GitHub-label pipeline (team-shift, chief-run, shift-cron,
+# shift-notify). Remove its host cron lines and cancel its "<Role> shift:" tasks; their conversations stay.
 current=$(crontab -l 2>/dev/null || true)
-# shift-notify (every minute): a Telegram line to the founder when a role finishes or blocks an item.
-notify_line="* * * * * bash $HERE/shift-notify >> $(dirname "$SHIFT_TASKS")/shift-notify.log 2>&1 # opendots-notify"
-{ grep -v -e ' # opendots-shift$' -e ' # opendots-notify$' <<<"$current" || true; echo "$cron_line"; echo "$notify_line"; } |
-  grep -v '^$' | crontab -
-echo "cron: $CRON_AT shift-cron, every minute shift-notify"
-echo "chief=$chief"
+if grep -q -e ' # opendots-shift$' -e ' # opendots-notify$' <<<"$current"; then
+  { grep -v -e ' # opendots-shift$' -e ' # opendots-notify$' <<<"$current" || true; } | crontab -
+  echo "cron: removed the shift-cron and shift-notify lines"
+fi
+api GET /state | jq -r '.tasks[] | select(.status != "cancelled" and (.prompt | test("^(Architect|Builder|Reviewer) shift: follow your SHIFT rules"))) | .id' |
+  while read -r task; do
+    api POST "/tasks/$task/actions" '{"action":"cancel"}' >/dev/null
+    echo "cancelled retired shift task $task"
+  done
+rm -f "$(dirname "$APP")/shift-tasks"
+echo "dots: chief=$chief builder=$builder architect=$architect reviewer=$reviewer devops=${devops:-none}"

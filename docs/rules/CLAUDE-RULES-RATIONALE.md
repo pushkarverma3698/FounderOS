@@ -33,6 +33,12 @@ Moved verbatim from `CLAUDE.md` on 2026-09-28 (PR docs/claude-md-trim). `CLAUDE.
      module was written from scratch while `nextRecurrence` already sat in
      `src/core/time.ts` — and the existing one was *better*, with real IANA
      timezone handling instead of a fixed offset.)
+     (2026-10-10 → 10-13: about 3,000 lines of team-shift, chief-run, shift-cron and
+     shift-notify re-built a scheduler, queue and dispatcher that OpenDots already had
+     as scheduled tasks and per-Dot computers. The founder: "we do not want claude to
+     drive us 5-6 days of coding and then we get to know it was already there". Since
+     2026-10-13 `scripts/verify-pr-scope.ts` fails a PR that adds a code or script file
+     without a `Checked first:` line naming what was searched and what was found.)
   2. **What is the binding constraint?** Optimising a downstream variable while an
      upstream one is unverified is the most expensive mistake available. Name the
      constraint before choosing the work.
