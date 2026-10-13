@@ -499,6 +499,20 @@ describe("setup-dots.sh: shift schedule", () => {
       expect(docker).toContain(`exec -i opendots-computer-${box} sh -c f=/usr/local/bin/$1; cat > "$f.new" && chmod 755 "$f.new" && mv -f "$f.new" "$f" sh run-bg`);
   });
 
+  // 2026-10-13: a Learning container ID that does not exist in Intelligence fails every new conversation with
+  // "Thread lock denied" (404 LEARNING_CONTAINER_NOT_FOUND); saving the ID never creates the container.
+  it("turns Learning off on every Dot it writes, so no conversation is bound to a missing container", () => {
+    const r = setup(shiftTasks(null), {}, [["DevOps", "d"]]);
+    expect(r.status, r.out).toBe(0);
+    const writes = r.calls.filter((c) => /^(PUT|POST) \/dots[/ ]/.test(c) && c.includes('"instructions"'));
+    expect(writes.length).toBeGreaterThanOrEqual(5);
+    for (const w of writes) {
+      const body = JSON.parse(w.slice(w.indexOf("{"))) as { learningContainerId?: unknown; skillDeliveryEnabled?: unknown };
+      expect(body.learningContainerId, w.slice(0, 20)).toBeNull();
+      expect(body.skillDeliveryEnabled, w.slice(0, 20)).toBe(false);
+    }
+  });
+
   it("never creates a DevOps Dot that does not exist", () => {
     const r = setup(shiftTasks(null));
     expect(r.status, r.out).toBe(0);
