@@ -76,6 +76,9 @@ describe("setup-dots.sh", () => {
     }
     expect(instructions(r.calls, "r")).toContain("pr-adversary");
     expect(instructions(r.calls, "d")).toContain("dot-task create");
+    // 2026-10-13 live: DevOps waited in its own turn for a run that could start only after that turn (one task at a
+    // time) and failed at the step limit (opendots-dot-task.test.ts).
+    expect(instructions(r.calls, "d")).toContain("never wait for it; dot-task show <id>");
     expect(r.out).not.toContain(TOKEN);
   });
 
