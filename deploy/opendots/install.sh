@@ -12,7 +12,7 @@ AGY_SRC=${AGY_SRC:-/home/antigravity/.local/bin/agy}
 [[ -d $APP/.git ]] || git clone -q https://github.com/CopilotKit/OpenDots.git "$APP"
 git -C "$APP" fetch -q origin && git -C "$APP" checkout -q -f "$OPENDOTS_REV"
 # Our OpenDots changes (README): 15-min turns and tasks, recurring tasks survive a failed or interrupted run,
-# scheduled runs send only their own turn. checkout -f dropped the previous copy (the new test file is untracked,
+# scheduled runs send only their own turn, privileged computers. checkout -f dropped the previous copy (the new test file is untracked,
 # so remove it), so this re-applies cleanly; it fails loudly if upstream code moved.
 rm -f "$APP/tests/turicks.test.ts"
 git -C "$APP" apply "$HERE/opendots-turicks.patch"
@@ -36,8 +36,8 @@ compose build computer-image computer-supervisor app browser
 ctx=$(mktemp -d "$ROOT/computer-ctx.XXXXXX")
 trap 'rm -rf "$ctx"' EXIT
 sudo -n cp "$AGY_SRC" "$ctx/agy" && sudo -n chown "$(id -u):$(id -g)" "$ctx/agy"
-cp "$HERE/run-bg" "$HERE/dot-login" "$HERE/team-shift" "$HERE/chief-run" "$HERE/team-lib.sh" "$HERE/team-stream" "$HERE/team-services" "$ctx/" && cp -r "$HERE/team" "$ctx/team"
-chmod +x "$ctx/agy" "$ctx/run-bg" "$ctx/dot-login" "$ctx/team-shift" "$ctx/chief-run" "$ctx/team-stream" "$ctx/team-services"
+cp "$HERE/run-bg" "$HERE/dot-login" "$HERE/dot-task" "$HERE/team-services" "$ctx/"
+chmod +x "$ctx/agy" "$ctx/run-bg" "$ctx/dot-login" "$ctx/dot-task" "$ctx/team-services"
 docker build -q -t opendots-computer-turicks:1 -f "$HERE/computer.Dockerfile" "$ctx"
 
 compose up -d app browser computer-supervisor

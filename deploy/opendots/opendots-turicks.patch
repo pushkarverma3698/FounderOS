@@ -1,3 +1,17 @@
+diff --git a/deployment/computers/supervisor.Dockerfile b/deployment/computers/supervisor.Dockerfile
+--- a/deployment/computers/supervisor.Dockerfile
++++ b/deployment/computers/supervisor.Dockerfile
+@@ -7,5 +7,10 @@
+ COPY deployment/computers/LICENSE.openbot ./LICENSE.openbot
+ COPY deployment/computers/harden-supervisor.mjs /tmp/harden-supervisor.mjs
+ RUN bun /tmp/harden-supervisor.mjs /app/src/environment.ts && rm /tmp/harden-supervisor.mjs
++# Turicks (founder 2026-10-13, option a): each Dot's computer is a privileged employee machine, so Postgres
++# (runuser), package installs and services work like on a laptop. Upstream drops every capability and sets
++# no-new-privileges. The build fails if upstream moves these lines.
++RUN sed -i 's|SecurityOpt: \["no-new-privileges:true"\],|Privileged: true,|; s|CapDrop: \["ALL"\],||' src/docker.ts \
++ && grep -q 'Privileged: true,' src/docker.ts && ! grep -q -E 'CapDrop|no-new-privileges' src/docker.ts
+ EXPOSE 4300
+ CMD ["bun", "src/index.ts"]
 diff --git a/src/client/App.tsx b/src/client/App.tsx
 index e5cc646..5e84729 100644
 --- a/src/client/App.tsx
@@ -83,11 +97,11 @@ index 6191cc7..5b4ead6 100644
 +const TURN_TIME_LIMIT_MS = 15 * 60_000;
 +// turicks: was 2200. Coding replies (a file in one tool call, plus reasoning) need far more.
 +const MAX_COMPLETION_TOKENS = 16000;
-+// turicks: was 5 (10 with skills). A scheduled shift runs team-shift and claude does the work, so it needs a
-+// few model calls; a chat turn (the Chief of Staff with the founder) does its own shell work and gets more.
++// turicks: was 5 (10 with skills). A Dot leads claude through run-bg (start, then wait until done), so a
++// scheduled task and a chat turn both need room for many model calls.
 +// Each call re-sends the whole run, so a turn still asking for tools at the limit fails loudly instead of
 +// ending as "completed" (upstream maxIterations).
-+const SHIFT_MODEL_CALLS = 12;
++const SCHEDULED_MODEL_CALLS = 30;
 +const CHAT_MODEL_CALLS = 30;
 +const stepLimit =
 +  (max: number): AgentLoopStrategy =>
@@ -331,7 +345,7 @@ index 6191cc7..5b4ead6 100644
 +              },
 +              agentLoopStrategy: stepLimit(
 +                isScheduledTurn(ctx.input.messages)
-+                  ? SHIFT_MODEL_CALLS
++                  ? SCHEDULED_MODEL_CALLS
 +                  : CHAT_MODEL_CALLS,
                ),
                tools: [
@@ -652,7 +666,7 @@ index 0000000..a4cbbba
 +    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
 +    expect(network).toHaveBeenCalledTimes(1);
 +  });
-+// turicks: a Dot dispatches (team-shift) and claude does the work, so a turn needs a few model calls.
++// turicks: a Dot leads claude through run-bg, so a turn needs many model calls.
 +// Each call re-sends the whole run, so a looping turn must stop early and fail, not end "completed".
 +describe('step limit', () => {
 +  const toolLoop = () =>
@@ -673,17 +687,17 @@ index 0000000..a4cbbba
 +      ),
 +    );
 +  // 2026-10-11: 12 calls cut the Chief of Staff's chat with the founder (12 shell execs, then the limit).
-+  // A scheduled shift only runs team-shift, so it keeps 12; a chat turn gets 30.
-+  it('gives a scheduled shift turn 12 model calls and a chat turn 30', async () => {
++  // 2026-10-13: a scheduled task now runs claude through run-bg wait too, so it gets 30 as well.
++  it('gives a scheduled turn and a chat turn 30 model calls each', async () => {
 +    const shift = agent();
 +    shift.input.messages = [
-+      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run team-shift.' },
++      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run the routine.' },
 +    ];
 +    let network = toolLoop();
 +    await expect(lastValueFrom(shift.dotAgent.run(shift.input))).rejects.toThrow(
-+      'step limit (12 model calls)',
++      'step limit (30 model calls)',
 +    );
-+    expect(network).toHaveBeenCalledTimes(12);
++    expect(network).toHaveBeenCalledTimes(30);
 +    network.mockRestore();
 +    const chat = agent();
 +    network = toolLoop();
@@ -692,10 +706,10 @@ index 0000000..a4cbbba
 +    );
 +    expect(network).toHaveBeenCalledTimes(30);
 +  });
-+  it('stops a scheduled shift turn after 12 model calls and fails it', async () => {
++  it('stops a scheduled turn after 30 model calls and fails it', async () => {
 +    const { dotAgent, input } = agent();
 +    input.messages = [
-+      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run team-shift.' },
++      { id: `${scheduledTaskMessagePrefix}1`, role: 'user', content: 'Run the routine.' },
 +    ];
 +    const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
 +      completion(
@@ -717,7 +731,7 @@ index 0000000..a4cbbba
 +    await expect(
 +      lastValueFrom(dotAgent.run(input).pipe(tap((e) => events.push(e)))),
 +    ).rejects.toThrow('step limit');
-+    expect(network).toHaveBeenCalledTimes(12);
++    expect(network).toHaveBeenCalledTimes(30);
 +    expect(types(events)).not.toContain(EventType.RUN_FINISHED);
 +  });
 +});

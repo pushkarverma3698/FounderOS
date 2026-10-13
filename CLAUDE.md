@@ -51,7 +51,7 @@ Rationale and incidents: [docs/rules/CLAUDE-RULES-RATIONALE.md](docs/rules/CLAUD
 - **Live-test everything yourself (founder, 2026-10-07)**: FounderOS is the founder's own harness, not a user-facing product, so prod has no customers to protect. After every deploy, drive the change through the real path yourself (Telegram probe, real GitHub, real tool) and show the output. Never hand the live test back to the founder. If a live run is impossible, say NOT VERIFIED and why.
 - **Fix the schema, not the code**: ambiguous requirements → the planner asks for the missing field; never guess data.
 - **Bug fixes start with a failing test** (PR template section is mandatory).
-- **#25**: before non-trivial work, grep for an existing implementation, name the binding constraint, state the strongest argument against your plan.
+- **#25 Verify and research before building**: before non-trivial work, search for what already exists (repo grep, the framework or product's own features and docs, open issues), name the binding constraint, state the strongest argument against your plan. An assumed fact is a hypothesis until a command or the docs confirm it. CI: a PR adding a code file needs a `Checked first:` line (`scripts/verify-pr-scope.ts`).
 - **#26**: founder-facing output is actionable without reading code: every reason printed with its own result; split a Telegram message rather than hide a row.
 - **Zero paid calls in the dev loop**: `pnpm test` is $0. `scripts/probe-*.ts`, `scripts/e2e-telegram-qa.ts` and `pnpm eval` spend
   money: failing unit test first, then ONE live run. `pnpm qa:telegram` runs once, when the PR is about to go up.
