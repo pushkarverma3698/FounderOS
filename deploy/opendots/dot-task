@@ -74,7 +74,8 @@ case "$cmd" in
   run|pause|cancel)
     id="${1:-}"
     [[ -n "$id" ]] || usage
-    api POST "/tasks/$id/actions" "$(jq -nc --arg a "$cmd" '{action: $a}')"
+    # The API answers with the whole task record; the confirmation line is all anyone needs. A refusal still exits non-zero.
+    api POST "/tasks/$id/actions" "$(jq -nc --arg a "$cmd" '{action: $a}')" >/dev/null
     echo "task $id: $cmd requested"
     ;;
   show)

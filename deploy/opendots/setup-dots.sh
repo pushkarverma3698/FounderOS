@@ -194,11 +194,11 @@ if compgen -G "$LOCAL_RULES/*.md" >/dev/null; then
   done
 fi
 
-# The shared brain over HTTP (src/mcp/hub-http.ts, deploy/founderos-hub-http.service on the host), for claude in
-# every computer. The computers get the brain-only token: they run repo code as root, so that code can read whatever
+# The shared brain over HTTP (src/mcp/hub-http.ts, deploy/founderos-hub-http.service on the host), for claude and agy
+# in every computer. The computers get the brain-only token: they run repo code as root, so that code can read whatever
 # token they hold. The Chief Dot gets the full token (adds calendar and mail reads) as an OpenDots Connection, stored
 # in the app's database, never in a computer. Skipped until the hub is installed. Tokens never reach the host's argv.
-HUB_ENV=/etc/founderos/hub-http.env
+HUB_ENV=${OPENDOTS_HUB_ENV:-/etc/founderos/hub-http.env}
 if [[ -r $HUB_ENV ]]; then
   hub_var() { grep "^$1=" "$HUB_ENV" | cut -d= -f2- || true; }
   port=$(hub_var HUB_HTTP_PORT)
@@ -207,7 +207,11 @@ if [[ -r $HUB_ENV ]]; then
     hub_var HUB_HTTP_BRAIN_TOKEN | docker exec -i -e HOME=/workspace -e HUB_URL="$HUB_URL" "$(box "$id")" sh -c '
       t=$(cat); claude mcp remove -s user turicks-brain >/dev/null 2>&1
       claude mcp add-json -s user turicks-brain \
-        "{\"type\":\"http\",\"url\":\"$HUB_URL\",\"headers\":{\"Authorization\":\"Bearer $t\"}}" >/dev/null' ||
+        "{\"type\":\"http\",\"url\":\"$HUB_URL\",\"headers\":{\"Authorization\":\"Bearer $t\"}}" >/dev/null || exit 1
+      # agy keeps its servers in ~/.gemini/config/mcp_config.json. The Builder held the laptop-era stdio entry
+      # (node /opt/agent-rules/brain-mcp.mjs), which cannot start here; remove it, then add the same HTTP hub.
+      agy mcp remove turicks-brain >/dev/null 2>&1
+      agy mcp add --header "Authorization: Bearer $t" turicks-brain "$HUB_URL" >/dev/null' ||
       { echo "could not add the brain MCP in $(box "$id")" >&2; exit 1; }
   done
   conn=$(api GET "/dots/$chief/connections" | jq -r '.[] | select(.name=="turicks-brain") | .id' | head -1)
@@ -221,7 +225,7 @@ if [[ -r $HUB_ENV ]]; then
   for tool in search_memory get_memory gmail_search calendar_events list_connected_tools; do
     api PATCH "/connections/$conn/tools/$tool" '{"enabled":true,"requiresApproval":false}' >/dev/null
   done
-  echo "brain: claude MCP in ${#ALL[@]} computers, Chief connection $conn"
+  echo "brain: claude and agy MCP in ${#ALL[@]} computers, Chief connection $conn"
 else
   echo "brain: $HUB_ENV not readable, skipped (install deploy/founderos-hub-http.service first)"
 fi
