@@ -21,7 +21,7 @@ on top of those and was removed on 2026-10-13; CI fails if those files come back
 | `home/` | Every computer's employee setup: `CLAUDE.md` (the laptop's engineering rules minus laptop-only lines) as `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and the skills `production-ready`, `pr-adversary`, `systematic-debugging`, `no-ai-slop` for claude and agy. Edit here, not in a computer |
 | `run-bg` | Long commands past the 70 s shell limit: `run-bg start <name> claude -p "..."`, then `run-bg wait <name>` (up to 55 s; call it with `timeoutMs` 60000) until `exit=` |
 | `dot-login` | Driven from chat: `dot-login <claude\|agy\|gh> start [email]` gives a sign-in link, `finish <code\|url>` installs the login, `logout`, `status` |
-| `dot-task` | The app's scheduled tasks from a shell: `dot-task create "<prompt>" --interval <sec>`, `list`, `run`, `pause`, `cancel` |
+| `dot-task` | The app's scheduled tasks from a shell: `dot-task create "<prompt>" --interval <sec>`, `list`, `show`, `run`, `pause`, `cancel`. The app runs one task at a time, so a run queued from a Dot's turn starts after that turn; read its answer later with `show` |
 | `team-services` | Real Postgres 16 (pgvector) and Redis inside a computer for tests, below |
 
 ## How a Dot works
