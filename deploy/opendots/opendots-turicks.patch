@@ -1,7 +1,8 @@
 diff --git a/deployment/computers/supervisor.Dockerfile b/deployment/computers/supervisor.Dockerfile
+index 83ef403..d01f04b 100644
 --- a/deployment/computers/supervisor.Dockerfile
 +++ b/deployment/computers/supervisor.Dockerfile
-@@ -7,5 +7,10 @@
+@@ -7,5 +7,10 @@ COPY --from=openbot supervisor/src ./src
  COPY deployment/computers/LICENSE.openbot ./LICENSE.openbot
  COPY deployment/computers/harden-supervisor.mjs /tmp/harden-supervisor.mjs
  RUN bun /tmp/harden-supervisor.mjs /app/src/environment.ts && rm /tmp/harden-supervisor.mjs
@@ -45,6 +46,58 @@ index e5cc646..5e84729 100644
        </main>
      );
    if (!state || !workspace || !dot)
+diff --git a/src/client/Chat.tsx b/src/client/Chat.tsx
+index 8ec3ce3..b558c4f 100644
+--- a/src/client/Chat.tsx
++++ b/src/client/Chat.tsx
+@@ -36,6 +36,7 @@ import { Mascot } from './Mascot';
+ import { useVoice } from './useVoice';
+ import { CallView } from './CallView';
+ import { shouldSubmitComposerOnKeyDown } from './chat-composer';
++import { messagesSignature, resyncUntilStable } from './thread-resync';
+ 
+ export function Chat({
+   thread,
+@@ -101,6 +102,7 @@ export function Chat({
+   const [running, setRunning] = useState(false);
+   const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
+   const sent = useRef(false);
++  const runningRef = useRef(false);
+   const bottom = useRef<HTMLDivElement>(null);
+   useEffect(() => {
+     const subscription = copilotkit.subscribe({
+@@ -120,7 +122,14 @@ export function Chat({
+     void copilotkit
+       .connectAgent({ agent })
+       .then(() => {
+-        if (active) setLoaded(true);
++        if (!active) return;
++        setLoaded(true);
++        void resyncUntilStable({
++          connect: () => copilotkit.connectAgent({ agent }),
++          signature: () => messagesSignature(agent.messages),
++          isBusy: () => runningRef.current,
++          isCancelled: () => !active,
++        });
+       })
+       .catch((e) => {
+         if (active)
+@@ -135,6 +144,7 @@ export function Chat({
+   const send = async (text: string) => {
+     if (!text.trim() || running || !loaded || !contextReady || paused) return;
+     setError('');
++    runningRef.current = true;
+     setRunning(true);
+     agent.addMessage({
+       id: crypto.randomUUID(),
+@@ -158,6 +168,7 @@ export function Chat({
+           : 'The turn failed. Your conversation remains saved.',
+       );
+     } finally {
++      runningRef.current = false;
+       setRunning(false);
+     }
+   };
 diff --git a/src/client/api.ts b/src/client/api.ts
 index db9fb2a..a27926e 100644
 --- a/src/client/api.ts
@@ -62,8 +115,85 @@ index db9fb2a..a27926e 100644
  }
  export class ApiError extends Error {
    constructor(
+diff --git a/src/client/thread-resync.ts b/src/client/thread-resync.ts
+new file mode 100644
+index 0000000..eef3d4e
+--- /dev/null
++++ b/src/client/thread-resync.ts
+@@ -0,0 +1,71 @@
++// turicks: opening a thread while its reply is still streaming, or within a second or two of the run
++// ending, replays only part of the reply and then the replay stream closes. The page kept the cut-off text
++// until the next reload. Re-running the cursor-preserving connect picks up the rest; this repeats it until
++// the transcript stops changing.
++
++type Message = {
++  id?: string;
++  role?: string;
++  content?: unknown;
++  toolCalls?: unknown;
++};
++
++function contentText(content: unknown): string {
++  if (typeof content === 'string') return content;
++  if (Array.isArray(content))
++    return content
++      .map((part) =>
++        part && typeof part === 'object' && 'text' in part
++          ? String((part as { text?: unknown }).text ?? '')
++          : '',
++      )
++      .join('');
++  return '';
++}
++
++export function messagesSignature(messages: readonly Message[]): string {
++  return JSON.stringify(
++    messages.map((m) => [
++      m.id ?? '',
++      m.role ?? '',
++      contentText(m.content),
++      JSON.stringify(m.toolCalls ?? null),
++    ]),
++  );
++}
++
++export const RESYNC_DELAYS_MS = [1000, 2000, 3000, 5000, 8000, 12000];
++
++export async function resyncUntilStable(options: {
++  connect: () => Promise<unknown>;
++  signature: () => string;
++  isBusy: () => boolean;
++  isCancelled: () => boolean;
++  wait?: (ms: number) => Promise<void>;
++  delaysMs?: number[];
++}): Promise<{ settled: boolean; rounds: number }> {
++  const wait =
++    options.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
++  const delays = options.delaysMs ?? RESYNC_DELAYS_MS;
++  let previous = options.signature();
++  let stable = 0;
++  let rounds = 0;
++  for (const delay of delays) {
++    await wait(delay);
++    if (options.isCancelled() || options.isBusy()) return { settled: false, rounds };
++    rounds += 1;
++    let failed = false;
++    try {
++      await options.connect();
++    } catch {
++      // a failed background re-sync leaves the transcript as it was; the next round retries
++      failed = true;
++    }
++    if (options.isCancelled()) return { settled: false, rounds };
++    const current = options.signature();
++    stable = !failed && current === previous ? stable + 1 : 0;
++    previous = current;
++    if (stable >= 2) return { settled: true, rounds };
++  }
++  return { settled: false, rounds };
++}
 diff --git a/src/server/dot-agent.ts b/src/server/dot-agent.ts
-index 6191cc7..5b4ead6 100644
+index 6191cc7..1767447 100644
 --- a/src/server/dot-agent.ts
 +++ b/src/server/dot-agent.ts
 @@ -14,7 +14,7 @@ import {
@@ -476,9 +606,145 @@ index 444b21c..090b7f9 100644
      const events = await finished;
      expect(events).toEqual(
        expect.arrayContaining([
+diff --git a/tests/thread-resync.test.ts b/tests/thread-resync.test.ts
+new file mode 100644
+index 0000000..5e27d80
+--- /dev/null
++++ b/tests/thread-resync.test.ts
+@@ -0,0 +1,130 @@
++import { expect, it, vi } from 'vitest';
++import {
++  messagesSignature,
++  resyncUntilStable,
++} from '../src/client/thread-resync';
++
++// turicks: opening a thread while its reply is still streaming (or within a second or two of the run
++// ending) replays only part of the reply, and the replay stream then closes. The page showed that cut-off
++// text until the next reload. These tests pin the re-sync that closes the gap.
++
++function harness(snapshots: string[]) {
++  let index = 0;
++  const connect = vi.fn(async () => {
++    index = Math.min(index + 1, snapshots.length - 1);
++  });
++  return {
++    connect,
++    signature: () => snapshots[index],
++    wait: vi.fn(async () => {}),
++  };
++}
++
++it('keeps reconnecting until the text stops changing, so a cut-off reply fills in', async () => {
++  const h = harness(['1 2 3', '1 2 3 4 5 6', '1 2 3 4 5 6 7 8 9', '1 2 3 4 5 6 7 8 9']);
++  const result = await resyncUntilStable({
++    ...h,
++    isBusy: () => false,
++    isCancelled: () => false,
++  });
++  expect(h.signature()).toBe('1 2 3 4 5 6 7 8 9');
++  expect(result).toEqual({ settled: true, rounds: 4 });
++});
++
++it('stops after two identical re-syncs when nothing was missing', async () => {
++  const h = harness(['complete']);
++  const result = await resyncUntilStable({
++    ...h,
++    isBusy: () => false,
++    isCancelled: () => false,
++  });
++  expect(h.connect).toHaveBeenCalledTimes(2);
++  expect(result).toEqual({ settled: true, rounds: 2 });
++});
++
++it('waits the configured delays between re-syncs', async () => {
++  const h = harness(['a']);
++  await resyncUntilStable({
++    ...h,
++    isBusy: () => false,
++    isCancelled: () => false,
++    delaysMs: [10, 20, 30],
++  });
++  expect((h.wait.mock.calls as unknown as number[][]).map((call) => call[0])).toEqual([10, 20]);
++});
++
++it('gives up, without throwing, when the text never settles', async () => {
++  let n = 0;
++  const connect = vi.fn(async () => {
++    n += 1;
++  });
++  const result = await resyncUntilStable({
++    connect,
++    signature: () => String(n),
++    isBusy: () => false,
++    isCancelled: () => false,
++    wait: async () => {},
++    delaysMs: [1, 1, 1],
++  });
++  expect(connect).toHaveBeenCalledTimes(3);
++  expect(result).toEqual({ settled: false, rounds: 3 });
++});
++
++it('does not touch the thread once this page started its own run', async () => {
++  const h = harness(['a', 'b']);
++  let busy = false;
++  h.wait.mockImplementation(async () => {
++    busy = true;
++  });
++  const result = await resyncUntilStable({
++    ...h,
++    isBusy: () => busy,
++    isCancelled: () => false,
++  });
++  expect(h.connect).not.toHaveBeenCalled();
++  expect(result).toEqual({ settled: false, rounds: 0 });
++});
++
++it('stops when the chat is closed', async () => {
++  const h = harness(['a', 'b', 'c']);
++  let cancelled = false;
++  h.connect.mockImplementation(async () => {
++    cancelled = true;
++  });
++  const result = await resyncUntilStable({
++    ...h,
++    isBusy: () => false,
++    isCancelled: () => cancelled,
++  });
++  expect(h.connect).toHaveBeenCalledTimes(1);
++  expect(result.settled).toBe(false);
++});
++
++it('survives a failed re-sync and counts it as not settled', async () => {
++  const h = harness(['a']);
++  h.connect.mockRejectedValueOnce(new Error('socket closed'));
++  const result = await resyncUntilStable({
++    ...h,
++    isBusy: () => false,
++    isCancelled: () => false,
++  });
++  expect(result.settled).toBe(true);
++  expect(h.connect).toHaveBeenCalledTimes(3);
++});
++
++it('signature changes when a message grows, a message is added, or a tool call appears', () => {
++  const base = [{ id: 'a', role: 'assistant', content: 'abc' }];
++  const sig = messagesSignature(base);
++  expect(messagesSignature([{ id: 'a', role: 'assistant', content: 'abcd' }])).not.toBe(sig);
++  expect(messagesSignature([...base, { id: 'b', role: 'user', content: 'x' }])).not.toBe(sig);
++  expect(
++    messagesSignature([{ ...base[0], toolCalls: [{ id: 't', function: { name: 'n', arguments: '{}' } }] }]),
++  ).not.toBe(sig);
++  expect(messagesSignature(base)).toBe(sig);
++});
++
++it('signature reads text from structured content parts', () => {
++  const sig = (text: string) =>
++    messagesSignature([{ id: 'a', role: 'assistant', content: [{ type: 'text', text }] }]);
++  expect(sig('abcd')).not.toBe(sig('abc'));
++});
 diff --git a/tests/turicks.test.ts b/tests/turicks.test.ts
 new file mode 100644
-index 0000000..a4cbbba
+index 0000000..6c42b5a
 --- /dev/null
 +++ b/tests/turicks.test.ts
 @@ -0,0 +1,417 @@

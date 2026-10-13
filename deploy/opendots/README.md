@@ -52,6 +52,8 @@ Applied by `install.sh` after a clean checkout; it fails loudly if upstream code
   reports a cut-off tool call as `finish_reason "tool_calls"`, so the patch also checks `native_finish_reason`, the
   whole budget used, and tool arguments that do not parse.
 - The web app remembers the owner token in `localStorage` (upstream: `sessionStorage`).
+- Opening a chat during a reply, or within about 3 s of one, no longer leaves it cut off: the page re-syncs the
+  thread (`src/client/thread-resync.ts`) until the text stops changing (upstream: stays truncated until a reload).
 - Computers run **privileged** (founder 2026-10-13): upstream drops every capability and sets `no-new-privileges`, so
   Postgres (`runuser`), package installs and services failed. The supervisor image build fails if upstream moves
   those lines.
