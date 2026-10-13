@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# dot-task: CLI helper for OpenDots autonomous routines, tasks, and background loops.
-# Works both on the host and inside any Dot's computer container.
+# dot-task: the app's scheduled tasks from a shell, on the host or inside any Dot's computer.
+# The app runs one task at a time, and a Dot's own turn is one, so a run requested from inside a turn starts only
+# after that turn ends: request it, report the id, and read its answer later with `show` (never wait in the turn).
 set -euo pipefail
 
 usage() {
@@ -8,12 +9,10 @@ usage() {
 Usage:
   dot-task list                                          List all tasks
   dot-task create "<prompt>" [--interval <sec>] [--thread <id>]  Create a task
-  dot-task run <task-id>                                 Run task immediately
+  dot-task show <task-id>                                Status, interval and the last run's answer
+  dot-task run <task-id>                                 Queue a run (starts after the current turn ends)
   dot-task pause <task-id>                               Pause task
   dot-task cancel <task-id>                              Cancel task
-  dot-task loop <name> <interval-sec> "<command>"        Run recurring background routine
-  dot-task loop-status <name>                            Check background loop status
-  dot-task loop-stop <name>                              Stop background loop
 EOF
   exit 2
 }
@@ -78,25 +77,14 @@ case "$cmd" in
     api POST "/tasks/$id/actions" "$(jq -nc --arg a "$cmd" '{action: $a}')"
     echo "task $id: $cmd requested"
     ;;
-  loop)
-    name="${1:-}"
-    interval="${2:-}"
-    loop_cmd="${3:-}"
-    [[ -n "$name" && "$interval" =~ ^[0-9]+$ && -n "$loop_cmd" ]] || usage
-    which run-bg >/dev/null 2>&1 || { echo "run-bg not found" >&2; exit 1; }
-    run-bg start "loop-$name" bash -c "while true; do $loop_cmd; sleep $interval; done"
-    echo "loop-$name started with interval ${interval}s"
-    ;;
-  loop-status)
-    name="${1:-}"
-    [[ -n "$name" ]] || usage
-    run-bg status "loop-$name"
-    ;;
-  loop-stop)
-    name="${1:-}"
-    [[ -n "$name" ]] || usage
-    run-bg stop "loop-$name"
-    echo "loop-$name stopped"
+  show)
+    id="${1:-}"
+    [[ -n "$id" ]] || usage
+    # GET /api/tasks/:id lists runs newest first.
+    api GET "/tasks/$id" | jq -r '.task as $t | (.runs // [] | first) as $r |
+      "\($t.id // "")\t\($t.status)\t\(if $t.intervalSeconds then "every \($t.intervalSeconds)s" else "manual" end)",
+      (if $r == null then "no run yet"
+       else "last run: \($r.status)" + (if $r.error then " - \($r.error)" else "" end), ($r.result.text // empty) end)'
     ;;
   *)
     usage
