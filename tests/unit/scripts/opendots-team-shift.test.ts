@@ -494,8 +494,9 @@ describe("setup-dots.sh: shift schedule", () => {
     const waitSeconds = /for \(\(i = 0; i < (\d+); i\+\+\)\)/.exec(readFileSync(join(ROOT, "deploy", "opendots", "run-bg"), "utf8"));
     expect(Number(waitSeconds?.[1])).toBeLessThanOrEqual(55);
     const docker = readFileSync(join(fake, "docker.log"), "utf8").trim().split("\n");
+    // Renamed into place: root in a computer cannot overwrite the ubuntu-owned run-bg of older images.
     for (const box of ["chief", "b", "a", "r", "d"])
-      expect(docker).toContain(`exec -i opendots-computer-${box} sh -c cat > "/usr/local/bin/$1" && chmod 755 "/usr/local/bin/$1" sh run-bg`);
+      expect(docker).toContain(`exec -i opendots-computer-${box} sh -c f=/usr/local/bin/$1; cat > "$f.new" && chmod 755 "$f.new" && mv -f "$f.new" "$f" sh run-bg`);
   });
 
   it("never creates a DevOps Dot that does not exist", () => {

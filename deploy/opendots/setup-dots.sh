@@ -146,11 +146,15 @@ copy "$architect" "${LOGINS[@]}" "${AGY[@]}"
 copy "$reviewer" "${LOGINS[@]}" "${AGY[@]}"
 copy "$chief" "${LOGINS[@]}" "${AGY[@]}" # chief-run: claude, agy when claude is at its limit
 # Refresh the helpers without an image rebuild; the copy lasts until the computer is recreated, and reruns redo it.
+# A new file renamed over the old one: older images have run-bg owned by ubuntu, which root cannot write to without
+# CAP_DAC_OVERRIDE (the computers drop all capabilities), but root owns /usr/local/bin, and a rename never truncates
+# a running script.
 helpers() {
   local tool
   for tool in dot-task run-bg; do
     [[ -f "$HERE/$tool" ]] || continue
-    docker exec -i "$(box "$1")" sh -c 'cat > "/usr/local/bin/$1" && chmod 755 "/usr/local/bin/$1"' sh "$tool" < "$HERE/$tool"
+    docker exec -i "$(box "$1")" sh -c \
+      'f=/usr/local/bin/$1; cat > "$f.new" && chmod 755 "$f.new" && mv -f "$f.new" "$f"' sh "$tool" < "$HERE/$tool"
   done
 }
 [[ -z $devops ]] || ! up "$devops" || helpers "$devops"
