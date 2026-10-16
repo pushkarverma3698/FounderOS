@@ -99,6 +99,26 @@ describe("form-brain fixes from live QA", () => {
     expect(planFor(text("Current Notice period (in days)", "number"), words).kind).toBe("ask");
   });
 
+  // Prod loop 2026-10-16: the saved "Yes" lost to the location mapping, so the bot typed the city and asked forever.
+  it("answers a yes/no select from the founder's saved answer, never the city", () => {
+    const nl = "Are you based in The Netherlands or Ireland?*";
+    const select: ScrapedField = { ...text(nl, "select"), options: ["Yes", "No"] };
+    expect(planFor(select)).toMatchObject({ kind: "ask", options: ["Yes", "No"] });
+    const saved: ApplyProfile = { ...PROFILE, question_bank: { [nl]: "Yes" } };
+    expect(planFor(select, saved)).toMatchObject({ kind: "choose", option: "Yes" });
+    expect(planFor(text(nl), saved)).toMatchObject({ kind: "value", value: "Yes" });
+  });
+
+  it("attaches the CV only to the Resume slot and asks for the cover letter", () => {
+    const fields: ScrapedField[] = [
+      { selector: '[id="resume"]', type: "file", label: "Resume/CV*", required: true },
+      { selector: '[id="cover_letter"]', type: "file", label: "Cover Letter", required: false },
+    ];
+    const [resume, cover] = buildFormFillPlan(fields, PROFILE, { resumePath: "/tmp/cv.pdf" });
+    expect(resume).toMatchObject({ kind: "file", path: "/tmp/cv.pdf" });
+    expect(cover).toMatchObject({ kind: "ask" });
+  });
+
   it("uses the founder's own answer over the standard profile mapping", () => {
     const answered: ApplyProfile = { ...PROFILE, question_bank: { "Location (City)*": "Mohali, Punjab, India" } };
     expect(planFor(text("Location (City)*"), answered)).toMatchObject({ kind: "value", value: "Mohali, Punjab, India" });

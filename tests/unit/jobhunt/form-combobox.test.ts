@@ -12,6 +12,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyProfile } from "../../../src/tools/jobhunt/apply-profile.js";
 import { buildFormFillPlan } from "../../../src/tools/jobhunt/form-brain.js";
+import { chooseComboboxOption } from "../../../src/tools/jobhunt/form-combobox.js";
 import { executeFormPlan } from "../../../src/tools/jobhunt/form-runner.js";
 import { scrapePageFields } from "../../../src/tools/jobhunt/form-scraper.js";
 
@@ -62,6 +63,7 @@ const FIXTURE = `<!doctype html><html><head><meta charset="utf-8"><title>QA fixt
   ${combo("location", "Location (City)*", 'data-async="SAS Nagar Mohali, Punjab, India|Mohali, Maharashtra, India|Mumbai, Maharashtra, India"')}
   ${combo("q_go", "Do you have production experience with the programming language Go?*", 'data-options="Yes|No"')}
   ${combo("q_nl", "Are you based in The Netherlands or Ireland?*", 'data-options="Yes|No"')}
+  ${combo("q_office", "Preferred office", 'data-options="New Delhi India|Mohali India" data-short="1"')}
   ${fileGroup("resume", "Resume/CV*")}
   ${fileGroup("cover_letter", "Cover Letter")}
   <fieldset class="_fieldEntry_x">
@@ -206,6 +208,15 @@ describe("form-combobox: React-Select, async autocomplete, Ashby radio groups (P
     const nl = plan.find((a) => a.label.startsWith("Are you based in"));
     expect(nl).toMatchObject({ kind: "ask", required: true, options: ["Yes", "No"] });
     expect(await singleValue("q_nl")).toBe("");
+    await page.close();
+  }, 30_000);
+
+  // A control showing only the last word may verify a dial code ("+91"), never a place: "India" is not "Mohali India".
+  it("does not verify a pick when the control shows only a non-dial-code last word", async () => {
+    if (!browser) return;
+    const page = await browser.newPage();
+    await page.goto(url);
+    expect(await chooseComboboxOption(page, page.locator('[id="q_office"]'), "Mohali India")).toBe(false);
     await page.close();
   }, 30_000);
 

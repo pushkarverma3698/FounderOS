@@ -119,20 +119,20 @@ async function pollMenu(
 }
 
 /**
- * True when the combobox now shows `expected`: its own value, or its single-value text, either equal or the
- * expected text's last whole words (Greenhouse's phone-country picker shows "+91" for "India +91").
+ * True when the combobox now shows `expected`: its own value or its single-value text, exactly. One exception:
+ * Greenhouse's phone-country picker shows only the dial code ("+91" for "India +91"), so a shown dial code that
+ * ends the expected text counts. A shown place name ("India" for "Mohali India") never does.
  */
 async function comboboxShows(input: Locator, expected: string): Promise<boolean> {
   return input
     .evaluate((el, want) => {
       const inp = el as unknown as DomElement;
       const norm = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-      const tokens = (s: string): string => ` ${s.replace(/[^a-z0-9]+/g, " ").trim()} `;
       if (norm(inp.value) === norm(want)) return true;
       const control = inp.closest('[class*="control" i]');
       const shown = norm(control?.querySelector('[class*="single-value" i], [class*="singleValue" i]')?.textContent);
       if (shown === norm(want)) return true;
-      return tokens(shown).trim().length > 0 && tokens(norm(want)).endsWith(tokens(shown));
+      return /^\+\d{1,4}$/.test(shown) && norm(want).endsWith(` ${shown}`);
     }, expected)
     // allow-failopen: unreadable DOM reports false, so the field stays unverified and is asked on Telegram.
     .catch(() => false);
