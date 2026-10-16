@@ -127,6 +127,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     example: "/wife_draft 1",
   },
   {
+    command: "apply",
+    description: "apply n — auto-fill the employer form from your dossier, ask any unknown questions here, and give a one-tap Submit button. apply tashi n for Tashi's",
+    group: "jobs",
+  },
+  {
+    command: "wife_apply",
+    description: "wife_apply n — auto-fill your wife's application form from her dossier and give a one-tap Submit button",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_apply 1",
+  },
+  {
     command: "gaps",
     // Says what to DO with it. /draft can only use words already on the CV, so
     // this list is the only thing that moves the number a recruiter searches on.
