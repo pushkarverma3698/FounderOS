@@ -56,8 +56,8 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
   website: ["website", "portfolio", "personal site"],
   coverLetter: ["cover letter", "motivation letter", "motivational letter", "motivatiebrief", "sollicitatiebrief"],
   resume: ["resume", "cv", "curriculum vitae"],
-  location: ["location", "based in", "where are you based", "current location", "address", "adres"],
-  country: ["country", "land"],
+  location: ["location", "based in", "where are you based", "where will you be based", "current location", "address", "adres"],
+  country: ["country", "country of residence", "woonland", "geboorteland"],
   currentCompany: ["current company", "current employer", "employer", "company name", "huidige werkgever", "bedrijf"],
   yearsExperience: ["years of experience", "years experience", "jaren ervaring"],
 };
@@ -65,6 +65,9 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
 function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): boolean {
   const n = normalizeQuestionKey(label);
   if (!n) return false;
+  if (group === "location" && (n.includes("office") || n.includes("days a week") || n.includes("can you come"))) {
+    return false;
+  }
   if (group === "fullName") {
     return n === "name" || LABEL_GROUPS.fullName!.some((phrase) => phrase !== "name" && n.includes(phrase));
   }
