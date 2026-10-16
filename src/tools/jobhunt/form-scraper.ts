@@ -7,9 +7,10 @@
  * into the platform-agnostic `ScrapedField[]` structure consumed by `form-brain.ts`.
  */
 
-import type { Locator, Page } from "playwright";
+import type { Page } from "playwright";
 import { getApplyUrl } from "./apply-packet.js";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
+import { cssEscapeAttr, idSelector, readComboboxOptions } from "./form-combobox.js";
 
 export type FormPlatform =
   | "greenhouse"
@@ -38,6 +39,7 @@ interface DomElement {
   getBoundingClientRect(): { readonly width: number; readonly height: number };
   closest(selector: string): DomElement | null;
   querySelector(selector: string): DomElement | null;
+  querySelectorAll(selector: string): ArrayLike<DomElement>;
 }
 
 interface DomGlobal {
@@ -106,70 +108,8 @@ export function resolveFormTargetUrl(url: string, company: string, platform: For
   return url;
 }
 
-function cssEscapeAttr(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-/** Use `[id="..."]` so dots/colons in Recruitee or React IDs never break CSS parsing. */
-export function idSelector(id: string): string {
-  return `[id="${cssEscapeAttr(id)}"]`;
-}
-
-async function labelForElement(page: Page, el: Locator, id: string): Promise<string> {
-  if (id) {
-    // allow-failopen: missing label[for] is normal; falls through to aria-label/placeholder/ancestor.
-    const viaFor = await page.locator(`label[for="${cssEscapeAttr(id)}"]`).first().textContent().catch(() => null);
-    if (viaFor?.trim() && !/^(attach|upload|clear|remove|browse|choose file)$/i.test(viaFor.trim())) {
-      return viaFor.trim().replace(/\s+/g, " ");
-    }
-  }
-  // allow-failopen: falls through to next label strategy.
-  const ariaLabel = await el.getAttribute("aria-label").catch(() => null);
-  if (ariaLabel?.trim()) return ariaLabel.trim().replace(/\s+/g, " ");
-  // allow-failopen: falls through to ancestor lookup.
-  const placeholder = await el.getAttribute("placeholder").catch(() => null);
-  if (placeholder?.trim() && !/^(select|type here|enter|choose|\.\.\.)/i.test(placeholder.trim())) {
-    return placeholder.trim().replace(/\s+/g, " ");
-  }
-  return el
-    .evaluate((node) => {
-      let n: DomElement | null = node as unknown as DomElement;
-      for (let i = 0; i < 6 && n; i++) {
-        n = n.parentElement;
-        if (!n) break;
-        const candidate = n.querySelector("legend, label, strong, [class*='label' i]");
-        const text = candidate?.textContent?.trim().replace(/\s+/g, " ");
-        if (text && text.length > 1 && text.length < 220 && !/^(clear|remove|attach|upload)$/i.test(text)) {
-          return text;
-        }
-      }
-      return "";
-    })
-    // allow-failopen: unlabelled field defaults to "" and maps to `ask` in form-brain.
-    .catch(() => "");
-}
-
 function isConsentByHeuristic(name: string, id: string, label: string): boolean {
   return /gdpr|consent|privacy|terms|agree|acknowledge|gegevens|toestemming/i.test(`${name} ${id} ${label}`);
-}
-
-async function groupLabelFor(page: Page, name: string): Promise<string> {
-  return page
-    .locator(`input[name="${cssEscapeAttr(name)}"]`)
-    .first()
-    .evaluate((node) => {
-      let n: DomElement | null = node as unknown as DomElement;
-      for (let i = 0; i < 8 && n; i++) {
-        n = n.parentElement;
-        if (!n) break;
-        const legend = n.querySelector("legend, [class*='label' i]:not(input):not(select):not(textarea)");
-        const text = legend?.textContent?.trim().replace(/\s+/g, " ");
-        if (text && text.length > 4 && text.length < 250 && !/^(clear|remove)$/i.test(text)) return text;
-      }
-      return "";
-    })
-    // allow-failopen: falls back to option-level label.
-    .catch(() => "");
 }
 
 /** Reveal the application form on platforms that require hydration or an in-page button click. */
@@ -228,49 +168,81 @@ export async function revealPlatformForm(page: Page, platform: FormPlatform): Pr
 export async function scrapePageFields(page: Page, platform: FormPlatform): Promise<ScrapedField[]> {
   const raw = await page.evaluate(() => {
     const dom = globalThis as unknown as DomGlobal;
-    const els = Array.from(dom.document.querySelectorAll("input, select, textarea"));
-    return els.map((e, idx) => {
-      const rect = e.getBoundingClientRect();
-      const rawType = (e.getAttribute("type") ?? (e.tagName === "TEXTAREA" ? "textarea" : e.tagName === "SELECT" ? "select" : "text")).toLowerCase();
-      const isVisible = rawType === "file" || (rect.width > 0 && rect.height > 0);
-      const isCaptcha =
-        /recaptcha|h-captcha|hcaptcha|cf-turnstile/i.test(e.className || "") ||
-        /recaptcha|h-captcha|cf-turnstile/i.test(e.getAttribute("name") ?? "") ||
-        !!e.closest('[class*="recaptcha" i], [class*="captcha" i], [class*="turnstile" i]');
-
-      let optText = "";
-      if (rawType === "checkbox" || rawType === "radio") {
-        if (e.id) {
-          const lbl = dom.document.querySelector(`label[for="${dom.CSS.escape(e.id)}"]`);
-          if (lbl?.textContent?.trim()) optText = lbl.textContent.trim().replace(/\s+/g, " ");
-        }
-        if (!optText) {
-          let n: DomElement | null = e.parentElement;
-          for (let i = 0; i < 5 && n; i++) {
-            const text = n.textContent?.trim().replace(/\s+/g, " ") ?? "";
-            if (text.length > 0 && text.length < 300) {
-              optText = text;
-              break;
-            }
-            n = n.parentElement;
-          }
+    const clean = (s: string | null | undefined): string => (s ?? "").trim().replace(/\s+/g, " ");
+    const SKIP = /^(attach|upload|clear|remove|browse|choose file)$/i;
+    const forLabel = (e: DomElement): string =>
+      e.id ? clean(dom.document.querySelector(`label[for="${dom.CSS.escape(e.id)}"]`)?.textContent) : "";
+    // Labels are read here, in one snapshot: a per-field locator wait cost 30 s for every field without label[for].
+    const labelOf = (e: DomElement): string => {
+      const viaFor = forLabel(e);
+      if (viaFor && !SKIP.test(viaFor)) return viaFor;
+      const aria = clean(e.getAttribute("aria-label"));
+      if (aria) return aria;
+      const placeholder = clean(e.getAttribute("placeholder"));
+      if (placeholder && !/^(select|type here|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
+      for (let n = e.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
+        for (const c of Array.from(n.querySelectorAll("legend, label, strong, [class*='label' i]"))) {
+          const t = clean(c.textContent);
+          if (t.length > 1 && t.length < 220 && !SKIP.test(t)) return t;
         }
       }
+      return "";
+    };
+    const optionTextOf = (e: DomElement): string => {
+      const viaFor = forLabel(e);
+      if (viaFor) return viaFor;
+      for (let n = e.parentElement, i = 0; n && i < 5; n = n.parentElement, i++) {
+        const t = clean(n.textContent);
+        if (t.length > 0 && t.length < 300) return t;
+      }
+      return "";
+    };
+    // A radio/checkbox group's question: the nearest label-like text that is not one of its own options.
+    const groupOf = (e: DomElement, opts: readonly string[]): { label: string; required: boolean } | null => {
+      for (let n = e.parentElement, i = 0; n && i < 8; n = n.parentElement, i++) {
+        for (const c of Array.from(n.querySelectorAll("legend, label, [class*='label' i]:not(input):not(select):not(textarea)"))) {
+          const t = clean(c.textContent);
+          if (t.length < 4 || t.length >= 250 || /^(clear|remove)$/i.test(t) || opts.includes(t)) continue;
+          return { label: t, required: /[*✱]\s*$/.test(t) || /required/i.test(c.className || "") };
+        }
+      }
+      return null;
+    };
 
+    const els = Array.from(dom.document.querySelectorAll("input, select, textarea"));
+    const rows = els.map((e) => {
+      const rect = e.getBoundingClientRect();
+      const rawType = (e.getAttribute("type") ?? (e.tagName === "TEXTAREA" ? "textarea" : e.tagName === "SELECT" ? "select" : "text")).toLowerCase();
+      const isChoice = rawType === "checkbox" || rawType === "radio";
       return {
-        idx,
         tag: e.tagName,
         type: rawType,
         role: (e.getAttribute("role") ?? "").toLowerCase(),
         name: e.name || e.getAttribute("name") || "",
         id: e.id || "",
+        label: labelOf(e),
         required: Boolean(e.required) || e.getAttribute("aria-required") === "true",
-        value: optText,
-        isCaptcha,
+        value: isChoice ? optionTextOf(e) : "",
+        options: e.tagName === "SELECT" ? Array.from(e.options ?? []).map((o) => clean(o.textContent)) : undefined,
+        group: null as { label: string; required: boolean } | null,
+        isCaptcha:
+          /recaptcha|h-captcha|hcaptcha|cf-turnstile/i.test(e.className || "") ||
+          /recaptcha|h-captcha|cf-turnstile/i.test(e.getAttribute("name") ?? "") ||
+          !!e.closest('[class*="recaptcha" i], [class*="captcha" i], [class*="turnstile" i]'),
         hasFormAttr: !!e.closest("form, [role='form'], #application-form, #application_form, #app"),
-        isVisible,
+        isVisible: rawType === "file" || (rect.width > 0 && rect.height > 0),
       };
     });
+    const groups = new Map<string, { label: string; required: boolean } | null>();
+    rows.forEach((r, i) => {
+      if (!r.name || (r.type !== "radio" && r.type !== "checkbox")) return;
+      if (!groups.has(r.name)) {
+        const opts = rows.filter((o) => o.name === r.name && o.type === r.type).map((o) => o.value);
+        groups.set(r.name, groupOf(els[i]!, opts));
+      }
+      r.group = groups.get(r.name) ?? null;
+    });
+    return rows;
   });
 
   const fields: ScrapedField[] = [];
@@ -283,8 +255,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     if (r.type !== "radio" && r.type !== "checkbox" && !r.name && !r.id) continue;
     if (/^react-select-\d+-input$/i.test(r.id) && !r.name) continue;
 
-    const locator = page.locator("input, select, textarea").nth(r.idx);
-    const label = await labelForElement(page, locator, r.id);
+    const label = r.label;
 
     if (r.isCaptcha) {
       fields.push({
@@ -318,14 +289,14 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       if (groupedNames.has(groupKey)) continue;
       groupedNames.add(groupKey);
       const options = siblings.map((o) => o.value).filter(Boolean);
-      const groupLabel = r.name ? await groupLabelFor(page, r.name) : "";
-      const resolvedLabel = groupLabel || label || r.value;
+      const resolvedLabel = r.group?.label || label || r.value;
+      const groupRequired = r.required || Boolean(r.group?.required);
       if (r.type === "checkbox" && isConsentByHeuristic(r.name, r.id, resolvedLabel)) {
         fields.push({
           selector,
           type: "checkbox",
           label: resolvedLabel,
-          required: r.required,
+          required: groupRequired,
           options: options.length > 0 ? options : ["Yes, accept"],
           isConsent: true,
         });
@@ -336,13 +307,13 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
         selector,
         type: r.type === "radio" ? "radio-group" : "checkbox-group",
         label: resolvedLabel,
-        required: r.required,
+        required: groupRequired,
         options,
       });
       continue;
     }
 
-    const kind: ScrapedFieldKind =
+    let kind: ScrapedFieldKind =
       r.type === "file" ? "file"
       : r.type === "email" ? "email"
       : r.type === "tel" ? "tel"
@@ -351,12 +322,15 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       : r.tag === "SELECT" ? "select"
       : "text";
 
-    let options: string[] | undefined;
-    if (kind === "select") {
-      options = await locator
-        .evaluate((el) => Array.from((el as unknown as DomElement).options ?? []).map((o) => o.textContent?.trim() ?? ""))
-        // allow-failopen: unreadable select options fall back to `ask` in form-brain.
-        .catch(() => undefined);
+    let options = r.options;
+    if (kind === "text" && r.role === "combobox" && r.id) {
+      // React-Select keeps its options in a listbox that exists only while open; a fixed list makes it a select.
+      // allow-failopen: an unopenable combobox stays a text field and is typed into or asked.
+      const listed = await readComboboxOptions(page, page.locator(idSelector(r.id))).catch(() => [] as string[]);
+      if (listed.length > 0) {
+        kind = "select";
+        options = listed;
+      }
     }
 
     const idOrName = `${r.id} ${r.name}`.toLowerCase();
@@ -369,7 +343,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
             : label
         : label;
 
-    const requiredFromLabel = /\*\s*$/.test(effectiveLabel);
+    const requiredFromLabel = /[*✱]\s*$/.test(effectiveLabel);
     fields.push({
       selector: r.id ? idSelector(r.id) : `${r.tag.toLowerCase()}[name="${cssEscapeAttr(r.name)}"]`,
       type: kind,
