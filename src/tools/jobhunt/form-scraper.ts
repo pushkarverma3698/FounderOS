@@ -300,7 +300,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     if (r.type === "radio" || r.type === "checkbox") {
       const groupKey = r.name || r.id;
       if (!groupKey) continue;
-      const selector = r.name ? `input[name="${cssEscapeAttr(r.name)}"]` : idSelector(r.id);
+      const selector = r.name ? `input[type="${r.type}"][name="${cssEscapeAttr(r.name)}"]` : idSelector(r.id);
       const siblings = r.name ? raw.filter((o) => o.name === r.name && (o.type === "radio" || o.type === "checkbox")) : [r];
 
       if (r.type === "checkbox" && siblings.length === 1 && isConsentByHeuristic(r.name, r.id, label || r.value)) {

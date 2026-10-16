@@ -180,15 +180,24 @@ async function runFormPrepAndPrompt(ctx: Context, session: PendingApplySession):
   sessionsByChat.set(session.chatId, updated);
   sessionsByRow.set(session.rowId, updated);
 
-  if (prep.summary.unanswered.length > 0) {
+  if (prep.summary.requiredUnanswered.length > 0) {
     await promptCurrentQuestion(ctx, updated);
     return;
   }
 
+  const optionalNote =
+    prep.summary.unanswered.length > 0
+      ? `\n<i>(${prep.summary.unanswered.length} optional questions remaining — you can submit now or answer them below.)</i>`
+      : "";
+
   await ctx.reply(
-    `✅ <b>Form ready for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\nAll required fields and CV are filled. Tap <b>Submit Application</b> to send it now.`,
+    `✅ <b>Form ready for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\nAll required fields and CV are filled. Tap <b>Submit Application</b> to send it now.${optionalNote}`,
     { parse_mode: "HTML", reply_markup: buildSubmitKeyboard(session.rowId, prep.targetUrl) },
   );
+
+  if (prep.summary.unanswered.length > 0) {
+    await promptCurrentQuestion(ctx, updated);
+  }
 }
 
 /** Start the one-click auto-apply flow for a resolved row. */

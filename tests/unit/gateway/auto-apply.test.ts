@@ -227,6 +227,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
                   },
                 ],
             hasCaptcha: false,
+            readyToSubmit: Boolean(hasLearnedWhy),
           },
         };
       },
@@ -316,8 +317,22 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
                     why: "not yet in dossier",
                   },
                 ],
-            requiredUnanswered: [],
+            requiredUnanswered: answered
+              ? []
+              : [
+                  {
+                    selector: "#office_select",
+                    label: "Preferred office location",
+                    kind: "ask",
+                    question: "Preferred office location",
+                    required: true,
+                    fieldType: "select",
+                    options: ["Amsterdam", "Rotterdam"],
+                    why: "not yet in dossier",
+                  },
+                ],
             hasCaptcha: false,
+            readyToSubmit: Boolean(answered),
           },
         };
       },
