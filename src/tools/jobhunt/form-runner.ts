@@ -31,14 +31,9 @@ export const SUBMIT_CONFIRM_TIMEOUT_MS = 12_000;
 const NAV_BUTTON_EXCLUSIONS = ["header-tab-apply-button", "apply-button-nav"];
 
 interface DomElement {
-  readonly id: string;
-  readonly value?: string;
-  readonly textContent: string | null;
-  readonly parentElement: DomElement | null;
-  getAttribute(name: string): string | null;
-  closest(selector: string): DomElement | null;
-  querySelector(selector: string): DomElement | null;
-  checkValidity?(): boolean;
+  readonly id: string; readonly value?: string; readonly textContent: string | null; readonly parentElement: DomElement | null;
+  getAttribute(name: string): string | null; closest(selector: string): DomElement | null;
+  querySelector(selector: string): DomElement | null; checkValidity?(): boolean;
 }
 
 interface DomGlobal {
@@ -56,16 +51,25 @@ async function typeIntoField(page: Page, selector: string, value: string): Promi
     await locator.click({ timeout: 5_000 });
     await locator.pressSequentially(value, { delay: 25, timeout: 10_000 });
     await page.waitForTimeout(400);
-    await page.keyboard.press("Enter");
+
+    // allow-failopen: clicking matching menu option directly when available, otherwise fall back to Enter.
+    const optClicked = await page.locator('[class*="option" i]').filter({ hasText: new RegExp(value, "i") }).first().click({ timeout: 2_500 }).then(() => true).catch(() => false);
+    if (!optClicked) {
+      // allow-failopen: arrow down fallback.
+      await page.keyboard.press("ArrowDown").catch(() => undefined);
+      // allow-failopen: enter fallback.
+      await page.keyboard.press("Enter").catch(() => undefined);
+    }
     await page.waitForTimeout(300);
     const verified = await locator
       .evaluate((el, expected) => {
         const inp = el as unknown as DomElement;
         if (inp.value && inp.value.toLowerCase().includes(expected.toLowerCase())) return true;
-        const container = inp.closest('[class*="select" i], [class*="combobox" i], .field') ?? inp.parentElement?.parentElement?.parentElement;
+        const container = inp.closest('.select__control, [class*="control" i], [class*="combobox" i], .field') ?? inp.parentElement?.parentElement;
         const singleVal = container?.querySelector('[class*="single-value" i], [class*="singleValue" i]');
         if (singleVal?.textContent?.trim()) return true;
-        return (container?.textContent ?? "").toLowerCase().includes(expected.toLowerCase());
+        const text = (container?.textContent ?? "").toLowerCase();
+        return text.includes(expected.toLowerCase());
       }, value)
       // allow-failopen: unreadable DOM reports false (unverified).
       .catch(() => false);
@@ -106,13 +110,16 @@ async function chooseInField(
   if (count === 1 && fieldType === "checkbox") {
     const single = inputs.first();
     // allow-failopen: styled checkbox fallback to .click() when .check() actionability fails.
-    await single.check({ timeout: 5_000 }).catch(() => single.click({ timeout: 5_000 }));
+    await single.check({ timeout: 5_000 }).catch(() => single.click({ timeout: 5_000, force: true }));
     // allow-failopen: unreadable checked state reports false.
     return single.isChecked().catch(() => false);
   }
 
   for (let i = 0; i < count; i++) {
     const input = inputs.nth(i);
+    // allow-failopen: missing type attribute defaults to null and continues loop.
+    const rawType = await input.getAttribute("type").catch(() => null);
+    if (rawType?.toLowerCase() === "hidden") continue;
     const text = await input
       .evaluate((el) => {
         const dom = globalThis as unknown as DomGlobal;
@@ -134,7 +141,7 @@ async function chooseInField(
 
     if (text.toLowerCase() === optionText.toLowerCase() || text.includes(optionText)) {
       // allow-failopen: styled radio/checkbox fallback to .click().
-      await input.check({ timeout: 5_000 }).catch(() => input.click({ timeout: 5_000 }));
+      await input.check({ timeout: 5_000 }).catch(() => input.click({ timeout: 5_000, force: true }));
       // allow-failopen: unreadable checked state reports false.
       return input.isChecked().catch(() => false);
     }
@@ -224,10 +231,8 @@ export interface FormFailureResult {
 }
 
 async function launchHeadlessBrowser() {
-  return chromium.launch({ headless: true }).catch(
-    // allow-failopen: falls back to system Chrome when Playwright's bundled shell is not installed.
-    () => chromium.launch({ headless: true, channel: "chrome" }),
-  );
+  // allow-failopen: falls back to system Chrome when Playwright's bundled shell is not installed.
+  return chromium.launch({ headless: true }).catch(() => chromium.launch({ headless: true, channel: "chrome" }));
 }
 
 /** Open the ATS page, fill known fields from profile + dossier, and return summary + preview PNG. */
@@ -293,9 +298,7 @@ export async function submitApplicationForm(
   dossier?: CandidateDossier,
 ): Promise<SubmittedFormResult | FormFailureResult> {
   const check = classifyFormUrl(url);
-  if (!check.supported) {
-    return { ok: false, reason: check.reason, platform: null };
-  }
+  if (!check.supported) return { ok: false, reason: check.reason, platform: null };
 
   const targetUrl = resolveFormTargetUrl(url, company, check.platform);
   const browser = await launchHeadlessBrowser();
