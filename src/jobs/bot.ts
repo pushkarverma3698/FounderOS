@@ -14,6 +14,7 @@ import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
 import { resolveJobsBotToken } from "../infra/jobs-bot-token.js";
 import { handleDraft, handleApplied } from "../gateway/jobhunt-commands.js";
+import { handleAutoApply, tryHandlePendingApplyReply } from "../gateway/auto-apply.js";
 import { injectSenderProfile, parseSenderProfiles } from "../gateway/jobhunt-sender-profile.js";
 import { handleJobCallback } from "../gateway/jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "../gateway/live-application-commands.js";
@@ -111,6 +112,7 @@ export function registerJobsHandlers(bot: Registrar, access: ChatAccessConfig = 
   bot.command("wife_commands", (ctx: Context) => handleWifeCommands(ctx)); // the wife_ aliases are out of the ☰ menu
 
   both(bot, "draft", (ctx) => handleDraft(ctx));
+  both(bot, "apply", (ctx) => handleAutoApply(ctx));
   both(bot, "applied", (ctx) => handleApplied(ctx));
   both(bot, "replied", (ctx) => handleReplied(ctx));
   both(bot, "rejected", (ctx) => handleRejected(ctx));
@@ -126,6 +128,7 @@ export function registerJobsHandlers(bot: Registrar, access: ChatAccessConfig = 
     const raw = ctx.message?.text ?? "";
     const text = ctx.chat?.type === "private" ? raw : stripBotMention(raw, ctx.me.username);
     if (!text.trim()) return;
+    if (await tryHandlePendingApplyReply(ctx, text)) return;
     log.info({ from: ctx.from?.id, chat: ctx.chat?.id, text: text.slice(0, 80) }, "Unhandled text");
     // Registered commands never reach here, so a /word is one that does not exist. Silence would read as a dead bot.
     const typed = text.trim().split(/\s+/)[0] ?? "";

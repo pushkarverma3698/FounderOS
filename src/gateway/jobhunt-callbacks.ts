@@ -14,6 +14,7 @@ import { getApplicationById } from "../db/apply-queries.js";
 import { getProfile, listProfiles } from "../tools/jobhunt/profile-config.js";
 import { childLogger } from "../infra/logger.js";
 import { draftRow } from "./jobhunt-commands.js";
+import { handleAutoApplyCallback } from "./auto-apply.js";
 import { markRowApplied, parseJobCallback, JOB_CALLBACK_PREFIX } from "./jobhunt-buttons.js";
 import { draftButtonsFor, parseViewCallback, type ViewCallback } from "./jobhunt-compact.js";
 import { gapAddReply, parseGapCallback } from "./jobhunt-gap-buttons.js";
@@ -37,6 +38,8 @@ export async function handleJobCallback(ctx: Context, jobs?: JobsViewDeps): Prom
 
   const view = parseViewCallback(data);
   if (view) return handleViewTap(ctx, view, jobs);
+
+  if (await handleAutoApplyCallback(ctx, data)) return true;
 
   const parsed = parseJobCallback(data);
   if (!parsed) {
