@@ -57,6 +57,8 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
   coverLetter: ["cover letter", "motivation letter", "motivational letter", "motivatiebrief", "sollicitatiebrief"],
   resume: ["resume", "cv", "curriculum vitae"],
   location: ["location", "based in", "where are you based", "current location", "address", "adres"],
+  country: ["country", "land"],
+  currentCompany: ["current company", "current employer", "employer", "company name", "huidige werkgever", "bedrijf"],
   yearsExperience: ["years of experience", "years experience", "jaren ervaring"],
 };
 
@@ -125,7 +127,7 @@ export function chooseEligibility(
   field: ScrapedField,
   profile: ApplyProfile,
   dossier?: CandidateDossier,
-): Extract<FormFillAction, { kind: "choose" | "ask" }> {
+): Extract<FormFillAction, { kind: "choose" | "ask" | "value" }> {
   const label = field.label || "Work authorization question";
   const askFallback = (why: string): Extract<FormFillAction, { kind: "ask" }> => ({
     selector: field.selector, label, kind: "ask", question: label,
@@ -153,6 +155,14 @@ export function chooseEligibility(
     return askFallback("apply-profile.json has no confirmed work_authorization — never guessed");
   }
   if (!field.options || field.options.length === 0) {
+    const q = normalizeQuestionKey(label);
+    if (q.includes("require sponsorship") || q.includes("need sponsorship") || q.includes("require visa") || q.includes("need a visa") || q.includes("sponsorship")) {
+      const ans = status === "requires-sponsorship" ? "Yes" : "No";
+      return {
+        selector: field.selector, label, kind: "value", value: ans, confidence: 0.95,
+        why: `work_authorization=${status} answered "${ans}" to sponsorship question`,
+      };
+    }
     return askFallback("no options to score — free-text legal statement is never typed automatically without an explicit question_bank entry");
   }
 
@@ -194,9 +204,17 @@ function matchStandardTextField(
   if (labelMatches(field.label, "phone")) return textActionFor(field, profile.phone, "matched phone field");
   if (labelMatches(field.label, "linkedin")) return textActionFor(field, profile.linkedin, "matched LinkedIn field");
   if (labelMatches(field.label, "website")) return textActionFor(field, profile.website ?? profile.answers?.github, "matched website/portfolio field");
+  if (labelMatches(field.label, "country")) {
+    const country = profile.answers?.location_country ?? "India";
+    return textActionFor(field, country, "matched country field");
+  }
   if (labelMatches(field.label, "location")) {
     const loc = [profile.answers?.location_city, profile.answers?.location_country].filter(Boolean).join(", ");
     return textActionFor(field, loc || undefined, "matched location field");
+  }
+  if (labelMatches(field.label, "currentCompany")) {
+    const company = (profile.answers as Record<string, unknown> | undefined)?.["current_company"] as string | undefined ?? "FounderOS / Turicks";
+    return textActionFor(field, company, "matched current company field");
   }
   if (labelMatches(field.label, "coverLetter")) return textActionFor(field, row.coverLetterText, "matched cover-letter text field");
   if (labelMatches(field.label, "yearsExperience") && (field.type === "text" || field.type === "number")) {
@@ -322,6 +340,7 @@ export interface FormPlanSummary {
   readonly unanswered: readonly UnansweredQuestion[];
   readonly requiredUnanswered: readonly UnansweredQuestion[];
   readonly hasCaptcha: boolean;
+  readonly readyToSubmit: boolean;
 }
 
 export function summariseFormPlan(
@@ -347,12 +366,17 @@ export function summariseFormPlan(
     }
   }
 
+  const requiredUnanswered = unanswered.filter((u) => u.required);
+  const optionalUnanswered = unanswered.filter((u) => !u.required);
+  const orderedUnanswered = [...requiredUnanswered, ...optionalUnanswered];
+
   return {
     filled: filledLabels.length,
     total: actions.length,
     filledLabels,
-    unanswered,
-    requiredUnanswered: unanswered.filter((u) => u.required),
+    unanswered: orderedUnanswered,
+    requiredUnanswered,
     hasCaptcha,
+    readyToSubmit: requiredUnanswered.length === 0 && !hasCaptcha,
   };
 }
