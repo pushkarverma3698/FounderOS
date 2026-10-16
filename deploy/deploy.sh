@@ -167,6 +167,20 @@ fi
 # production is live and healthy. `timeout` on every command is the mechanism.
 # ---------------------------------------------------------------------------
 
+# Public /apply link (2026-10-16): the jobs bot serves /apply/<token> on 127.0.0.1:3001 and the founder
+# opens it from a phone, so Tailscale Funnel must map https://<node>.ts.net/apply to it. The script is
+# idempotent (no change when the mapping is already right) and only ever touches that one mount.
+# Failure is NON-fatal on purpose: the bot is already live and healthy, the link is an add-on, and a red
+# deploy would block unrelated fixes. It is loud instead: an APPLY_LINK_FUNNEL_FAILED line with the reason
+# printed just above it, plus a fixed-text GitHub Actions warning annotation on the run.
+echo "==> Ensuring the /apply Funnel route (idempotent, bounded, non-fatal)"
+FUNNEL_TMO=""
+if command -v timeout >/dev/null 2>&1; then FUNNEL_TMO="timeout 90"; fi
+if ! $FUNNEL_TMO bash scripts/infra/apply-link-funnel.sh </dev/null; then
+  echo "APPLY_LINK_FUNNEL_FAILED: the public /apply link is NOT published (reason printed above). Fix it, then run: bash scripts/infra/apply-link-funnel.sh" >&2
+  echo "::warning title=APPLY_LINK_FUNNEL_FAILED::The public apply link is not published. See the deploy log."
+fi
+
 # brain_memories is NOT synced here — see the header. Report what the store holds
 # so a stale/empty brain is visible on every deploy, then move on.
 # (brain.turicks_brain is the frozen pre-ADR-038 table — checking it here always
