@@ -2,7 +2,8 @@
 
 Branch `fix/jobhunt-ats-form-fill` (cut from `main` ddd0d904). Commits: b90e622d (failing tests from the live QA),
 ca65ac36 (React-Select options, safe label matching, number fields, fast labels), f142dad9 (tsx evaluate shim,
-`aria-labelledby` labels, svg-free label text, slow country picker). The building session reached its fourth
+`aria-labelledby` labels, svg-free label text, slow country picker), 362d4baf (exact-text combobox verify; only a
+dial code may match as a suffix; regression locks for the prod loop and the CV slot). The building session reached its fourth
 compaction and stopped there. The fill layer is fixed and live-checked on 4 ATS, and `pnpm gate` is green.
 Still to do: the draft PR, the deploy, the Telegram proof and the verdict.
 
@@ -33,7 +34,7 @@ contain personal data, so do not share them.
   ancestor walk), skipping `<svg>` text. Radio groups are named from `aria-labelledby` or the
   fieldset/legend. React-Select comboboxes are opened with ArrowDown so their options can be read.
 - **`form-combobox.ts`:** chooses an option and verifies it after blur, including a control that shows only the
-  last words, as the Greenhouse phone-country picker shows "+91". Async autocomplete types the first comma
+  dial code, as the Greenhouse phone-country picker shows "+91"; a shown place name never verifies. Async autocomplete types the first comma
   segment and picks with `pickAutocompleteOption`.
 - **Brain/dossier:** whole-word option matching; semantic phrases matched at a word start with excludes
   (ethnicity ≠ city, current salary ≠ expectation, open source ≠ referral source); yes/no questions never get
@@ -48,7 +49,7 @@ pnpm vitest run tests/unit/jobhunt/form-ats-qa.test.ts tests/unit/jobhunt/form-c
 pnpm gate > /tmp/gate-$$.log 2>&1; echo "exit=$?"
 ```
 
-Last gate on f142dad9: exit 0, 254 files, 3388 tests passed.
+Last gate on 362d4baf: exit 0, 254 files, 3391 tests passed. Greenhouse re-run on 362d4baf: same as the table.
 
 ## Live harness setup (gitignored; never commit it or print profile values)
 
