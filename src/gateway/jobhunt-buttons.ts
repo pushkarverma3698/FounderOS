@@ -35,9 +35,12 @@ export function parseJobCallback(data: string): { action: JobAction; rowId: stri
   return { action: kind === "d" ? "draft" : "applied", rowId };
 }
 
-/** The keyboard under a delivered CV: open the form, then close the row out. */
-export function packetKeyboard(rowId: string, applyUrl: string): InlineKeyboard {
+/** The keyboard under a delivered CV: auto-apply (when enabled), open the form, then close the row out. */
+export function packetKeyboard(rowId: string, applyUrl: string, withAutoApply = false): InlineKeyboard {
   const kb = new InlineKeyboard();
+  if (withAutoApply && /^https?:\/\//i.test(applyUrl)) {
+    kb.text("🚀 Auto-Apply", `${JOB_CALLBACK_PREFIX}f:${rowId}`).row();
+  }
   // Telegram refuses a url button whose URL is not http(s); an empty one is
   // already reported in the message text, so the button is simply left out.
   if (/^https?:\/\//i.test(applyUrl)) kb.url("🔗 Open the form", applyUrl).row();
