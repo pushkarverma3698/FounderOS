@@ -35,6 +35,21 @@ Defects proven:
 | Agent A (background subagent of the old session) | `feat/jobhunt-apply-answer-page` | `.claude/worktrees/agent-a338685cbbc9234c5` | Answer page: route `/apply/<rowId>.<exp>.<sig>` on the jobs health server (127.0.0.1:3001), HMAC-SHA256 token, 72 h expiry, per-row snapshot JSON (0600) in the data root, `filledAnswers` added in `summariseFormPlan` only, POST → `recordLearnedAnswer` → re-prepare → new card via bot API, per-row lock, never submits; card = text summary + URL button instead of the photo; env `APPLY_LINK_BASE_URL` / `APPLY_LINK_SECRET`, missing env fails loud. Plus rows 5–6 |
 | Agent B (background subagent of the old session) | `chore/apply-link-funnel` | `.claude/worktrees/agent-a158fbbf0aa543d27` | Tailscale Funnel `/apply` → `http://127.0.0.1:3001/apply` on `turicks-dots.taile5afc3.ts.net`; deploy/env wiring (`deploy/deploy.sh`, `scripts/apply-prod-env-overrides.sh`, `scripts/infra/`) |
 
+## Agent B result (arrived after the handoff was written)
+Draft PR #1184 (`chore/apply-link-funnel` → beta, head 1c3f71e8). Its own report: `pnpm gate` exit=0, 3398 tests,
+CI "Type check + lint + wiring" green, "Unit + regression" still running when it checked. Not reviewed yet.
+- `scripts/infra/apply-link-funnel.sh` (idempotent): `tailscale funnel --yes --bg --https=443 --set-path=/apply
+  http://127.0.0.1:3001/apply`. The target must repeat `/apply`, because `--set-path` strips the mount.
+- `scripts/apply-prod-env-overrides.sh` writes `APPLY_LINK_BASE_URL` and `APPLY_LINK_SECRET` only if they are missing,
+  and keeps them across a `PROD_DOTENV` re-render.
+- `deploy/deploy.sh` runs it after the health check. On failure it only warns (log plus a GitHub annotation).
+  Review point: the founder rejects detect-and-alert patches ("remove the seam"). Decide whether a failed
+  publish should fail the deploy, or whether the bot should fall back to sending no link and say why in the card.
+- Proven on the VPS with throwaway mounts only: public HTTPS 200 through the mount, 404 outside it, and
+  `/apply-probe/../health` 404. Not proven: the real `/apply/<token>` route, a real deploy, surviving a tailscaled
+  restart, and cert renewal.
+- The app branch must add `APPLY_LINK_*` to `.env.example` when `src/` starts reading them.
+
 Agents A and B report to the old session. If it is gone, read their worktrees directly:
 `git -C <worktree> log --oneline -5; git -C <worktree> status --short`.
 
