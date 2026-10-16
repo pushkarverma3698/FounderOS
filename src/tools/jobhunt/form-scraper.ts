@@ -10,7 +10,7 @@
 import type { Page } from "playwright";
 import { getApplyUrl } from "./apply-packet.js";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
-import { cssEscapeAttr, idSelector, readComboboxOptions } from "./form-combobox.js";
+import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions } from "./form-combobox.js";
 
 export type FormPlatform =
   | "greenhouse"
@@ -27,6 +27,9 @@ export type FormPlatform =
 /** Minimal structural DOM types for browser `evaluate` callbacks (Node tsconfig omits `lib: ["dom"]`). */
 interface DomElement {
   readonly id: string;
+  readonly nodeType: number;
+  readonly nodeName: string;
+  readonly childNodes: ArrayLike<DomElement>;
   readonly name?: string;
   readonly tagName: string;
   readonly className: string;
@@ -44,6 +47,7 @@ interface DomElement {
 
 interface DomGlobal {
   readonly document: {
+    getElementById(id: string): DomElement | null;
     querySelector(selector: string): DomElement | null;
     querySelectorAll(selector: string): ArrayLike<DomElement>;
   };
@@ -166,23 +170,40 @@ export async function revealPlatformForm(page: Page, platform: FormPlatform): Pr
 
 /** Scrape all fillable fields on the current page into `ScrapedField[]`. */
 export async function scrapePageFields(page: Page, platform: FormPlatform): Promise<ScrapedField[]> {
+  await installEvaluateShim(page);
   const raw = await page.evaluate(() => {
     const dom = globalThis as unknown as DomGlobal;
     const clean = (s: string | null | undefined): string => (s ?? "").trim().replace(/\s+/g, " ");
     const SKIP = /^(attach|upload|clear|remove|browse|choose file)$/i;
+    // Text without <svg> content: Workable's icon-only label[for] would otherwise read "SVGs not supported by this browser."
+    const textOf = (n: DomElement | null | undefined): string => {
+      if (!n || n.nodeName.toLowerCase() === "svg") return "";
+      if (n.nodeType !== 1) return n.textContent ?? "";
+      return Array.from(n.childNodes).map(textOf).join("");
+    };
     const forLabel = (e: DomElement): string =>
-      e.id ? clean(dom.document.querySelector(`label[for="${dom.CSS.escape(e.id)}"]`)?.textContent) : "";
+      e.id ? clean(textOf(dom.document.querySelector(`label[for="${dom.CSS.escape(e.id)}"]`))) : "";
+    // Workable names every question only through aria-labelledby; the first id is the label, later ids are hints.
+    const labelledBy = (e: DomElement | null | undefined): string => {
+      for (const id of (e?.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean)) {
+        const t = clean(textOf(dom.document.getElementById(id)));
+        if (t) return t;
+      }
+      return "";
+    };
     // Labels are read here, in one snapshot: a per-field locator wait cost 30 s for every field without label[for].
     const labelOf = (e: DomElement): string => {
       const viaFor = forLabel(e);
       if (viaFor && !SKIP.test(viaFor)) return viaFor;
+      const named = labelledBy(e);
+      if (named && !SKIP.test(named)) return named;
       const aria = clean(e.getAttribute("aria-label"));
       if (aria) return aria;
       const placeholder = clean(e.getAttribute("placeholder"));
       if (placeholder && !/^(select|type here|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
       for (let n = e.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
         for (const c of Array.from(n.querySelectorAll("legend, label, strong, [class*='label' i]"))) {
-          const t = clean(c.textContent);
+          const t = clean(textOf(c));
           if (t.length > 1 && t.length < 220 && !SKIP.test(t)) return t;
         }
       }
@@ -199,9 +220,12 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     };
     // A radio/checkbox group's question: the nearest label-like text that is not one of its own options.
     const groupOf = (e: DomElement, opts: readonly string[]): { label: string; required: boolean } | null => {
+      const box = e.closest('[role="radiogroup"], [role="group"], fieldset');
+      const named = labelledBy(box);
+      if (named) return { label: named, required: box?.getAttribute("aria-required") === "true" };
       for (let n = e.parentElement, i = 0; n && i < 8; n = n.parentElement, i++) {
         for (const c of Array.from(n.querySelectorAll("legend, label, [class*='label' i]:not(input):not(select):not(textarea)"))) {
-          const t = clean(c.textContent);
+          const t = clean(textOf(c));
           if (t.length < 4 || t.length >= 250 || /^(clear|remove)$/i.test(t) || opts.includes(t)) continue;
           return { label: t, required: /[*✱]\s*$/.test(t) || /required/i.test(c.className || "") };
         }

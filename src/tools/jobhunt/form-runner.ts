@@ -17,7 +17,7 @@ import {
   type FormPlanSummary,
   type RowApplicationFacts,
 } from "./form-brain.js";
-import { chooseComboboxOption, typeIntoCombobox } from "./form-combobox.js";
+import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormUrl,
   resolveFormTargetUrl,
@@ -130,6 +130,7 @@ export async function executeFormPlan(
   page: Page,
   actions: readonly FormFillAction[],
 ): Promise<ReadonlySet<string>> {
+  await installEvaluateShim(page);
   const verified = new Set<string>();
   for (const action of actions) {
     if (action.kind === "ask") continue;

@@ -8,8 +8,8 @@
 
 import type { Locator, Page } from "playwright";
 
-/** How long to wait for a fixed option list after ArrowDown while scraping. */
-export const COMBOBOX_OPEN_WAIT_MS = 400;
+/** How long to wait for a fixed option list after ArrowDown while scraping (Greenhouse's 244 countries took 440 ms). */
+export const COMBOBOX_OPEN_WAIT_MS = 1_500;
 /** How long to wait for the chosen option to appear when filling. */
 export const COMBOBOX_CHOOSE_WAIT_MS = 2_000;
 /** How long an async autocomplete gets to return a matching suggestion. */
@@ -39,6 +39,15 @@ export function cssEscapeAttr(s: string): string {
 /** Use `[id="..."]` so dots/colons in Recruitee or React IDs never break CSS parsing. */
 export function idSelector(id: string): string {
   return `[id="${cssEscapeAttr(id)}"]`;
+}
+
+/**
+ * tsx (pnpm dev, harness and probe scripts) compiles with esbuild keepNames, which wraps named helpers inside
+ * `evaluate` callbacks in `__name(fn, "x")`; the page has no `__name`, so every evaluate threw. tsc output never
+ * emits it. A string script is not transformed, so it can install the identity helper. Call before evaluating.
+ */
+export async function installEvaluateShim(page: Page): Promise<void> {
+  await page.evaluate("globalThis.__name ??= (fn) => fn");
 }
 
 const words = (s: string): string => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
@@ -109,16 +118,21 @@ async function pollMenu(
   }
 }
 
-/** True when the combobox now shows exactly `expected`: its single-value text, or its own value. */
+/**
+ * True when the combobox now shows `expected`: its own value, or its single-value text, either equal or the
+ * expected text's last whole words (Greenhouse's phone-country picker shows "+91" for "India +91").
+ */
 async function comboboxShows(input: Locator, expected: string): Promise<boolean> {
   return input
     .evaluate((el, want) => {
       const inp = el as unknown as DomElement;
       const norm = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const tokens = (s: string): string => ` ${s.replace(/[^a-z0-9]+/g, " ").trim()} `;
       if (norm(inp.value) === norm(want)) return true;
       const control = inp.closest('[class*="control" i]');
-      const single = control?.querySelector('[class*="single-value" i], [class*="singleValue" i]');
-      return norm(single?.textContent) === norm(want);
+      const shown = norm(control?.querySelector('[class*="single-value" i], [class*="singleValue" i]')?.textContent);
+      if (shown === norm(want)) return true;
+      return tokens(shown).trim().length > 0 && tokens(norm(want)).endsWith(tokens(shown));
     }, expected)
     // allow-failopen: unreadable DOM reports false, so the field stays unverified and is asked on Telegram.
     .catch(() => false);
