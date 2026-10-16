@@ -1,122 +1,88 @@
 # 2026-10-16: multi-ATS auto-apply QA, handoff
 
-Branch `fix/jobhunt-ats-form-fill` (cut from `main` ddd0d904). The session that wrote this hit its
-second compaction and stopped, per the founder's rule. The live QA and the diagnosis are complete;
-the code fixes are not started. Two failing test files are committed and must go green.
+Branch `fix/jobhunt-ats-form-fill` (cut from `main` ddd0d904). Commits: b90e622d (failing tests from the live QA),
+ca65ac36 (React-Select options, safe label matching, number fields, fast labels), f142dad9 (tsx evaluate shim,
+`aria-labelledby` labels, svg-free label text, slow country picker). The building session reached its fourth
+compaction and stopped there. The fill layer is fixed and live-checked on 4 ATS, and `pnpm gate` is green.
+Still to do: the draft PR, the deploy, the Telegram proof and the verdict.
 
 ## Verdict so far: NOT ready for daily Telegram use
 
-| ATS | Job | Filled / total | Required missing | Submit ready | Main defect |
-|---|---|---|---|---|---|
-| Greenhouse | Telnyx | 11 / 18 | 4 | no | React-Select questions scraped as text (no buttons); city typed into a yes/no question; CV attached twice (cover-letter slot labelled "Resume/CV"); country/location "verified" by a check that accepts any text |
-| Ashby | EMA | 6 / 8 | 1 | no | "Immediately" typed into a number field; salary expectation typed into "Current Base Salary"; radio group labelled with its first option ("US Remote") and not marked required |
-| Lever | AppZen | 9 / 16 | 7 | no | Works as designed: the 7 missing are essay questions the founder must answer |
-| Workable | MLabs | did not finish | n/a | no | Every field without `label[for]` waits Playwright's 30 s default; run times out and the page closes |
-| Workday | n/a | unsupported | n/a | n/a | Out of scope; say so in the verdict |
+The form filling is now correct on Greenhouse, Ashby, Lever and Workable. The Telegram loop (ask → answer →
+re-fill → 🚀 Submit unlocks) has not been run since these fixes. Until it is, the verdict stays "not ready".
+Workday is unsupported.
 
-Not reproduced: the Greenhouse "required" submit errors (no submit was attempted; only analytics POSTs fired).
-Not yet proven: the Telegram HITL loop (ask → answer → re-fill → 🚀 Submit unlocks).
+## Before / after (live harness, never clicks submit)
 
-## Root causes
+"Required missing" after the fix counts only questions the founder must answer himself.
 
-1. **Scraper `labelForElement`** (`form-scraper.ts` ~118–150) calls `locator('label[for=…]').first().textContent()`,
-   which waits 30 s when the label is absent. Also, the per-field `locator(...).nth(r.idx)` after a page-wide
-   evaluate races DOM changes.
-2. **React-Select comboboxes** have no `<select>`. Options exist only in a listbox after ArrowDown
-   (`aria-controls` is set only while open). The scraper never reads them, so yes/no questions become
-   free-text asks with no buttons, and the runner's combobox branch types the full value and clicks a
-   regex-matched `[class*=option]`.
-3. **Runner verification** for comboboxes accepts any single-value text, so a wrong pick reports "verified".
-4. **`matchChoiceOption`** substring match cannot tell "India +91" from "British Indian Ocean Territory +246".
-5. **`SEMANTIC_RULES`** match by `normKey.includes(phrase)`: "ethnicity" contains "city"; "netherlands or ireland"
-   contains "land"; "current base salary" hits the salary rule; "open source" hits referral "source".
-6. **`labelMatches` location/country groups** fire on yes/no questions ("Are you based in …").
-7. **Number fields** get free text ("Immediately").
-8. **Group labels** (Ashby fieldset, Greenhouse file groups) take the first label walking up, which is an
-   option label or the inner "Attach" label.
+| ATS | Job | Before | After (f142dad9) |
+|---|---|---|---|
+| Greenhouse | Telnyx | 11/18, 4 required missing. City typed into the NL yes/no question; CV attached twice; Go/NL/OFAC with no buttons; country "verified" by an any-text check | 10/18, 4 required missing: Go, NL/Ireland and OFAC as Yes/No button asks, plus a legal-basis textarea. Country chosen and verified (control shows the dial code). Location "SAS Nagar Mohali, Punjab, India" verified. Visa = Yes verified. CV only in the Resume slot; Cover Letter asked |
+| Ashby | EMA | 6/8, 1 missing. "Immediately" in a number field; salary expectation in Current Base Salary; radio group labelled "US Remote", not required | 6/8, 2 required missing: "Where are you located?" required radio group with option buttons, and Current Base Salary asked. Notice period numeric |
+| Lever | AppZen | 9/16, 7 essays | 9/16, 7 essays (unchanged; they need the founder's own answers) |
+| Workable | MLabs | Timed out (30 s per field with no `label[for]`) | Finishes in ~11 s. 4/19: names, email, Resume attached and verified. 13 required missing: 12 Yes/No experience radio groups with correct labels, 1 compound textarea. Photo optional, asked |
+| Workday | n/a | unsupported | unsupported |
 
-## Fix design (keep every src file ≤ 400 lines; current: runner 397, brain 385, scraper 383, dossier 381)
+Every run took 9–14 s and exited 0. Screenshots and JSON are in `artifacts/qa/out/*-v4.*`. They are gitignored and
+contain personal data, so do not share them.
 
-1. **Scraper:** compute labels and `<select>` option texts inside the single `page.evaluate` snapshot.
-   In-browser `labelOf(e)`: `label[for]` text unless it is attach/upload/clear/remove/browse/choose file →
-   `aria-label` → placeholder (unless generic: select/type here/enter/choose) → walk up 6 ancestors for
-   `legend, label, strong, [class*='label' i]` text of 1–220 chars, skipping clear/remove/attach/upload.
-   Delete `labelForElement`. Keep `[id="…"]` locators only where still needed (comboboxes).
-2. **Combobox options at scrape time:** for `input[role=combobox]` with an id, `readComboboxOptions`
-   (focus, ArrowDown, wait ~300 ms, read `[role=option]` from `getElementById(aria-controls)` else the
-   closest container's `[id*="-option-"]`, Escape, blur). Options found → type `select` with options.
-   None (async autocomplete, e.g. Greenhouse country/location) → stays text.
-3. **`groupLabelFor(page, name, options)` returns `{label, required}`:** per ancestor (8 levels) scan
-   `legend, label, [class*='label' i]:not(input):not(select):not(textarea)`; first text of 4–250 chars that is
-   not clear/remove and not equal to an option text. `required = /[*✱]\s*$/` on the text or `/required/i`
-   on the className. Use `r.required || group.required`. Add `querySelectorAll` to the `DomElement` type.
-   Change `requiredFromLabel` to `/[*✱]\s*$/` (Lever uses ✱).
-4. **New `src/tools/jobhunt/form-combobox.ts`:**
-   - `readComboboxOptions(page, input)`
-   - `chooseComboboxOption(page, input, option)`: open, click the exactly-matching option by index, blur, verify
-     the single-value text in `closest('[class*="control" i]')` equals the option.
-   - `typeIntoCombobox(page, input, value)`: type the first comma segment, poll ≤ 4 s for options,
-     `pickAutocompleteOption`, click, blur, verify equality; no match → Escape, blur, return false.
-   - Pure `pickAutocompleteOption(value, options)`: the first segment must appear in the option as a whole
-     word (normalised); prefer the option containing the most other segments; ties keep provider order; else null.
-   - Runner: `typeIntoField` combobox branch → `return typeIntoCombobox(...)`; `chooseInField` select path checks
-     `role=combobox` first → `chooseComboboxOption`. Frees ~25 lines in the runner.
-5. **candidate-dossier:** (a) `matchChoiceOption`: with several substring matches, keep options containing
-   the desired text as a whole word; one left → return it. (b) SEMANTIC phrases match at a word start:
-   `(" " + normKey).includes(" " + phrase)`. (c) Optional `excludes` per rule: salary excludes `current`,
-   referralSource excludes `open source`. (d) Export `explicitAnswerFor(question, profile, dossier)`
-   (question_bank exact normalised key, then dossier Q&A); `lookupLearnedAnswer` uses it.
-6. **form-brain:** (a) `labelMatches` location/country groups return false when the label starts with
-   are/do/does/did/have/has/is/can/could/will/would/should. (b) For non-choice fields call `explicitAnswerFor`
-   before `matchStandardTextField`; replace the duplicated bank lookups in `chooseEligibility` and the eligibility
-   branch with it. (c) `type === "number"` value actions: keep a leading number (`-?\d+(?:[.,]\d+)?`, comma → dot);
-   `/immediate|asap/i` → "0"; anything else → ask (required = field.required).
+## What the fixes do
 
-Expected after the fixes: Greenhouse country "India +91", location "SAS Nagar Mohali, Punjab, India", Go and
-NL/Ireland and OFAC as Yes/No button asks, CV only in the Resume slot. Ashby notice "0", base salary an ask, radio
-group "Where are you located?" required with option buttons. Lever unchanged. Workable finishes.
+- **Scraper:** one in-page snapshot computes labels (`label[for]` → `aria-labelledby` → aria-label → placeholder →
+  ancestor walk), skipping `<svg>` text. Radio groups are named from `aria-labelledby` or the
+  fieldset/legend. React-Select comboboxes are opened with ArrowDown so their options can be read.
+- **`form-combobox.ts`:** chooses an option and verifies it after blur, including a control that shows only the
+  last words, as the Greenhouse phone-country picker shows "+91". Async autocomplete types the first comma
+  segment and picks with `pickAutocompleteOption`.
+- **Brain/dossier:** whole-word option matching; semantic phrases matched at a word start with excludes
+  (ethnicity ≠ city, current salary ≠ expectation, open source ≠ referral source); yes/no questions never get
+  the city; number fields get a number or an ask.
+- **`installEvaluateShim`:** tsx keepNames breaks in-page helpers. This only affects the harness and `pnpm dev`.
+  Prod runs tsc output and was never affected.
 
-## Tests (committed, failing now)
-
-- `tests/unit/jobhunt/form-ats-qa.test.ts`: pure; fails at import until `form-combobox.ts` exists.
-- `tests/unit/jobhunt/form-combobox.test.ts`: Playwright fixture (React-Select, async autocomplete, Ashby
-  fieldset, Greenhouse file groups, a field with no `label[for]`); both cases time out at 30 s today.
+## Commands
 
 ```bash
 pnpm vitest run tests/unit/jobhunt/form-ats-qa.test.ts tests/unit/jobhunt/form-combobox.test.ts
+pnpm gate > /tmp/gate-$$.log 2>&1; echo "exit=$?"
 ```
 
-## Live re-run after the fixes (never clicks submit)
+Last gate on f142dad9: exit 0, 254 files, 3388 tests passed.
 
-Live job URLs used:
+## Live harness setup (gitignored; never commit it or print profile values)
+
+Job URLs:
 - Greenhouse Telnyx: https://job-boards.greenhouse.io/telnyx54/jobs/8034464003
 - Lever AppZen: https://jobs.lever.co/appzen/cce93662-196a-4814-b80c-bfa0b37384af
 - Ashby EMA: https://jobs.ashbyhq.com/ema/f0865fe6-cd4c-449e-a564-80acde241a4f
 - Workable MLabs: https://apply.workable.com/j/FB4C6D1E7A
-- Optional: SmartRecruiters Wise https://jobs.smartrecruiters.com/Wise/744000155771274 ,
-  Recruitee Metyis https://metyisag.recruitee.com/o/associate-data-scientist-1
-
-Setup (the harness and personal data are gitignored; never commit them or print their contents):
 
 ```bash
 mkdir -p artifacts/qa/out "$TMPDIR/qa-data"
 scp founderos-vps:/opt/founderos-data/apply-profile.json founderos-vps:/opt/founderos-data/candidate-dossier.md "$TMPDIR/qa-data/"
 ```
 
-`artifacts/qa/harness.ts`: launch headless Chromium, `classifyFormUrl` → `resolveFormTargetUrl` → `goto` →
-`revealPlatformForm` → screenshot `<tag>-before.png` → `scrapePageFields` → `buildFormFillPlan(fields, profile,
-{ resumePath }, dossier)` → `executeFormPlan` → `summariseFormPlan` → screenshot `<tag>-after.png` → write
-`<tag>.json` with fields, plan, and `{filled, total, reqMissing, optMissing, captcha, ready}`. Imports come from
-`../../src/tools/jobhunt/*`. Run with placeholder env so config validation passes:
+`artifacts/qa/harness.ts` runs these steps in order:
+1. Launch headless Chromium.
+2. `classifyFormUrl` → `resolveFormTargetUrl` → `goto` → `revealPlatformForm`.
+3. Screenshot `<tag>-before.png`.
+4. `scrapePageFields` → `buildFormFillPlan(fields, profile, { resumePath }, dossier)` → `executeFormPlan` → `summariseFormPlan`.
+5. Screenshot `<tag>-after.png`.
+6. Write `<tag>.json` with labels, kinds and `{filled, total, reqMissing, optMissing, captcha, ready}`.
+
+When summarising, print only labels, kinds, ok and why, never the values. Use placeholder env so config validation passes. On macOS, do not wrap the command in `timeout`; the command does not exist there.
 
 ```bash
 APPLY_PROFILE_PATH=$TMPDIR/qa-data/apply-profile.json DATABASE_URL=postgres://qa:qa@127.0.0.1:1/qa TELEGRAM_BOT_TOKEN=0:qa TELEGRAM_CHAT_ID=1 npx tsx artifacts/qa/harness.ts gh-telnyx https://job-boards.greenhouse.io/telnyx54/jobs/8034464003 Telnyx
 ```
 
-## Then
+## Next
 
-1. `pnpm gate` green, draft PR to `beta` (What changed / How it was verified / NOT VERIFIED / `Checked first:`).
-2. After deploy: drive `/apply <rank>` on one Greenhouse job through `scripts/telegram-probe.ts`, answer one
-   question by button and one by text, and show that 🚀 Submit unlocks. Do not press Submit without the founder's yes.
-3. Known UX gap (not fixed): skipping the last required question still shows the Submit keyboard
-   (`src/gateway/auto-apply.ts` ~310–320).
+1. Open a draft PR from `fix/jobhunt-ats-form-fill` to `beta`, with sections What changed / How it was verified / NOT VERIFIED / `Checked first:`. Use the table above as the evidence.
+2. After merge, promotion and deploy, drive `/apply <rank>` on one Greenhouse job through `scripts/telegram-probe.ts`:
+   - Answer one question by button and one by text.
+   - Show that the field fills and 🚀 Submit unlocks.
+   - Never press Submit without the founder's yes.
+3. Give the verdict "ready / not ready for daily Telegram use", with a reason for each point.
+4. Known UX gap, not fixed: skipping the last required question still shows the Submit keyboard (`src/gateway/auto-apply.ts` ~310–320).
