@@ -273,7 +273,7 @@ export async function draftRow(
   await ctx.reply(packetMessage(packet, rank), {
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
-    reply_markup: packetKeyboard(row.id, packet.applyUrl),
+    reply_markup: packetKeyboard(row.id, packet.applyUrl, true),
   });
 }
 
