@@ -34,7 +34,7 @@ const log = logger.child({ module: "apply-routes" });
 const PREFIX = "/apply/";
 const MAX_BODY_BYTES = 64 * 1024;
 const FORM_TYPE = "application/x-www-form-urlencoded";
-const NOT_FOUND = "Not found";
+const NOT_FOUND = "This form is closed: it was sent, cancelled, or the link is wrong. Run /apply again in Telegram for a fresh one.";
 
 export interface ApplyRouteDeps {
   readonly now: () => number;
@@ -64,8 +64,9 @@ function text(res: ServerResponse, status: number, body: string, extra: Record<s
   res.end(body);
 }
 
+/** One body for every dead link (cancelled, sent, forged, unknown), so the page never says which rows have a session. */
 function notFound(res: ServerResponse): void {
-  text(res, 404, NOT_FOUND);
+  notice(res, 404, "Link closed", NOT_FOUND);
 }
 
 function html(res: ServerResponse, status: number, body: string, extra: Record<string, string> = {}): void {

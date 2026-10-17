@@ -164,7 +164,7 @@ describe("apply answer page routes", () => {
       expect((await fetch(`${base}/apply/${tokenFor()}?utm=1`)).status).toBe(200);
     });
 
-    it("answers every failure with the same plain 404", async () => {
+    it("answers every failure with the same 404 page", async () => {
       const good = tokenFor();
       const tampered = `${good.slice(0, -2)}${good.endsWith("AA") ? "BB" : "AA"}`;
       const bad = [
@@ -184,6 +184,8 @@ describe("apply answer page routes", () => {
         bodies.add(await res.text());
       }
       expect(bodies.size).toBe(1);
+      // A cancelled or submitted session lands here too (2026-10-17 live test): say what to do, inside Telegram.
+      expect([...bodies][0]).toContain("Run /apply again in Telegram");
     });
 
     it("is 410 for an expired link with a genuine signature, 404 once the signature is wrong", async () => {
