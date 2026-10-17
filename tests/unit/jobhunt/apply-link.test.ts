@@ -40,6 +40,11 @@ function snap(over: Partial<ApplySnapshot> = {}): ApplySnapshot {
       total: 4,
       hasCaptcha: false,
       filledLabels: ["Full name", "Notice period"],
+      filledAnswers: [
+        { label: "Full name", value: "Fixture Person", fieldType: "text", editable: true },
+        { label: "Notice period", value: "30 days", fieldType: "select", options: ["30 days", "60 days"], editable: true },
+        { label: "Resume/CV", value: "cv-fixture.pdf", fieldType: "file", editable: false },
+      ],
       unanswered: [
         { label: "Why Acme?", required: true, fieldType: "textarea" },
         { label: "Work permit", required: false, fieldType: "select", options: ["Yes", "No"], triedAnswer: "Yes" },
@@ -204,5 +209,41 @@ describe("apply snapshot store", () => {
     expect(pruneApplySnapshots(Date.now(), root)).toBe(1);
     expect(loadApplySnapshot(ROW, root)).toBeNull();
     expect(loadApplySnapshot(ROW2, root)).not.toBeNull();
+  });
+});
+
+describe("snapshot filledAnswers", () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "founderos-apply-link-filled-"));
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("round-trips the filled answers, with their options and editable flag", () => {
+    saveApplySnapshot(snap(), root);
+    expect(loadApplySnapshot(ROW, root)).toEqual(snap());
+  });
+
+  it("loads a snapshot saved before filled answers existed, with an empty list", () => {
+    const old = JSON.parse(JSON.stringify(snap())) as { summary: Record<string, unknown> };
+    delete old.summary["filledAnswers"];
+    const dir = path.join(root, "apply-pages");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${ROW}.json`), JSON.stringify(old));
+    const loaded = loadApplySnapshot(ROW, root);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.summary.filledAnswers).toEqual([]);
+    expect(loaded?.summary.filledLabels).toEqual(["Full name", "Notice period"]);
+  });
+
+  it("refuses a filled answer without the editable flag", () => {
+    const bad = JSON.parse(JSON.stringify(snap())) as { summary: { filledAnswers: Record<string, unknown>[] } };
+    delete bad.summary.filledAnswers[0]!["editable"];
+    const dir = path.join(root, "apply-pages");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${ROW}.json`), JSON.stringify(bad));
+    expect(loadApplySnapshot(ROW, root)).toBeNull();
   });
 });

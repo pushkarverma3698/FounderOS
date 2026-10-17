@@ -168,6 +168,13 @@ function snapshotOf(session: PendingApplySession, prep: PrepOk, stuck: readonly 
       total: prep.summary.total,
       hasCaptcha: prep.summary.hasCaptcha,
       filledLabels: [...prep.summary.filledLabels],
+      filledAnswers: prep.summary.filledAnswers.map((f) => ({
+        label: f.label,
+        value: f.value,
+        fieldType: f.fieldType,
+        ...(f.options ? { options: [...f.options] } : {}),
+        editable: f.editable,
+      })),
       unanswered: prep.summary.unanswered.map((q) => {
         const triedAnswer = tried.get(keyOf(q.label));
         return {

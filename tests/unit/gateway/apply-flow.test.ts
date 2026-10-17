@@ -85,6 +85,10 @@ function prep(unanswered: UnansweredQuestion[]): Prep {
       filled: 4,
       total: 4 + unanswered.length,
       filledLabels: ["First Name", "Email"],
+      filledAnswers: [
+        { label: "First Name", value: "Fixture", fieldType: "text", editable: true },
+        { label: "Email", value: "fixture@example.com", fieldType: "text", editable: true },
+      ],
       unanswered,
       requiredUnanswered: unanswered.filter((u) => u.required),
       hasCaptcha: false,
@@ -193,6 +197,10 @@ describe("apply flow", () => {
     expect(snap).toMatchObject({ chatId: "888", profileId: PROFILE, company: "Telnyx", platform: "greenhouse" });
     expect(snap?.summary.unanswered.map((q) => q.label)).toEqual([WHERE]);
     expect(snap?.summary.filledLabels).toEqual(["First Name", "Email"]);
+    expect(snap?.summary.filledAnswers).toEqual([
+      { label: "First Name", value: "Fixture", fieldType: "text", editable: true },
+      { label: "Email", value: "fixture@example.com", fieldType: "text", editable: true },
+    ]);
     expect(replies.some((r) => r.text.includes("Question 1/1"))).toBe(true);
   });
 

@@ -117,6 +117,15 @@ const unansweredSchema = z.object({
   triedAnswer: z.string().optional(),
 });
 
+/** One field the bot filled, with the value it put there (see form-filled.ts). */
+const filledSchema = z.object({
+  label: z.string().min(1),
+  value: z.string(),
+  fieldType: z.string(),
+  options: z.array(z.string()).optional(),
+  editable: z.boolean(),
+});
+
 export const applySnapshotSchema = z.object({
   rowId: z.string().regex(UUID_RE),
   chatId: z.string().min(1),
@@ -132,6 +141,8 @@ export const applySnapshotSchema = z.object({
     total: z.number().int().nonnegative(),
     hasCaptcha: z.boolean(),
     filledLabels: z.array(z.string()),
+    /** Absent in snapshots saved before the page showed values: they load with an empty list. */
+    filledAnswers: z.array(filledSchema).default([]),
     unanswered: z.array(unansweredSchema),
   }),
   /** Epoch ms of the prepare run that produced this snapshot. */
@@ -140,6 +151,7 @@ export const applySnapshotSchema = z.object({
 
 export type ApplySnapshot = z.infer<typeof applySnapshotSchema>;
 export type ApplySnapshotQuestion = ApplySnapshot["summary"]["unanswered"][number];
+export type ApplySnapshotFilled = ApplySnapshot["summary"]["filledAnswers"][number];
 
 function snapshotDir(root: string): string {
   return path.join(root, SNAPSHOT_DIR);

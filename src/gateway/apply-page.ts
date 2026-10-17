@@ -3,16 +3,31 @@
  * ================================
  * Pure functions: a snapshot goes in, a mobile-first HTML string comes out. No script, no external
  * resource, one inline style block whose hash is pinned in the Content-Security-Policy. Every string
- * from the snapshot (labels, options, company names) came from a third-party site, so every one is
- * escaped. The page never submits an application; it saves answers and asks the bot to re-fill.
+ * from the snapshot (labels, values, options, company names) came from a third-party site or the
+ * candidate's profile, so every one is escaped. The page never submits an application; it saves
+ * answers and asks the bot to re-fill.
+ *
+ * One form holds both sections: the questions the bot could not answer, and every field it did fill,
+ * each with its value in an editable input. Files, consent boxes and anything the stored one-line
+ * answer cannot represent are shown as text. A posted field the founder did not change is ignored.
  */
 
 import { createHash } from "node:crypto";
-import type { ApplySnapshot, ApplySnapshotQuestion } from "../tools/jobhunt/apply-link.js";
+import type { ApplySnapshot, ApplySnapshotFilled, ApplySnapshotQuestion } from "../tools/jobhunt/apply-link.js";
+import { MAX_ANSWER_CHARS } from "../tools/jobhunt/form-filled.js";
 
 const MAX_RADIO_OPTIONS = 4;
-export const MAX_ANSWER_CHARS = 2000;
+const SHOWN_VALUE_CHARS = 300;
+const RESUME_LABEL = /r[eé]sum[eé]|\bcv\b/i;
+export { MAX_ANSWER_CHARS };
 export const READ_ONLY_FIELD_TYPES: ReadonlySet<string> = new Set(["file", "captcha"]);
+
+type Summary = ApplySnapshot["summary"];
+/** What a control needs to know about its field: a question and a filled answer both fit. */
+interface ControlSpec {
+  readonly fieldType: string;
+  readonly options?: readonly string[];
+}
 
 const CSS =
   "body{margin:0;background:#f6f7f9;color:#14181f;font:16px/1.45 system-ui,-apple-system,sans-serif}" +
@@ -25,6 +40,7 @@ const CSS =
   ".choice{display:block;padding:8px 0}.choice input{margin-right:8px}" +
   "button{width:100%;font:inherit;font-weight:600;padding:14px;border:0;border-radius:10px;background:#1f6feb;color:#fff;margin-top:8px}" +
   ".hint,.note{color:#5b6573;font-size:.9rem;margin:6px 0 0}.warn{background:#fff4e5;border:1px solid #f0c36d;border-radius:10px;padding:10px}" +
+  ".val{white-space:pre-wrap;overflow-wrap:anywhere}" +
   "ul{padding-left:20px;margin:0}li{margin:2px 0}.foot{color:#5b6573;font-size:.85rem;margin-top:24px}" +
   "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}.q{background:#171c24;border-color:#2a313c}" +
   "input[type=text],select,textarea{background:#0f1319;border-color:#3a4350}" +
@@ -79,27 +95,63 @@ function shell(title: string, inner: string): string {
   return DOCTYPE + `<html lang="en"><head>${head}</head><body><main>${inner}</main></body></html>`;
 }
 
-function option(o: string): string {
-  return `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`;
+/** A question the page offers an input for (a file or CAPTCHA cannot be answered here). */
+export function isEditableQuestion(q: ApplySnapshotQuestion): boolean {
+  return !READ_ONLY_FIELD_TYPES.has(q.fieldType);
 }
 
-function choice(name: string, o: string): string {
+/** A filled value the page offers an input for: flagged editable when the snapshot was made, and never a file. */
+function isEditableFilled(f: ApplySnapshotFilled): boolean {
+  return f.editable && !READ_ONLY_FIELD_TYPES.has(f.fieldType);
+}
+
+/**
+ * The filled values the page offers inputs for: the first per field name, and never one an open
+ * question already owns (a name must map to exactly one thing). `collectAnswers` reads the same list.
+ */
+export function editableFilled(s: Summary): ApplySnapshotFilled[] {
+  const taken = new Set(s.unanswered.filter(isEditableQuestion).map((q) => applyFieldName(q.label)));
+  const out: ApplySnapshotFilled[] = [];
+  for (const f of s.filledAnswers) {
+    const name = applyFieldName(f.label);
+    if (!isEditableFilled(f) || taken.has(name)) continue;
+    taken.add(name);
+    out.push(f);
+  }
+  return out;
+}
+
+function option(o: string, selected: boolean): string {
+  return `<option value="${escapeHtml(o)}"${selected ? " selected" : ""}>${escapeHtml(o)}</option>`;
+}
+
+function choice(name: string, o: string, checked: boolean): string {
   const v = escapeHtml(o);
-  return `<label class="choice"><input type="radio" name="${name}" value="${v}"> ${v}</label>`;
+  return `<label class="choice"><input type="radio" name="${name}" value="${v}"${checked ? " checked" : ""}> ${v}</label>`;
 }
 
-function renderControl(q: ApplySnapshotQuestion, name: string): string {
-  const options = q.options ?? [];
-  if (options.length > 0 && options.length <= MAX_RADIO_OPTIONS) {
-    return options.map((o) => choice(name, o)).join("");
-  }
+const usesRadios = (spec: ControlSpec): boolean =>
+  spec.options !== undefined && spec.options.length > 0 && spec.options.length <= MAX_RADIO_OPTIONS;
+
+/** The input for a field. `current` is what is already in it: empty for an open question. */
+function renderControl(spec: ControlSpec, name: string, current: string): string {
+  const options = spec.options ?? [];
+  if (usesRadios(spec)) return options.map((o) => choice(name, o, o === current)).join("");
   if (options.length > 0) {
-    return `<select name="${name}" id="${name}"><option value="">Choose</option>${options.map(option).join("")}</select>`;
+    // A select with no blank entry would post its first option for a value the form does not offer.
+    const blank = options.includes(current) ? "" : `<option value="">Choose</option>`;
+    return `<select name="${name}" id="${name}">${blank}${options.map((o) => option(o, o === current)).join("")}</select>`;
   }
-  if (q.fieldType === "textarea") {
-    return `<textarea name="${name}" id="${name}" rows="5" maxlength="${MAX_ANSWER_CHARS}"></textarea>`;
+  if (spec.fieldType === "textarea") {
+    return `<textarea name="${name}" id="${name}" rows="5" maxlength="${MAX_ANSWER_CHARS}">${escapeHtml(current)}</textarea>`;
   }
-  return `<input type="text" name="${name}" id="${name}" maxlength="${MAX_ANSWER_CHARS}" autocomplete="off">`;
+  const value = current === "" ? "" : ` value="${escapeHtml(current)}"`;
+  return `<input type="text" name="${name}" id="${name}" maxlength="${MAX_ANSWER_CHARS}" autocomplete="off"${value}>`;
+}
+
+/** The label above a control: a legend-style line for radios, a real label for everything else. */
+function fieldHead(titleHtml: string, name: string, spec: ControlSpec): string {
+  return usesRadios(spec) ? `<div class="t">${titleHtml}</div>` : `<label class="t" for="${name}">${titleHtml}</label>`;
 }
 
 function hintFor(q: ApplySnapshotQuestion): string {
@@ -114,14 +166,12 @@ function flagFor(q: ApplySnapshotQuestion): string {
 
 function renderQuestion(q: ApplySnapshotQuestion): string {
   const title = `${escapeHtml(q.label)}${flagFor(q)}`;
-  if (READ_ONLY_FIELD_TYPES.has(q.fieldType)) {
+  if (!isEditableQuestion(q)) {
     const what = q.fieldType === "file" ? "file upload" : "CAPTCHA";
     return `<div class="q"><div class="t">${title}</div><p class="note">This ${what} cannot be answered here.</p></div>`;
   }
   const name = applyFieldName(q.label);
-  const radios = q.options !== undefined && q.options.length > 0 && q.options.length <= MAX_RADIO_OPTIONS;
-  const head = radios ? `<div class="t">${title}</div>` : `<label class="t" for="${name}">${title}</label>`;
-  return `<div class="q">${head}${renderControl(q, name)}${hintFor(q)}</div>`;
+  return `<div class="q">${fieldHead(title, name, q)}${renderControl(q, name, "")}${hintFor(q)}</div>`;
 }
 
 /** Required questions first; the order inside each group is the form's own order. */
@@ -129,18 +179,46 @@ function orderQuestions(qs: readonly ApplySnapshotQuestion[]): ApplySnapshotQues
   return [...qs].sort((a, b) => Number(b.required) - Number(a.required));
 }
 
-function renderFilled(labels: readonly string[]): string {
-  if (labels.length === 0) return "";
-  return `<h2>Already filled (${labels.length})</h2><ul>${labels.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>`;
-}
-
 function renderQuestions(qs: readonly ApplySnapshotQuestion[]): string {
   if (qs.length === 0) {
-    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the form below, then press Submit in Telegram.</p>`;
+    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the values below, then press Submit in Telegram.</p>`;
   }
-  const editable = qs.some((q) => !READ_ONLY_FIELD_TYPES.has(q.fieldType));
-  const button = editable ? `<button type="submit">Save answers and re-fill</button>` : "";
-  return `<form method="post"><h2>Needs your answer (${qs.length})</h2>${qs.map(renderQuestion).join("")}${button}</form>`;
+  return `<h2>Needs your answer (${qs.length})</h2>${qs.map(renderQuestion).join("")}`;
+}
+
+function clip(value: string): string {
+  return value.length > SHOWN_VALUE_CHARS ? `${value.slice(0, SHOWN_VALUE_CHARS)}…` : value;
+}
+
+/** A filled value shown as text: a file by name, anything else by its (clipped) value. */
+function renderStaticFilled(f: ApplySnapshotFilled): string {
+  const shown = f.fieldType === "file" ? `${RESUME_LABEL.test(f.label) ? "CV" : "File"} attached: ${f.value}` : clip(f.value);
+  return `<div class="q"><div class="t">${escapeHtml(f.label)}</div><p class="note val">${escapeHtml(shown)}</p></div>`;
+}
+
+function renderEditableFilled(f: ApplySnapshotFilled): string {
+  const name = applyFieldName(f.label);
+  return `<div class="q">${fieldHead(escapeHtml(f.label), name, f)}${renderControl(f, name, f.value)}</div>`;
+}
+
+/** The "Already filled" section, and whether it holds any input. Older snapshots carry labels only. */
+function renderFilled(s: Summary): { readonly html: string; readonly editable: boolean } {
+  if (s.filledAnswers.length === 0) {
+    if (s.filledLabels.length === 0) return { html: "", editable: false };
+    const items = s.filledLabels.map((l) => `<li>${escapeHtml(l)}</li>`).join("");
+    return { html: `<h2>Already filled (${s.filledLabels.length})</h2><ul>${items}</ul>`, editable: false };
+  }
+  const offered = new Set(editableFilled(s));
+  const rows: string[] = [];
+  for (const f of s.filledAnswers) {
+    if (offered.has(f)) rows.push(renderEditableFilled(f));
+    else if (!isEditableFilled(f)) rows.push(renderStaticFilled(f));
+  }
+  const note =
+    offered.size > 0
+      ? `<p class="note">Change a value if it is wrong, then save. A change is remembered for every form that asks the same question.</p>`
+      : "";
+  return { html: `<h2>Already filled (${rows.length})</h2>${note}${rows.join("")}`, editable: offered.size > 0 };
 }
 
 const FOOTER =
@@ -155,6 +233,12 @@ export function renderApplyPage(snap: ApplySnapshot): string {
   const warn = s.hasCaptcha
     ? `<p class="warn">This form has a CAPTCHA the bot cannot solve, so it may not be submittable from Telegram.</p>`
     : "";
-  const body = `<h1>${escapeHtml(title)}</h1><p class="sub">${escapeHtml(intro)}</p>${warn}`;
-  return shell(title, body + renderQuestions(orderQuestions(s.unanswered)) + renderFilled(s.filledLabels) + FOOTER);
+  const questions = orderQuestions(s.unanswered);
+  const filled = renderFilled(s);
+  const sections = renderQuestions(questions) + filled.html;
+  const body = questions.some(isEditableQuestion) || filled.editable
+    ? `<form method="post">${sections}<button type="submit">Save answers and re-fill</button></form>`
+    : sections;
+  const head = `<h1>${escapeHtml(title)}</h1><p class="sub">${escapeHtml(intro)}</p>${warn}`;
+  return shell(title, head + body + FOOTER);
 }

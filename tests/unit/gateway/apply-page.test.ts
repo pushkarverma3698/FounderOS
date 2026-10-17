@@ -12,6 +12,11 @@ const ROW = "11111111-2222-4333-8444-555555555555";
 const SQ = String.fromCharCode(39);
 
 type Summary = ApplySnapshot["summary"];
+type Filled = Summary["filledAnswers"][number];
+
+function filled(over: Partial<Filled> & Pick<Filled, "label" | "value">): Filled {
+  return { fieldType: "text", editable: true, ...over };
+}
 
 function snap(over: Partial<Summary> = {}, top: Partial<ApplySnapshot> = {}): ApplySnapshot {
   return {
@@ -29,6 +34,10 @@ function snap(over: Partial<Summary> = {}, top: Partial<ApplySnapshot> = {}): Ap
       total: 5,
       hasCaptcha: false,
       filledLabels: ["Full name", "Email"],
+      filledAnswers: [
+        { label: "Full name", value: "Fixture Person", fieldType: "text", editable: true },
+        { label: "Email", value: "fixture@example.com", fieldType: "text", editable: true },
+      ],
       unanswered: [
         { label: "Optional note", required: false, fieldType: "text" },
         { label: "Why Acme?", required: true, fieldType: "textarea" },
@@ -68,6 +77,7 @@ describe("renderApplyPage", () => {
       snap(
         {
           filledLabels: [evil],
+          filledAnswers: [{ label: evil, value: evil, fieldType: "text", editable: true }],
           unanswered: [
             { label: evil, required: true, fieldType: "select", options: [evil, "a", "b", "c", "d"], triedAnswer: evil },
           ],
@@ -78,6 +88,7 @@ describe("renderApplyPage", () => {
     expect(html).not.toContain(`${LT}script${GT}alert(1)`);
     expect(html).not.toContain(`${LT}img src=x`);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).toContain(`value="&lt;script&gt;alert(1)&lt;/script&gt;"`);
     expect(html.toLowerCase()).not.toContain(`${LT}script`);
   });
 
@@ -119,7 +130,7 @@ describe("renderApplyPage", () => {
   });
 
   it("renders a nothing-left page when every question is answered", () => {
-    const html = renderApplyPage(snap({ unanswered: [] }));
+    const html = renderApplyPage(snap({ unanswered: [], filledAnswers: [] }));
     expect(html).toContain("Nothing left to answer");
     expect(html).not.toContain("button type=");
   });
@@ -133,6 +144,114 @@ describe("renderApplyPage", () => {
     expect(html).not.toContain("action=");
     expect(html).toContain("never submits");
     expect(html).toContain(`method="post"`);
+  });
+});
+
+describe("renderApplyPage filled answers", () => {
+  const LT = String.fromCharCode(60);
+  const GT = String.fromCharCode(62);
+  const countOf = (html: string, needle: string): number => html.split(needle).length - 1;
+
+  it("shows each filled value as an editable input, in the same form as the questions", () => {
+    const html = renderApplyPage(snap());
+    const name = applyFieldName("Full name");
+    expect(html).toMatch(new RegExp(`${LT}input type="text" name="${name}"[^${GT}]*value="Fixture Person"`));
+    expect(html).toContain("Already filled (2)");
+    expect(countOf(html, `${LT}form`)).toBe(1);
+    expect(html.indexOf("Needs your answer")).toBeLessThan(html.indexOf("Already filled"));
+    expect(html.indexOf("Already filled")).toBeLessThan(html.indexOf(`${LT}/form${GT}`));
+    expect(html).toContain(`${LT}button type="submit"${GT}`);
+  });
+
+  it("escapes a filled label and value in element text, a textarea body and the value attribute", () => {
+    const evil = `${LT}script${GT}alert(1)${LT}/script${GT}`;
+    const quoteBreak = `" autofocus onfocus="alert(2)`;
+    const html = renderApplyPage(
+      snap({
+        unanswered: [],
+        filledAnswers: [
+          filled({ label: evil, value: quoteBreak }),
+          filled({ label: "Bio", value: evil, fieldType: "textarea" }),
+        ],
+      }),
+    );
+    expect(html.toLowerCase()).not.toContain(`${LT}script`);
+    expect(html).toContain(`value="&quot; autofocus onfocus=&quot;alert(2)"`);
+    expect(html).not.toContain(`" autofocus`);
+    expect(html).toContain(`${GT}&lt;script&gt;alert(1)&lt;/script&gt;${LT}/textarea${GT}`);
+  });
+
+  it("preselects the current option on radios and on selects", () => {
+    const many = ["a", "b", "c", "d", "e"];
+    const html = renderApplyPage(
+      snap({
+        unanswered: [],
+        filledAnswers: [
+          filled({ label: "Relocate", value: "No", fieldType: "radio-group", options: ["Yes", "No"] }),
+          filled({ label: "Region", value: "c", fieldType: "select", options: many }),
+        ],
+      }),
+    );
+    expect(html).toMatch(/<input type="radio" name="q_[0-9a-f]{16}" value="No" checked>/);
+    expect(html).not.toMatch(/value="Yes" checked/);
+    expect(html).toContain(`<option value="c" selected>c</option>`);
+    expect(html).not.toContain(`<option value="">Choose</option>`);
+  });
+
+  it("shows a file as attached and a non-editable value as plain text, with no input for either", () => {
+    const html = renderApplyPage(
+      snap({
+        unanswered: [],
+        filledAnswers: [
+          filled({ label: "Resume/CV *", value: "cv-fixture.pdf", fieldType: "file", editable: false }),
+          filled({ label: "Passport scan", value: "scan.pdf", fieldType: "file", editable: true }),
+          filled({ label: "I agree", value: "Yes", fieldType: "checkbox", editable: false }),
+        ],
+      }),
+    );
+    expect(html).toContain("CV attached: cv-fixture.pdf");
+    expect(html).toContain("File attached: scan.pdf");
+    expect(html).toContain("I agree");
+    for (const label of ["Resume/CV *", "Passport scan", "I agree"]) expect(html).not.toContain(applyFieldName(label));
+    expect(html).not.toContain(`${LT}form`);
+    expect(html).not.toContain("button type=");
+  });
+
+  it("offers Save when the only editable things are filled values", () => {
+    const html = renderApplyPage(snap({ unanswered: [] }));
+    expect(html).toContain("Nothing left to answer");
+    expect(html).toContain(`${LT}button type="submit"${GT}`);
+    expect(html).toContain(`method="post"`);
+  });
+
+  it("lists a label once, and lets an unanswered question keep a name both would use", () => {
+    const html = renderApplyPage(
+      snap({
+        unanswered: [{ label: "Phone", required: true, fieldType: "text" }],
+        filledAnswers: [
+          filled({ label: "Email", value: "a@example.com" }),
+          filled({ label: "Email", value: "b@example.com" }),
+          filled({ label: "Phone", value: "+31 6 11111111" }),
+        ],
+      }),
+    );
+    expect(countOf(html, `name="${applyFieldName("Email")}"`)).toBe(1);
+    expect(html).toContain("a@example.com");
+    expect(html).not.toContain("b@example.com");
+    expect(countOf(html, `name="${applyFieldName("Phone")}"`)).toBe(1);
+    expect(html).not.toContain("+31 6 11111111");
+    expect(html).toContain("Already filled (1)");
+  });
+
+  it("falls back to the label list for a snapshot saved before filled values existed", () => {
+    const html = renderApplyPage(snap({ filledAnswers: [] }));
+    expect(html).toContain("Already filled (2)");
+    expect(html).toContain("Full name");
+    expect(html).not.toContain(`value="Fixture Person"`);
+  });
+
+  it("says an edit is remembered for every form that asks the same question", () => {
+    expect(renderApplyPage(snap())).toContain("every form that asks the same question");
   });
 });
 

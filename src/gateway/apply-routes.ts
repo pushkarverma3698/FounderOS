@@ -163,7 +163,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse, snap: Apply
   }
   const answers = collected.answers;
   if (answers.length === 0) {
-    notice(res, 200, "Nothing to save", "Nothing new to save. Fill in at least one answer, then save again.");
+    notice(res, 200, "Nothing to save", "Nothing new to save. Answer a question or change a value, then save again.");
     return;
   }
   const held = tryLockApply(snap.rowId, deps.now());

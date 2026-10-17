@@ -54,7 +54,12 @@ const snapshot: ApplySnapshot = {
     filled: 7,
     total: 10,
     hasCaptcha: false,
-    filledLabels: ["Full name", "Email"],
+    filledLabels: ["Full name", "Email", "Résumé"],
+    filledAnswers: [
+      { label: "Full name", value: "Pushkar Verma", fieldType: "text", editable: true },
+      { label: "Email", value: "fixture@example.com", fieldType: "text", editable: true },
+      { label: "Résumé", value: "cv-fixture.pdf", fieldType: "file", editable: false },
+    ],
     unanswered: [
       { label: WHERE, required: true, fieldType: "select", options: OPTIONS },
       { label: WHY, required: true, fieldType: "textarea" },
@@ -145,6 +150,14 @@ describe("apply answer page routes", () => {
       expect(html).not.toContain("<script");
     });
 
+    it("prefills what the bot filled, so the form is not blank", async () => {
+      const html = await (await fetch(`${base}/apply/${tokenFor()}`)).text();
+      expect(html).toContain(`name="${applyFieldName("Email")}"`);
+      expect(html).toContain(`value="fixture@example.com"`);
+      expect(html).toContain(`value="Pushkar Verma"`);
+      expect(html).toContain("CV attached: cv-fixture.pdf");
+    });
+
     it("ignores a query string", async () => {
       expect((await fetch(`${base}/apply/${tokenFor()}?utm=1`)).status).toBe(200);
     });
@@ -219,6 +232,29 @@ describe("apply answer page routes", () => {
       const res = await post(form({ [applyFieldName(WHERE)]: "Ireland", [applyFieldName(WHY)]: "   " }));
       expect(await res.text()).toContain("Saved 1 answer.");
       expect(record).toHaveBeenCalledTimes(1);
+    });
+
+    it("saves a changed filled value under its label and re-fills with it", async () => {
+      const res = await post(form({ [applyFieldName("Full name")]: "Pushkar Verma", [applyFieldName("Email")]: "new@example.com" }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("Saved 1 answer.");
+      expect(record.mock.calls).toEqual([[PROFILE, "Email", "new@example.com"]]);
+      const call = refill.mock.calls[0] as unknown as [ApplySnapshot, { label: string; answer: string }[]];
+      expect(call[1]).toEqual([{ label: "Email", answer: "new@example.com" }]);
+    });
+
+    it("saves nothing when the page is posted back with every filled value unchanged", async () => {
+      const res = await post(form({ [applyFieldName("Full name")]: "Pushkar Verma", [applyFieldName("Email")]: "fixture@example.com" }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("Nothing new to save");
+      expect(record).not.toHaveBeenCalled();
+      expect(refill).not.toHaveBeenCalled();
+    });
+
+    it("refuses a post for the attached file", async () => {
+      const res = await post(form({ [applyFieldName("Résumé")]: "evil.pdf" }));
+      expect(res.status).toBe(400);
+      expect(record).not.toHaveBeenCalled();
     });
 
     it("saves nothing and does not re-fill when every field is empty", async () => {

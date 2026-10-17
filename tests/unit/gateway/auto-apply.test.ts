@@ -206,6 +206,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
             filled: hasLearnedWhy ? 6 : 5,
             total: 6,
             filledLabels: ["First Name", "Last Name", "Email", "Phone", "Resume/CV"],
+            filledAnswers: [],
             unanswered: hasLearnedWhy
               ? []
               : [
@@ -311,6 +312,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
             filled: answered ? 5 : 4,
             total: 5,
             filledLabels: ["Full Name", "Email", "Phone", "Resume/CV"],
+            filledAnswers: [],
             unanswered: answered
               ? []
               : [
