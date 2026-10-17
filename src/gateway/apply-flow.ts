@@ -35,10 +35,13 @@ import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import {
   acquireApplyLock,
   botSender,
+  cardTag,
   getRunnerDeps,
   keyOf,
+  mintCardStamp,
   newSession,
   partitionStuck,
+  questionTag,
   rememberAnswer,
   sessionForRow,
   setSession,
@@ -115,16 +118,16 @@ export function fileQuestionNotice(q: UnansweredQuestion): string {
   return `<b>${safeHtml(q.label)}</b> is a file upload: attach it on the company page, or skip.`;
 }
 
-export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion): InlineKeyboard {
+export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion, qTag = "", cTag = ""): InlineKeyboard {
   const kb = new InlineKeyboard();
   const opts = isFileQuestion(q) ? [] : (q.options ?? []);
   if (opts.length > 0 && opts.length <= MAX_BUTTON_OPTIONS) {
     opts.forEach((opt, idx) => {
       const label = opt.length > MAX_BUTTON_LABEL_CHARS ? `${opt.slice(0, MAX_BUTTON_LABEL_CHARS - 1)}…` : opt;
-      kb.text(label, `${JOB_CALLBACK_PREFIX}q:${rowId}:${idx}`).row();
+      kb.text(label, `${JOB_CALLBACK_PREFIX}q:${rowId}:${idx}${qTag}`).row();
     });
   }
-  return kb.text("⏭ Skip this question", `${JOB_CALLBACK_PREFIX}q:${rowId}:skip`).text("✖ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
+  return kb.text("⏭ Skip this question", `${JOB_CALLBACK_PREFIX}q:${rowId}:skip${qTag}`).text("✖ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}${cTag}`);
 }
 
 /** Adds the hosted answer-page button, when there is a link: inside Telegram where it can, else a url button. */
@@ -135,19 +138,19 @@ function withAnswerButton(kb: InlineKeyboard, link: AnswerLink): InlineKeyboard 
 }
 
 /** Hosted link first, then Submit and Cancel, then the company page (labelled: it is not prefilled). */
-export function buildSubmitKeyboard(rowId: string, targetUrl: string, link: AnswerLink): InlineKeyboard {
+export function buildSubmitKeyboard(rowId: string, targetUrl: string, link: AnswerLink, tag = ""): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (link.url) withAnswerButton(kb, link).row();
-  kb.text("🚀 Submit Application", `${JOB_CALLBACK_PREFIX}s:${rowId}`).text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
+  kb.text("🚀 Submit Application", `${JOB_CALLBACK_PREFIX}s:${rowId}${tag}`).text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}${tag}`);
   if (isHttp(targetUrl)) kb.row().url(COMPANY_PAGE_LABEL, targetUrl);
   return kb;
 }
 
 /** No Submit: something required is still missing. */
-export function buildBlockedKeyboard(rowId: string, targetUrl: string, link: AnswerLink): InlineKeyboard {
+export function buildBlockedKeyboard(rowId: string, targetUrl: string, link: AnswerLink, tag = ""): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (link.url) withAnswerButton(kb, link).row();
-  kb.text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
+  kb.text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}${tag}`);
   if (isHttp(targetUrl)) kb.row().url(COMPANY_PAGE_LABEL, targetUrl);
   return kb;
 }
@@ -164,7 +167,7 @@ export async function promptCurrentQuestion(send: ApplySender, session: PendingA
   if (!q) return;
   const head = `❓ <b>Question ${session.questionIndex + 1}/${session.unanswered.length} for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\n\n`;
   if (isFileQuestion(q)) {
-    await send.text(head + fileQuestionNotice(q), buildQuestionKeyboard(session.rowId, q));
+    await send.text(head + fileQuestionNotice(q), buildQuestionKeyboard(session.rowId, q, questionTag(session), cardTag(session)));
     return;
   }
   const opts = q.options ?? [];
@@ -174,7 +177,7 @@ export async function promptCurrentQuestion(send: ApplySender, session: PendingA
       : opts.length > 0
         ? "\n<i>Tap an option below or reply with your exact answer:</i>"
         : "\n<i>Reply to this message with your answer (I'll save it to your dossier so I never ask again):</i>";
-  await send.text(`${head}<b>${safeHtml(q.label)}</b>${optionsHint}`, buildQuestionKeyboard(session.rowId, q));
+  await send.text(`${head}<b>${safeHtml(q.label)}</b>${optionsHint}`, buildQuestionKeyboard(session.rowId, q, questionTag(session), cardTag(session)));
 }
 
 // ── card, verdict, re-fill ──────────────────────────────────────────────────────────────────────
@@ -240,7 +243,7 @@ async function sendBlocked(
   const missing = skipped.filter((q) => q.required);
   if (missing.length > 0) lines.push("Still missing (required):", ...missing.map((q) => `• ${safeHtml(q.label)}`));
   lines.push(link.url ? "Submit appears once nothing required is missing." : `<i>answer link unavailable: ${safeHtml(link.reason)}</i>`);
-  await send.text(lines.join("\n"), buildBlockedKeyboard(session.rowId, session.targetUrl, link));
+  await send.text(lines.join("\n"), buildBlockedKeyboard(session.rowId, session.targetUrl, link, cardTag(session)));
 }
 
 async function sendReady(send: ApplySender, session: PendingApplySession, link: AnswerLink): Promise<void> {
@@ -251,7 +254,7 @@ async function sendReady(send: ApplySender, session: PendingApplySession, link: 
   const notes = session.stuck.length > 0 ? `\n${stuckLines(link, session.stuck).join("\n")}` : "";
   await send.text(
     `✅ <b>Form ready for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\nAll required fields and CV are filled. Tap <b>Submit Application</b> to send it now.${optional}${notes}`,
-    buildSubmitKeyboard(session.rowId, session.targetUrl, link),
+    buildSubmitKeyboard(session.rowId, session.targetUrl, link, cardTag(session)),
   );
 }
 
@@ -264,7 +267,7 @@ export async function finishWithoutRefill(send: ApplySender, session: PendingApp
   }
   await send.text(
     `✅ Ready to submit for <b>${safeHtml(session.company)}</b> (with skipped optional/unknown field).`,
-    buildSubmitKeyboard(session.rowId, session.targetUrl, link),
+    buildSubmitKeyboard(session.rowId, session.targetUrl, link, cardTag(session)),
   );
 }
 
@@ -289,6 +292,7 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
     const part = partitionStuck(prep.summary.unanswered, session.answered, session.skipped);
     const updated: PendingApplySession = {
       ...session, targetUrl: prep.targetUrl, unanswered: part.pending, stuck: part.stuck, skipped: part.skipped, questionIndex: 0,
+      cardStamp: mintCardStamp(),
     };
     setSession(updated);
     const link = persistAndLink(snapshotOf(updated, prep, part.stuck));

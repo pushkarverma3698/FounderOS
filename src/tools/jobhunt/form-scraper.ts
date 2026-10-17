@@ -248,6 +248,8 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
         required: Boolean(e.required) || e.getAttribute("aria-required") === "true",
         value: isChoice ? optionTextOf(e) : "",
         options: e.tagName === "SELECT" ? Array.from(e.options ?? []).map((o) => clean(o.textContent)) : undefined,
+        // Ashby Yes/No: the answer is a pressed sibling button; the hidden checkbox only mirrors "Yes".
+        buttonOptions: isChoice ? Array.from(e.parentElement?.querySelectorAll(":scope > button[aria-pressed]") ?? []).map((b) => clean(textOf(b))) : [],
         group: null as { label: string; required: boolean } | null,
         isCaptcha:
           /recaptcha|h-captcha|hcaptcha|cf-turnstile/i.test(e.className || "") ||
@@ -297,6 +299,17 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       if (!groupKey) continue;
       const selector = r.name ? `input[type="${r.type}"][name="${cssEscapeAttr(r.name)}"]` : idSelector(r.id);
       const siblings = r.name ? raw.filter((o) => o.name === r.name && (o.type === "radio" || o.type === "checkbox")) : [r];
+
+      if (r.buttonOptions.length >= 2 && r.name) {
+        fields.push({
+          selector: `div:has(> input[name="${cssEscapeAttr(r.name)}"]) > button[aria-pressed]`,
+          type: "radio-group",
+          label: r.group?.label || label,
+          required: r.required || Boolean(r.group?.required),
+          options: r.buttonOptions,
+        });
+        continue;
+      }
 
       if (r.type === "checkbox" && siblings.length === 1 && isConsentByHeuristic(r.name, r.id, label || r.value)) {
         fields.push({

@@ -171,6 +171,34 @@ describe("resolveApplyCoverLetter", () => {
     expect(mockRender).not.toHaveBeenCalled();
   });
 
+  it("retries once after a backoff when the model is rate-limited, and uses the second letter", async () => {
+    mockWrite
+      .mockResolvedValueOnce({ ok: false, reason: '429 {"error":{"message":"Rate limit exceeded: free-models-per-min","code":429}}' })
+      .mockResolvedValueOnce({ ok: true, letter: LETTER });
+    const sleeps: number[] = [];
+    const out = await resolveApplyCoverLetter(ROW, "CV TEXT", tmpDir, { sleep: async (ms) => void sleeps.push(ms) });
+    expect(out).toMatchObject({ ok: true, source: "written", letter: { text: LETTER } });
+    expect(mockWrite).toHaveBeenCalledTimes(2);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThan(0);
+  });
+
+  it("gives a plain one-line reason, not the provider text, when the retry is rate-limited too", async () => {
+    mockWrite.mockResolvedValue({ ok: false, reason: 'Error: 429 Too Many Requests\n{"error":{"metadata":{"raw":"google/gemini is temporarily rate-limited upstream"}}}' });
+    const out = await resolveApplyCoverLetter(ROW, "CV TEXT", tmpDir, { sleep: async () => undefined });
+    expect(out).toEqual({ ok: false, reason: "model rate-limited" });
+    expect(mockWrite).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a failure that is not a rate limit, and keeps its reason to one line", async () => {
+    mockWrite.mockResolvedValue({ ok: false, reason: "model returned no letter\nstack line 1\nstack line 2" });
+    const sleep = vi.fn(async () => undefined);
+    const out = await resolveApplyCoverLetter(ROW, "CV TEXT", tmpDir, { sleep });
+    expect(out).toEqual({ ok: false, reason: "model returned no letter" });
+    expect(mockWrite).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it("does not call the writer without a CV to ground the letter in", async () => {
     const out = await resolveApplyCoverLetter(ROW, null, tmpDir);
     expect(out.ok).toBe(false);
@@ -232,7 +260,7 @@ describe("/apply with a cover letter", () => {
     await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
 
     expect(prepFacts).toEqual([{ resumePath: resume }]);
-    expect(replies.find((r) => r.text.includes("Filled 2/2"))?.text).toContain("⚠ Cover letter: none (provider 503)");
+    expect(replies.find((r) => r.text.includes("Filled 2/2"))?.text).toContain("⚠ Cover letter not written: provider 503.");
     expect(replies.some((r) => r.text.includes("Form ready"))).toBe(true);
   });
 

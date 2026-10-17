@@ -125,6 +125,9 @@ function buttons(extra?: Record<string, unknown>): Btn[] {
   return (kb?.inline_keyboard ?? []).flat();
 }
 
+/** Callback data without the card stamp (apply-stale-card.test.ts covers the stamp itself). */
+const unstamped = (data?: string): string | undefined => data?.replace(/:[0-9a-z]+(\.\d+)?$/, "");
+
 function urlButtons(replies: Reply[]): Btn[] {
   return replies.flatMap((r) => buttons(r.extra)).filter((b) => b.url !== undefined);
 }
@@ -279,7 +282,7 @@ describe("apply flow", () => {
     const ready = replies.find((r) => r.text.includes("Form ready"));
     const all = buttons(ready?.extra);
     expect(all[0]?.web_app?.url.startsWith(`${BASE_URL}/apply/`)).toBe(true);
-    expect(all.some((b) => b.callback_data === `jh:s:${ROW_ID}`)).toBe(true);
+    expect(all.some((b) => b.callback_data?.startsWith(`jh:s:${ROW_ID}:`))).toBe(true);
     expect(all.find((b) => b.url === ROW.url)?.text).toContain("Company page (not prefilled)");
     expect(all.some((b) => b.text.includes("Open form manually"))).toBe(false);
   });
@@ -514,7 +517,7 @@ describe("apply flow", () => {
       const q = replies.find((r) => r.text.includes("Question 1/2"));
       expect(q?.text).toContain(`<b>${COVER}</b> is a file upload: attach it on the company page, or skip.`);
       expect(q?.text).not.toMatch(/reply/i);
-      expect(buttons(q?.extra).map((b) => b.callback_data)).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
+      expect(buttons(q?.extra).map((b) => unstamped(b.callback_data))).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
     });
 
     it("never saves a typed reply to it, and keeps the question open for Skip", async () => {
@@ -526,7 +529,7 @@ describe("apply flow", () => {
       const said = replies.at(-1);
       expect(said?.text).toContain("Nothing was saved");
       expect(said?.text).not.toContain("Saved to");
-      expect(buttons(said?.extra).map((b) => b.callback_data)).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
+      expect(buttons(said?.extra).map((b) => unstamped(b.callback_data))).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
       expect((await readCandidateDossier(PROFILE))?.qaPairs["cover letter"]).toBeUndefined();
       const profile = await readApplyProfile(applyProfilePathFor(PROFILE));
       expect(profile.ok && profile.profile.question_bank?.[COVER]).toBeFalsy();
