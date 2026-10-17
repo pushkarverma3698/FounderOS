@@ -69,6 +69,31 @@ export async function sendCoverLetter(
   row: JobApplication,
   cvMarkdown: string,
 ): Promise<void> {
+  const written = await writeCoverLetter(row, cvMarkdown);
+  if (!written.ok) {
+    await ctx.reply(
+      `⚠ No cover letter this time: ${safeHtml(written.reason.slice(0, 300))}\n` +
+        `The tailored CV is still on its way.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+  await ctx.reply(
+    `<b>Cover letter — ${safeHtml(row.company)}</b>\n` +
+      `<i>Tap to copy, then paste it into the application form.</i>\n\n` +
+      `<pre>${safeHtml(written.letter)}</pre>`,
+    { parse_mode: "HTML" },
+  );
+}
+
+/**
+ * Write the letter and archive it (`cover_letter_s3_key`). Shared by `/draft`, which pastes it into the
+ * chat, and `/apply`, which attaches it to the form. A failure is a reason, never a throw.
+ */
+export async function writeCoverLetter(
+  row: JobApplication,
+  cvMarkdown: string,
+): Promise<{ readonly ok: true; readonly letter: string } | { readonly ok: false; readonly reason: string }> {
   // cover-letter.ts is deliberately ignorant of LangChain so its tests cost
   // nothing and run offline. The role/content pairs it speaks map onto
   // LangChain's tuple message form here, at the one place that knows both.
@@ -97,23 +122,13 @@ export async function sendCoverLetter(
   if (!result.success || !result.letter) {
     log.warn(
       { id: row.id, company: row.company, reason: result.error },
-      "Cover letter not produced — CV delivery continues",
+      "Cover letter not produced",
     );
-    await ctx.reply(
-      `⚠ No cover letter this time: ${safeHtml((result.error ?? "unknown").slice(0, 300))}\n` +
-        `The tailored CV is still on its way.`,
-      { parse_mode: "HTML" },
-    );
-    return;
+    return { ok: false, reason: result.error ?? "unknown" };
   }
 
   await archiveCoverLetter(row, result.letter);
-  await ctx.reply(
-    `<b>Cover letter — ${safeHtml(row.company)}</b>\n` +
-      `<i>Tap to copy, then paste it into the application form.</i>\n\n` +
-      `<pre>${safeHtml(result.letter)}</pre>`,
-    { parse_mode: "HTML" },
-  );
+  return { ok: true, letter: result.letter };
 }
 
 /**

@@ -18,6 +18,7 @@ import { deleteApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { normalizeQuestionKey } from "../tools/jobhunt/candidate-dossier.js";
 import type { UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import { prepareApplicationForm, submitApplicationForm } from "../tools/jobhunt/form-runner.js";
+import { resolveApplyCoverLetter, type ApplyCoverLetter } from "./apply-cover-letter.js";
 
 const log = childLogger({ module: "gateway:apply-session" });
 const LOCK_STALE_MS = 10 * 60_000;
@@ -47,6 +48,9 @@ export interface PendingApplySession {
   readonly title: string;
   readonly targetUrl: string;
   readonly resumePdfPath: string;
+  /** Attached to the form and to Submit; absent when none could be produced (`coverLetterNote` says why). */
+  readonly coverLetter?: ApplyCoverLetter;
+  readonly coverLetterNote?: string;
   /** Still to ask in Telegram: unfilled, and neither answered nor skipped in this session. */
   readonly unanswered: readonly UnansweredQuestion[];
   /** Answered in this session but the form still shows them unfilled (from the last prepare run). */
@@ -60,7 +64,7 @@ export interface PendingApplySession {
 
 export type SessionBase = Pick<
   PendingApplySession,
-  "rowId" | "chatId" | "profileId" | "candidateName" | "company" | "title" | "targetUrl" | "resumePdfPath"
+  "rowId" | "chatId" | "profileId" | "candidateName" | "company" | "title" | "targetUrl" | "resumePdfPath" | "coverLetter" | "coverLetterNote"
 >;
 
 export function newSession(base: SessionBase, answered: AnsweredEntry[] = []): PendingApplySession {
@@ -110,14 +114,20 @@ export function endSession(rowId: string): void {
 export interface AutoApplyRunnerDeps {
   readonly prepare: typeof prepareApplicationForm;
   readonly submit: typeof submitApplicationForm;
+  readonly coverLetter: typeof resolveApplyCoverLetter;
 }
 
-let runnerDeps: AutoApplyRunnerDeps = { prepare: prepareApplicationForm, submit: submitApplicationForm };
+const REAL_RUNNER: AutoApplyRunnerDeps = { prepare: prepareApplicationForm, submit: submitApplicationForm, coverLetter: resolveApplyCoverLetter };
+let runnerDeps: AutoApplyRunnerDeps = REAL_RUNNER;
 
 export const getRunnerDeps = (): AutoApplyRunnerDeps => runnerDeps;
 
 export function setAutoApplyRunnerForTests(override?: Partial<AutoApplyRunnerDeps>): void {
-  runnerDeps = { prepare: override?.prepare ?? prepareApplicationForm, submit: override?.submit ?? submitApplicationForm };
+  runnerDeps = {
+    prepare: override?.prepare ?? REAL_RUNNER.prepare,
+    submit: override?.submit ?? REAL_RUNNER.submit,
+    coverLetter: override?.coverLetter ?? REAL_RUNNER.coverLetter,
+  };
 }
 
 export function clearAutoApplySessionsForTests(): void {

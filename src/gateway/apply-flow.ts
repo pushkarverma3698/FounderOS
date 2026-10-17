@@ -46,6 +46,7 @@ import {
   type SessionBase,
   type StuckQuestion,
 } from "./apply-session.js";
+import { coverLetterLine, letterFacts } from "./apply-cover-letter.js";
 import { safeHtml } from "./safe-html.js";
 
 export { partitionStuck, tryLockApply } from "./apply-session.js";
@@ -172,6 +173,8 @@ function snapshotOf(session: PendingApplySession, prep: PrepOk, stuck: readonly 
     targetUrl: prep.targetUrl,
     platform: prep.platform,
     resumePath: session.resumePdfPath,
+    ...(session.coverLetter ? { coverLetter: { ...session.coverLetter } } : {}),
+    ...(session.coverLetterNote ? { coverLetterNote: session.coverLetterNote } : {}),
     summary: {
       filled: prep.summary.filled,
       total: prep.summary.total,
@@ -257,7 +260,7 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
       return;
     }
     const dossier = (await readCandidateDossier(session.profileId)) ?? undefined;
-    const prep = await getRunnerDeps().prepare(session.targetUrl, session.company, loaded.profile, { resumePath: session.resumePdfPath }, dossier);
+    const prep = await getRunnerDeps().prepare(session.targetUrl, session.company, loaded.profile, { resumePath: session.resumePdfPath, ...letterFacts(session.coverLetter) }, dossier);
     if (!prep.ok) {
       await send.text(`⚠ Form preparation failed for ${safeHtml(session.company)}: ${safeHtml(prep.reason)}`);
       return;
@@ -270,7 +273,11 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
     setSession(updated);
     const link = persistAndLink(snapshotOf(updated, prep, part.stuck));
 
-    const lines = [`<b>${safeHtml(session.company)} — ${safeHtml(session.title)}</b> (${safeHtml(prep.platform)})`, safeHtml(formatSummaryLine(prep.summary))];
+    const lines = [
+      `<b>${safeHtml(session.company)} — ${safeHtml(session.title)}</b> (${safeHtml(prep.platform)})`,
+      safeHtml(formatSummaryLine(prep.summary)),
+      coverLetterLine(session.coverLetter, session.coverLetterNote, prep.summary),
+    ];
     if (!link.url) lines.push(`<i>answer link unavailable: ${safeHtml(link.reason)}</i>`);
     await send.text(lines.join("\n"), link.url ? new InlineKeyboard().url(answerLabel(link.left), link.url) : undefined);
 
@@ -324,6 +331,8 @@ export async function refillFromPage(
     const base: SessionBase = {
       rowId: snap.rowId, chatId: snap.chatId, profileId: snap.profileId, candidateName: snap.candidateName,
       company: snap.company, title: snap.title, targetUrl: snap.targetUrl, resumePdfPath: snap.resumePath,
+      ...(snap.coverLetter ? { coverLetter: snap.coverLetter } : {}),
+      ...(snap.coverLetterNote ? { coverLetterNote: snap.coverLetterNote } : {}),
     };
     const tried = snap.summary.unanswered.flatMap((q) => (q.triedAnswer !== undefined ? [{ label: q.label, answer: q.triedAnswer }] : []));
     const session = sessionForRow(snap.rowId) ?? newSession(base, tried);
