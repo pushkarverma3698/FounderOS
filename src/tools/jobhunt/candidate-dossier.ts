@@ -90,6 +90,9 @@ export function matchChoiceOption(desiredAnswer: string, options: readonly strin
       return normOpt.includes(normDesired) || (normOpt.length >= MIN_SUBSTRING_MATCH_CHARS && normDesired.includes(normOpt));
     });
     if (subMatches.length === 1) return subMatches[0]!;
+    // "India" also hits "British Indian Ocean Territory": keep the options naming it as a whole word.
+    const wholeWord = subMatches.filter((o) => ` ${normalizeQuestionKey(o)} `.includes(` ${normDesired} `));
+    if (wholeWord.length === 1) return wholeWord[0]!;
   }
 
   return null;
@@ -158,6 +161,8 @@ export function parseDossierMarkdown(markdown: string): CandidateDossier {
 const SEMANTIC_RULES: ReadonlyArray<{
   readonly name: string;
   readonly phrases: readonly string[];
+  /** Phrases that veto the rule ("current base salary" is not the salary expectation). */
+  readonly excludes?: readonly string[];
   readonly resolve: (profile: ApplyProfile, dossier?: CandidateDossier) => string | undefined;
 }> = [
   {
@@ -174,6 +179,7 @@ const SEMANTIC_RULES: ReadonlyArray<{
   {
     name: "salary",
     phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual"],
+    excludes: ["current"],
     resolve: (p, d) =>
       d?.facts["salary expectation"] ??
       d?.facts["expected salary"] ??
@@ -233,9 +239,30 @@ const SEMANTIC_RULES: ReadonlyArray<{
   {
     name: "referralSource",
     phrases: ["how did you hear", "where did you hear", "how did you find", "source", "hoe heb je ons gevonden"],
+    excludes: ["open source"],
     resolve: (p, d) => p.answers?.referral_source ?? d?.facts["how did you hear about us"] ?? d?.facts["referral source"],
   },
 ];
+
+/** The candidate's own answer to exactly this question: `question_bank` first, then the dossier. */
+export function explicitAnswerFor(
+  question: string,
+  profile: ApplyProfile,
+  dossier?: CandidateDossier,
+): { readonly value: string; readonly source: string } | null {
+  const normKey = normalizeQuestionKey(question);
+  if (!normKey) return null;
+  for (const [k, v] of Object.entries(profile.question_bank ?? {})) {
+    if (normalizeQuestionKey(k) === normKey && v.trim()) return { value: v.trim(), source: `question_bank ("${k}")` };
+  }
+  const qa = dossier?.qaPairs[normKey]?.trim();
+  if (qa) return { value: qa, source: `dossier Q&A ("${normKey}")` };
+  const fact = dossier?.facts[normKey]?.trim();
+  return fact ? { value: fact, source: `dossier fact ("${normKey}")` } : null;
+}
+
+/** A phrase matches at a word start, so "city" never fires inside "ethnicity". */
+const hasPhrase = (normKey: string, phrase: string): boolean => ` ${normKey}`.includes(` ${phrase}`);
 
 /** Look up an answer for `question` from `question_bank`, `dossier`, or `profile.answers`. */
 export function lookupLearnedAnswer(
@@ -247,32 +274,13 @@ export function lookupLearnedAnswer(
   const normKey = normalizeQuestionKey(question);
   if (!normKey) return null;
 
-  let rawAnswer: string | undefined;
-  let source = "";
-
-  if (profile.question_bank) {
-    for (const [k, v] of Object.entries(profile.question_bank)) {
-      if (normalizeQuestionKey(k) === normKey && v.trim()) {
-        rawAnswer = v.trim();
-        source = `question_bank ("${k}")`;
-        break;
-      }
-    }
-  }
-
-  if (!rawAnswer && dossier) {
-    if (dossier.qaPairs[normKey]) {
-      rawAnswer = dossier.qaPairs[normKey];
-      source = `dossier Q&A ("${normKey}")`;
-    } else if (dossier.facts[normKey]) {
-      rawAnswer = dossier.facts[normKey];
-      source = `dossier fact ("${normKey}")`;
-    }
-  }
+  const explicit = explicitAnswerFor(question, profile, dossier);
+  let rawAnswer = explicit?.value;
+  let source = explicit?.source ?? "";
 
   if (!rawAnswer) {
     for (const rule of SEMANTIC_RULES) {
-      if (rule.phrases.some((p) => normKey.includes(p))) {
+      if (rule.phrases.some((p) => hasPhrase(normKey, p)) && !rule.excludes?.some((p) => hasPhrase(normKey, p))) {
         const resolved = rule.resolve(profile, dossier);
         if (resolved && resolved.trim()) {
           rawAnswer = resolved.trim();
