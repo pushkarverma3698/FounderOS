@@ -132,6 +132,14 @@ function resolveRequest(req: IncomingMessage, deps: ApplyRouteDeps): Resolved {
 async function runRefill(snap: ApplySnapshot, posted: readonly AnsweredEntry[], held: () => void, deps: ApplyRouteDeps): Promise<void> {
   const send = deps.senderFor(snap.chatId);
   try {
+    // Labels only: the values are the founder's answers and stay out of the chat log.
+    const labels = posted.map((p) => `<b>${escapeHtml(p.label)}</b>`).join(", ");
+    await send.text(`💾 Saved from the answer page for <b>${escapeHtml(snap.company)}</b>: ${labels}`);
+  } catch (err) {
+    // allow-failopen: the answers are already in the dossier; a lost chat line must not stop the re-fill.
+    log.warn({ rowId: snap.rowId, err: (err as Error).message }, "apply page: could not post the saved line");
+  }
+  try {
     await deps.refill(snap, posted, held, send);
   } catch (err) {
     const reason = (err as Error).message;

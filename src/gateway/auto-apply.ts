@@ -36,13 +36,16 @@ import {
 } from "./apply-flow.js";
 import {
   acquireApplyLock,
+  cardTag,
   ctxSender,
   endSession,
   forgetUnconfirmedClick,
   getRunnerDeps,
+  isStaleTap,
   markSkipped,
   newSession,
   noteUnconfirmedClick,
+  questionTag,
   rememberAnswer,
   sessionForChat,
   sessionForRow,
@@ -57,6 +60,7 @@ import { safeHtml } from "./safe-html.js";
 export { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests } from "./apply-session.js";
 
 const log = childLogger({ module: "gateway:auto-apply" });
+const STALE_CARD = "This card is out of date; use the latest one";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function artifactDirForChat(chatId: string): string {
@@ -207,7 +211,7 @@ export async function tryHandlePendingApplyReply(ctx: Context, text: string): Pr
   if (isFileQuestion(q)) {
     await ctx.reply(`📎 ${fileQuestionNotice(q)} A typed reply cannot fill it. Nothing was saved.`, {
       parse_mode: "HTML",
-      reply_markup: buildQuestionKeyboard(session.rowId, q),
+      reply_markup: buildQuestionKeyboard(session.rowId, q, questionTag(session), cardTag(session)),
     });
     return true;
   }
@@ -223,9 +227,14 @@ export async function tryHandlePendingApplyReply(ctx: Context, text: string): Pr
 /** Handle `jh:f:`, `jh:q:`, `jh:s:`, and `jh:k:` inline button taps. */
 export async function handleAutoApplyCallback(ctx: Context, data: string): Promise<boolean> {
   if (!data.startsWith(JOB_CALLBACK_PREFIX)) return false;
-  const [kind, rowId, choiceToken = ""] = data.slice(JOB_CALLBACK_PREFIX.length).split(":");
+  const [kind, rowId, choiceToken = "", qStamp] = data.slice(JOB_CALLBACK_PREFIX.length).split(":");
   if (!kind || !rowId || !UUID_PATTERN.test(rowId)) return false;
   if (kind !== "f" && kind !== "q" && kind !== "s" && kind !== "k") return false;
+  // `jh:f:` comes from the job list and starts a fresh fill on purpose, so it carries no stamp.
+  if (kind !== "f" && isStaleTap(rowId, kind, kind === "q" ? qStamp : choiceToken || undefined)) {
+    await ctx.answerCallbackQuery({ text: STALE_CARD });
+    return true;
+  }
 
   if (kind === "k") {
     endSession(rowId);
@@ -333,7 +342,7 @@ async function submitRow(ctx: Context, rowId: string): Promise<void> {
   if (!result.ok) {
     await ctx.reply(`⚠ <b>Could not submit for ${safeHtml(row.company)}</b>: ${safeHtml(result.reason)}`, {
       parse_mode: "HTML",
-      reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id)),
+      reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))),
     });
     return;
   }
@@ -357,7 +366,7 @@ async function submitRow(ctx: Context, rowId: string): Promise<void> {
       `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\n` +
         `Submit was clicked, so it may have arrived. Check your email and the screenshot above before trying again; ` +
         `to retry, send <code>/apply ${shortJobId(row.id)}</code>.`,
-      { parse_mode: "HTML", reply_markup: buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id)) },
+      { parse_mode: "HTML", reply_markup: buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))) },
     );
   }
 }

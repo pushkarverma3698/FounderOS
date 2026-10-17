@@ -7,7 +7,7 @@
  * slip through.
  *
  * Exception: when the founder authorises real applications in chat, the run names those rows in
- * `TAP_ALLOW_SUBMIT_ROWS=<rowId>,<rowId>`. Only `jh:s:<rowId>` for an exact listed id is then pressed.
+ * `TAP_ALLOW_SUBMIT_ROWS=<rowId>,<rowId>`. Only `jh:s:<rowId>[:<cardStamp>]` for an exact listed id is then pressed.
  */
 
 export interface TapButton {
@@ -31,7 +31,7 @@ export function allowedSubmitRows(raw: string | undefined): readonly string[] {
 export function tapRefusal(button: TapButton, allowSubmitRows: readonly string[] = []): string | null {
   const data = button.data ?? "";
   const prefix = SUBMIT_CALLBACK_PREFIXES.find((p) => data.startsWith(p));
-  if (prefix && allowSubmitRows.includes(data.slice(prefix.length))) return null;
+  if (prefix && allowSubmitRows.includes(data.slice(prefix.length).split(":")[0] ?? "")) return null;
   if (prefix || /submit/i.test(button.label)) {
     return `refused: "${button.label}" is a Submit button. Only the founder presses Submit, or names the row in TAP_ALLOW_SUBMIT_ROWS.`;
   }
