@@ -219,4 +219,21 @@ describe("form-brain", () => {
     expect(chooseEligibility(ghEligibility, unknownProfile).kind).toBe("ask");
     expect(scoreEligibilityOption("Need sponsorship", "requires-sponsorship")).toBeGreaterThan(0.9);
   });
+
+  it("answers Ashby's 'Do you require a visa to legally work…' Yes/No from work_authorization", () => {
+    // Real Mollie (Ashby) label, scraped 2026-10-17; the scraper does not flag it as eligibility.
+    const visa: ScrapedField = {
+      selector: '[name="c384b593-fe20-4f59-bae8-1c83f7451920"]',
+      type: "radio-group",
+      label: "Do you require a visa to legally work in the country where you are applying?",
+      required: true,
+      options: ["Yes", "No"],
+    };
+    const tashi = buildFormFillPlan([visa], TASHI_PROFILE)[0]!;
+    expect(tashi.kind).toBe("choose");
+    if (tashi.kind === "choose") expect(tashi.option).toBe("No");
+    const pushkar = buildFormFillPlan([visa], PUSHKAR_PROFILE)[0]!;
+    expect(pushkar.kind).toBe("choose");
+    if (pushkar.kind === "choose") expect(pushkar.option).toBe("Yes");
+  });
 });
