@@ -46,7 +46,8 @@ const { handleAutoApplyCallback, tryHandlePendingApplyReply, setAutoApplyRunnerF
   await import("../../../src/gateway/auto-apply.js");
 const { refillFromPage, tryLockApply, partitionStuck } = await import("../../../src/gateway/apply-flow.js");
 const { loadApplySnapshot, verifyApplyToken } = await import("../../../src/tools/jobhunt/apply-link.js");
-const { applyProfilePathFor } = await import("../../../src/tools/jobhunt/apply-profile.js");
+const { applyProfilePathFor, readApplyProfile } = await import("../../../src/tools/jobhunt/apply-profile.js");
+const { readCandidateDossier } = await import("../../../src/tools/jobhunt/candidate-dossier.js");
 
 const ROW = {
   id: ROW_ID,
@@ -438,6 +439,53 @@ describe("apply flow", () => {
 
       expect(replies.some((r) => r.text.includes("Form ready"))).toBe(true);
       expect(hasSubmit(replies)).toBe(true);
+    });
+  });
+
+  // Seen live on Telnyx 2026-10-17: Greenhouse "Cover Letter" (a file input) was asked as a text reply.
+  describe("file upload question", () => {
+    const COVER = "Cover Letter";
+    const file = (over: Partial<UnansweredQuestion> = {}): UnansweredQuestion =>
+      ask(COVER, { fieldType: "file", options: undefined, ...over });
+
+    it("is a notice with only Skip and Cancel, never a request to reply with text", async () => {
+      script([prep([file(), ask(WHERE)])]);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+
+      const q = replies.find((r) => r.text.includes("Question 1/2"));
+      expect(q?.text).toContain(`<b>${COVER}</b> is a file upload: attach it on the company page, or skip.`);
+      expect(q?.text).not.toMatch(/reply/i);
+      expect(buttons(q?.extra).map((b) => b.callback_data)).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
+    });
+
+    it("never saves a typed reply to it, and keeps the question open for Skip", async () => {
+      script([prep([file(), ask(WHERE)])]);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+
+      expect(await tryHandlePendingApplyReply(ctx as never, "Dear hiring team, I am writing to apply")).toBe(true);
+      const said = replies.at(-1);
+      expect(said?.text).toContain("Nothing was saved");
+      expect(said?.text).not.toContain("Saved to");
+      expect(buttons(said?.extra).map((b) => b.callback_data)).toEqual([`jh:q:${ROW_ID}:skip`, `jh:k:${ROW_ID}`]);
+      expect((await readCandidateDossier(PROFILE))?.qaPairs["cover letter"]).toBeUndefined();
+      const profile = await readApplyProfile(applyProfilePathFor(PROFILE));
+      expect(profile.ok && profile.profile.question_bank?.[COVER]).toBeFalsy();
+      expect(prepareCalls).toBe(1);
+
+      await handleAutoApplyCallback(ctx as never, `jh:q:${ROW_ID}:skip`);
+      expect(replies.some((r) => r.text.includes("Question 2/2") && r.text.includes(WHERE))).toBe(true);
+    });
+
+    it("still blocks Submit when a required one is skipped", async () => {
+      script([prep([file()])]);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+      await handleAutoApplyCallback(ctx as never, `jh:q:${ROW_ID}:skip`);
+
+      expect(hasSubmit(replies)).toBe(false);
+      expect(replies.some((r) => r.text.includes("Not ready to submit") && r.text.includes(COVER))).toBe(true);
     });
   });
 
