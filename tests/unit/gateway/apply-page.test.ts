@@ -270,7 +270,9 @@ describe("page headers", () => {
     expect(csp).toContain(`default-src ${SQ}none${SQ}`);
     expect(csp).toContain(`style-src ${SQ}sha256-${hash}${SQ}`);
     expect(csp).toContain(`form-action ${SQ}self${SQ}`);
-    expect(csp).not.toMatch(/https?:/);
+    // The card opens this page as a Telegram Mini App; Telegram Web shows it in an iframe on web.telegram.org.
+    expect(csp).toContain("frame-ancestors https://web.telegram.org;");
+    expect(csp.replace("frame-ancestors https://web.telegram.org;", "")).not.toMatch(/https?:/);
   });
 
   it("renders a notice page with the same shell and escapes the message", () => {

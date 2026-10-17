@@ -48,7 +48,10 @@ const CSS =
 
 const STYLE_HASH = createHash("sha256").update(CSS).digest("base64");
 
-/** Sent with every page. The style hash is the only allowance; nothing can load or run anything else. */
+/**
+ * Sent with every page. The style hash is the only allowance; nothing can load or run anything else.
+ * Only Telegram Web may frame the page: it opens the card's Mini App button in an iframe (native apps use a WebView).
+ */
 export const APPLY_PAGE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
@@ -56,7 +59,7 @@ export const APPLY_PAGE_HEADERS: Readonly<Record<string, string>> = {
   "X-Robots-Tag": "noindex, nofollow",
   "X-Content-Type-Options": "nosniff",
   "Content-Security-Policy":
-    `default-src 'none'; style-src 'sha256-${STYLE_HASH}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    `default-src 'none'; style-src 'sha256-${STYLE_HASH}'; form-action 'self'; frame-ancestors https://web.telegram.org; base-uri 'none'`,
 };
 
 /**
