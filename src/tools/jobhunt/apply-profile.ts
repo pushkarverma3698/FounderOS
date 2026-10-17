@@ -77,6 +77,8 @@ const answersSchema = z
     university: z.string().optional(),
     github: z.string().optional(),
     referral_source: z.string().optional(),
+    /** Voluntary EEO answers by category (`self-identification.ts`); a category not set is declined. */
+    self_identification: z.record(z.string()).optional(),
   })
   .partial({ work_authorization: true });
 
