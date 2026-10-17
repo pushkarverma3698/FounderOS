@@ -32,6 +32,16 @@ import {
 } from "../../../src/tools/jobhunt/form-runner.js";
 import { classifyFormUrl, resolveFormTargetUrl } from "../../../src/tools/jobhunt/form-scraper.js";
 
+/**
+ * The e2e test drives three full browser passes (prepare, refused submit, real submit). Idle it takes
+ * ~10.6 s locally and ~13 s on a CI runner: 13 blind CONTROLLED_INPUT_SETTLE_MS (600 ms) sleeps are
+ * ~7.8 s of that, and each pass cold-starts Chrome and waits up to 6 s for networkidle. The old 30 s
+ * budget (the vitest default) left a 2.3x margin, so one slow Chrome start on a loaded 2-vCPU runner
+ * failed the file (PR #1190, run 39008711947). 120 s is far above any one Playwright step timeout
+ * (30 s), so a genuine stall still fails, as a named Playwright timeout instead of an anonymous one.
+ */
+const E2E_TIMEOUT_MS = 120_000;
+
 const FORM_HTML = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Acme AI — Senior Engineer Application</title></head>
@@ -215,5 +225,5 @@ describe("form-scraper & form-runner end-to-end with Playwright Chromium", () =>
     expect(submitted.clicked).toBe(true);
     expect(submitted.confirmed).toBe(true);
     expect(submitted.afterScreenshotPng.length).toBeGreaterThan(1000);
-  }, 30_000);
+  }, E2E_TIMEOUT_MS);
 });
