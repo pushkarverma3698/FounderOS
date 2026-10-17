@@ -85,7 +85,7 @@ export function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): b
 
 const ELIGIBILITY_PHRASES: readonly string[] = [
   "right to work", "authorized to work", "authorised to work", "work authorization",
-  "work authorisation", "visa sponsorship", "require sponsorship", "need sponsorship",
+  "work authorisation", "visa sponsorship", "require sponsorship", "need sponsorship", "require a visa",
   "legally eligible", "legally authorized", "work permit", "werkvergunning", "tewerkstellingsvergunning",
 ];
 
@@ -111,7 +111,8 @@ export function scoreEligibilityOption(
 
   const asksIfSponsorshipNeeded =
     q.includes("require sponsorship") || q.includes("need sponsorship") ||
-    q.includes("require visa") || q.includes("need a visa") || q.includes("sponsorship required");
+    q.includes("require visa") || q.includes("require a visa") || q.includes("need a visa") ||
+    q.includes("sponsorship required");
   const asksIfAuthorized =
     q.includes("authorized to work") || q.includes("authorised to work") ||
     q.includes("right to work") || q.includes("legally eligible") || q.includes("valid work permit");
@@ -164,7 +165,7 @@ export function chooseEligibility(
   }
   if (!field.options || field.options.length === 0) {
     const q = normalizeQuestionKey(label);
-    if (q.includes("require sponsorship") || q.includes("need sponsorship") || q.includes("require visa") || q.includes("need a visa") || q.includes("sponsorship")) {
+    if (q.includes("require sponsorship") || q.includes("need sponsorship") || q.includes("require visa") || q.includes("require a visa") || q.includes("need a visa") || q.includes("sponsorship")) {
       const ans = status === "requires-sponsorship" ? "Yes" : "No";
       return {
         selector: field.selector, label, kind: "value", value: ans, confidence: 0.95,
