@@ -67,7 +67,7 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
 /** "Are you based in …?" is a yes/no question, not a place to type the candidate's city. */
 const YES_NO_QUESTION_START = /^(?:are|do|does|did|have|has|is|can|could|will|would|should)\b/;
 
-function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): boolean {
+export function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): boolean {
   const n = normalizeQuestionKey(label);
   if (!n) return false;
   if ((group === "location" || group === "country") && YES_NO_QUESTION_START.test(n)) return false;

@@ -151,6 +151,7 @@ function script(results: Prep[], submitOk = true): void {
   setAutoApplyRunnerForTests({
     prepare: async () => results[Math.min(prepareCalls++, results.length - 1)] as Prep,
     submit: async () => (submitOk ? sent : failed) as never,
+    coverLetter: async () => ({ ok: false, reason: "not in this test" }),
   });
 }
 

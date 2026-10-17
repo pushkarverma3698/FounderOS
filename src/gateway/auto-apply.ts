@@ -23,6 +23,7 @@ import { readCandidateDossier, recordLearnedAnswer } from "../tools/jobhunt/cand
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
+import { coverLetterMessage, letterFacts, letterOf, type CoverLetterOutcome } from "./apply-cover-letter.js";
 import {
   advanceAfterQuestion,
   answerLink,
@@ -78,9 +79,7 @@ async function resolveResumePdf(
   const configured = (row.track ? applyProfile.resumes?.[row.track] : undefined) ?? applyProfile.default_resume ?? "";
   if (configured && (await fileExists(configured))) return { ok: true, pdfPath: configured };
 
-  const trackConfig = row.track ? profile.tracks[row.track] : undefined;
-  const explicitPaths = [...(trackConfig?.cvPath ? [trackConfig.cvPath] : []), ...(profile.baseCvPath ? [profile.baseCvPath] : [])];
-  const cv = readFullCvText(row.track, explicitPaths.length > 0 ? explicitPaths : undefined);
+  const cv = readBaseCv(row, profile);
   if (!cv.ok) return { ok: false, reason: `Configured resume (${configured || "unset"}) is missing and base CV read failed: ${cv.error}` };
 
   try {
@@ -94,6 +93,17 @@ async function resolveResumePdf(
   }
 }
 
+function readBaseCv(row: JobApplication, profile: JobSearchProfile): ReturnType<typeof readFullCvText> {
+  const trackConfig = row.track ? profile.tracks[row.track] : undefined;
+  const explicitPaths = [...(trackConfig?.cvPath ? [trackConfig.cvPath] : []), ...(profile.baseCvPath ? [profile.baseCvPath] : [])];
+  return readFullCvText(row.track, explicitPaths.length > 0 ? explicitPaths : undefined);
+}
+
+/** The archived letter, else a new one grounded in the base CV. Never throws. */
+function resolveCoverLetter(row: JobApplication, profile: JobSearchProfile, artifactDir: string): Promise<CoverLetterOutcome> {
+  const cv = readBaseCv(row, profile);
+  return getRunnerDeps().coverLetter(row, cv.ok ? cv.text : null, artifactDir);
+}
 
 /** Start the one-click auto-apply flow for a resolved row. */
 export async function startAutoApplyForRow(ctx: Context, row: JobApplication, profile: JobSearchProfile): Promise<void> {
@@ -104,7 +114,8 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
     return;
   }
 
-  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDirForChat(chatId));
+  const artifactDir = artifactDirForChat(chatId);
+  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDir);
   if (!pdfResolved.ok) {
     await ctx.reply(`⚠ Cannot start auto-apply: ${safeHtml(pdfResolved.reason)}`, { parse_mode: "HTML" });
     return;
@@ -121,9 +132,12 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
   if (!held) return;
   try {
     await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
+    const letter = await resolveCoverLetter(row, profile, artifactDir);
+    if (letter.ok) await ctx.reply(coverLetterMessage(row.company, letter), { parse_mode: "HTML" });
     const base = {
       rowId: row.id, chatId, profileId: profile.id, candidateName: profile.candidateName,
       company: row.company, title: row.title, targetUrl, resumePdfPath: pdfResolved.pdfPath,
+      ...(letter.ok ? { coverLetter: letter.letter } : { coverLetterNote: letter.reason }),
     };
     await runFormPrepAndPrompt(send, newSession(base), held);
   } finally {
@@ -237,7 +251,8 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
     await ctx.answerCallbackQuery({ text: "Apply profile unreadable" });
     return true;
   }
-  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDirForChat(String(ctx.chat?.id ?? "unknown")));
+  const artifactDir = artifactDirForChat(String(ctx.chat?.id ?? "unknown"));
+  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDir);
   if (!pdfResolved.ok) {
     await ctx.answerCallbackQuery({ text: "Resume missing" });
     return true;
@@ -249,7 +264,10 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   const dossier = (await readCandidateDossier(profile.id)) ?? undefined;
   const session = sessionForRow(rowId);
   const targetUrl = session?.targetUrl ?? getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
-  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, { resumePath: pdfResolved.pdfPath }, dossier);
+  // The letter the card showed; after a restart (no session) the archived one, resolved again.
+  const letter = session ? session.coverLetter : letterOf(await resolveCoverLetter(row, profile, artifactDir));
+  const facts = { resumePath: pdfResolved.pdfPath, ...letterFacts(letter) };
+  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, facts, dossier);
 
   if (!result.ok) {
     await ctx.reply(`⚠ <b>Could not submit for ${safeHtml(row.company)}</b>: ${safeHtml(result.reason)}`, {
