@@ -21,11 +21,13 @@ import { DRAFT_SECTIONS, getApplyUrl, tailoredCvPath } from "../tools/jobhunt/ap
 import { applyProfilePathFor, readApplyProfile, type ApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { readCandidateDossier, recordLearnedAnswer } from "../tools/jobhunt/candidate-dossier.js";
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
-import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
+import { JOB_CALLBACK_PREFIX, shortJobId } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
+import { coverLetterMessage, letterFacts, letterOf, type CoverLetterOutcome } from "./apply-cover-letter.js";
 import {
   advanceAfterQuestion,
   answerLink,
+  buildBlockedKeyboard,
   buildQuestionKeyboard,
   buildSubmitKeyboard,
   fileQuestionNotice,
@@ -42,6 +44,7 @@ import {
   rememberAnswer,
   sessionForChat,
   sessionForRow,
+  tryLockApply,
 } from "./apply-session.js";
 import { markRowApplied } from "./jobhunt-buttons.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
@@ -78,9 +81,7 @@ async function resolveResumePdf(
   const configured = (row.track ? applyProfile.resumes?.[row.track] : undefined) ?? applyProfile.default_resume ?? "";
   if (configured && (await fileExists(configured))) return { ok: true, pdfPath: configured };
 
-  const trackConfig = row.track ? profile.tracks[row.track] : undefined;
-  const explicitPaths = [...(trackConfig?.cvPath ? [trackConfig.cvPath] : []), ...(profile.baseCvPath ? [profile.baseCvPath] : [])];
-  const cv = readFullCvText(row.track, explicitPaths.length > 0 ? explicitPaths : undefined);
+  const cv = readBaseCv(row, profile);
   if (!cv.ok) return { ok: false, reason: `Configured resume (${configured || "unset"}) is missing and base CV read failed: ${cv.error}` };
 
   try {
@@ -94,9 +95,34 @@ async function resolveResumePdf(
   }
 }
 
+function readBaseCv(row: JobApplication, profile: JobSearchProfile): ReturnType<typeof readFullCvText> {
+  const trackConfig = row.track ? profile.tracks[row.track] : undefined;
+  const explicitPaths = [...(trackConfig?.cvPath ? [trackConfig.cvPath] : []), ...(profile.baseCvPath ? [profile.baseCvPath] : [])];
+  return readFullCvText(row.track, explicitPaths.length > 0 ? explicitPaths : undefined);
+}
+
+/** The archived letter, else a new one grounded in the base CV. Never throws. */
+function resolveCoverLetter(row: JobApplication, profile: JobSearchProfile, artifactDir: string): Promise<CoverLetterOutcome> {
+  const cv = readBaseCv(row, profile);
+  return getRunnerDeps().coverLetter(row, cv.ok ? cv.text : null, artifactDir);
+}
+
+/** The day a row was applied to, or null. An applied row is never filled or sent again. */
+function appliedOn(row: JobApplication): string | null {
+  if (row.applied_at) return new Date(row.applied_at).toISOString().slice(0, 10);
+  return row.stage === "applied" ? "an earlier date" : null;
+}
+
+const alreadyAppliedMessage = (row: JobApplication, on: string): string =>
+  `✅ Already applied to <b>${safeHtml(row.company)}</b> (${safeHtml(row.title)}) on ${on}. Nothing was sent again.`;
 
 /** Start the one-click auto-apply flow for a resolved row. */
 export async function startAutoApplyForRow(ctx: Context, row: JobApplication, profile: JobSearchProfile): Promise<void> {
+  const on = appliedOn(row);
+  if (on) {
+    await ctx.reply(alreadyAppliedMessage(row, on), { parse_mode: "HTML" });
+    return;
+  }
   const chatId = String(ctx.chat?.id ?? "unknown");
   const loaded = await readApplyProfile(applyProfilePathFor(profile.id));
   if (!loaded.ok) {
@@ -104,7 +130,8 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
     return;
   }
 
-  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDirForChat(chatId));
+  const artifactDir = artifactDirForChat(chatId);
+  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDir);
   if (!pdfResolved.ok) {
     await ctx.reply(`⚠ Cannot start auto-apply: ${safeHtml(pdfResolved.reason)}`, { parse_mode: "HTML" });
     return;
@@ -121,9 +148,12 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
   if (!held) return;
   try {
     await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
+    const letter = await resolveCoverLetter(row, profile, artifactDir);
+    if (letter.ok) await ctx.reply(coverLetterMessage(row.company, letter), { parse_mode: "HTML" });
     const base = {
       rowId: row.id, chatId, profileId: profile.id, candidateName: profile.candidateName,
       company: row.company, title: row.title, targetUrl, resumePdfPath: pdfResolved.pdfPath,
+      ...(letter.ok ? { coverLetter: letter.letter } : { coverLetterNote: letter.reason }),
     };
     await runFormPrepAndPrompt(send, newSession(base), held);
   } finally {
@@ -226,21 +256,45 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
     return true;
   }
 
+  // Lock before reading the row: a second tap is refused, and never reads a row the first is about to mark applied.
+  const release = tryLockApply(rowId);
+  if (!release) {
+    await ctx.answerCallbackQuery({ text: "Already in progress" });
+    await ctx.reply("⏳ This application is already being filled or submitted. Nothing was sent twice.");
+    return true;
+  }
+  try {
+    await submitRow(ctx, rowId);
+  } finally {
+    release();
+  }
+  return true;
+}
+
+/** Re-fill and send one application. The caller holds the row's lock. */
+async function submitRow(ctx: Context, rowId: string): Promise<void> {
   const row = await getApplicationById(rowId, getProfile().tenantId);
   if (!row) {
     await ctx.answerCallbackQuery({ text: "That role is no longer on file." });
-    return true;
+    return;
+  }
+  const on = appliedOn(row);
+  if (on) {
+    await ctx.answerCallbackQuery({ text: "Already applied" });
+    await ctx.reply(alreadyAppliedMessage(row, on), { parse_mode: "HTML" });
+    return;
   }
   const profile = getProfile(row.profile_id);
   const loaded = await readApplyProfile(applyProfilePathFor(profile.id));
   if (!loaded.ok) {
     await ctx.answerCallbackQuery({ text: "Apply profile unreadable" });
-    return true;
+    return;
   }
-  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDirForChat(String(ctx.chat?.id ?? "unknown")));
+  const artifactDir = artifactDirForChat(String(ctx.chat?.id ?? "unknown"));
+  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDir);
   if (!pdfResolved.ok) {
     await ctx.answerCallbackQuery({ text: "Resume missing" });
-    return true;
+    return;
   }
 
   await ctx.answerCallbackQuery({ text: "Submitting application…" });
@@ -249,14 +303,17 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   const dossier = (await readCandidateDossier(profile.id)) ?? undefined;
   const session = sessionForRow(rowId);
   const targetUrl = session?.targetUrl ?? getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
-  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, { resumePath: pdfResolved.pdfPath }, dossier);
+  // The letter the card showed; after a restart (no session) the archived one, resolved again.
+  const letter = session ? session.coverLetter : letterOf(await resolveCoverLetter(row, profile, artifactDir));
+  const facts = { resumePath: pdfResolved.pdfPath, ...letterFacts(letter) };
+  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, facts, dossier);
 
   if (!result.ok) {
     await ctx.reply(`⚠ <b>Could not submit for ${safeHtml(row.company)}</b>: ${safeHtml(result.reason)}`, {
       parse_mode: "HTML",
       reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id)),
     });
-    return true;
+    return;
   }
 
   if (result.afterScreenshotPng.length > 0) {
@@ -268,16 +325,23 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   if (result.confirmed) {
     await markRowApplied(row);
     endSession(rowId);
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(
-      // allow-failopen: cosmetic; the application is already submitted and recorded.
-      () => undefined,
-    );
+    await dropTappedKeyboard(ctx);
     await ctx.reply(`✅ <b>Application submitted and marked applied</b> — ${safeHtml(row.company)} (${safeHtml(row.title)}). It's off today's queue.`, { parse_mode: "HTML" });
   } else {
+    // The click went through, so the application may have arrived: no Submit here or on the tapped card.
+    await dropTappedKeyboard(ctx);
     await ctx.reply(
-      `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\nCheck the screenshot above or open the form directly.`,
-      { parse_mode: "HTML", reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id)) },
+      `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\n` +
+        `Submit was clicked, so it may have arrived. Check your email and the screenshot above before trying again; ` +
+        `to retry, send <code>/apply ${shortJobId(row.id)}</code>.`,
+      { parse_mode: "HTML", reply_markup: buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id)) },
     );
   }
-  return true;
+}
+
+function dropTappedKeyboard(ctx: Context): Promise<unknown> {
+  return ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(
+    // allow-failopen: best effort; if Telegram refuses the edit, the reply still says what happened and what to do.
+    () => undefined,
+  );
 }
