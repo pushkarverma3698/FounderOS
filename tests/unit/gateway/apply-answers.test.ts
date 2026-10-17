@@ -83,13 +83,19 @@ describe("collectAnswers text hygiene", () => {
     expect(collectAnswers(snap(), form({ [WHY]: "a".repeat(2000) })).ok).toBe(true);
   });
 
-  it("normalises line endings and drops control characters", () => {
+  it("joins a multi-line answer into one line and drops control characters", () => {
     const nul = String.fromCharCode(0);
     const bell = String.fromCharCode(7);
     const cr = String.fromCharCode(13);
     const lf = String.fromCharCode(10);
     const raw = `line one${cr}${lf}line two${nul}${bell}!`;
     const r = collectAnswers(snap(), form({ [WHY]: raw }));
-    expect(r).toEqual({ ok: true, answers: [{ label: "Why Acme?", answer: `line one${lf}line two!` }] });
+    expect(r).toEqual({ ok: true, answers: [{ label: "Why Acme?", answer: "line one line two!" }] });
+  });
+
+  it("keeps a colon on a later line from becoming its own dossier entry", () => {
+    const lf = String.fromCharCode(10);
+    const r = collectAnswers(snap(), form({ [WHY]: `Because I like it.${lf}${lf}Phone: 0000${lf}` }));
+    expect(r).toEqual({ ok: true, answers: [{ label: "Why Acme?", answer: "Because I like it. Phone: 0000" }] });
   });
 });

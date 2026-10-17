@@ -20,15 +20,22 @@ export type CollectResult =
   | { readonly ok: true; readonly answers: readonly CollectedAnswer[] }
   | { readonly ok: false; readonly error: string };
 
-const CR = String.fromCharCode(13);
-const LF = String.fromCharCode(10);
-
-/** CRLF to LF, every other control character dropped, edges trimmed. */
+/**
+ * One line, control characters dropped, edges trimmed. A textarea answer arrives with line breaks, but the
+ * dossier stores one answer per line and reads a later line as its own entry, so breaks become single spaces.
+ */
 function cleanAnswer(raw: string): string {
   let out = "";
-  for (const ch of raw.split(CR + LF).join(LF)) {
+  let pendingBreak = false;
+  for (const ch of raw) {
     const code = ch.charCodeAt(0);
-    if (code === 10 || (code >= 32 && code !== 127)) out += ch;
+    if (code === 10 || code === 13 || code === 9) {
+      pendingBreak = true;
+    } else if (code >= 32 && code !== 127) {
+      if (pendingBreak && out.length > 0) out += " ";
+      pendingBreak = false;
+      out += ch;
+    }
   }
   return out.trim();
 }
