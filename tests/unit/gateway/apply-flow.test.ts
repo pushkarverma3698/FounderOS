@@ -626,6 +626,30 @@ describe("apply flow", () => {
       expect(buttons(said?.extra).some((b) => b.callback_data === `jh:k:${ROW_ID}`)).toBe(true);
       expect(mockMarkRowApplied).not.toHaveBeenCalled();
     });
+
+    // grammY polling runs updates one at a time, so in prod a double tap reaches the bot only after the first
+    // Submit finished, and by then Telegram has expired the tap (live run 2026-10-17, Telnyx, 06:58:36).
+    it("sends nothing on a second tap handled after the first Submit finished unconfirmed", async () => {
+      runner(async () => ({ ...SENT, confirmed: false, evidence: "no confirmation banner" }));
+      const first = makeCtx();
+      const second = makeCtx();
+      second.ctx.answerCallbackQuery.mockRejectedValue(new Error("400: Bad Request: query is too old"));
+      await handleAutoApplyCallback(first.ctx as never, `jh:s:${ROW_ID}`);
+      await handleAutoApplyCallback(second.ctx as never, `jh:s:${ROW_ID}`);
+
+      expect(submits).toBe(1);
+      expect(hasSubmit(second.replies)).toBe(false);
+      expect(second.replies.some((r) => r.text.includes("Nothing was sent again") && r.text.includes(`/apply j${ROW_ID.slice(0, 7)}`))).toBe(true);
+    });
+
+    it("sends again after an unconfirmed Submit only when the form is reopened on purpose", async () => {
+      runner(async () => ({ ...SENT, confirmed: false, evidence: "no confirmation banner" }));
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:s:${ROW_ID}`);
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:f:${ROW_ID}`);
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:s:${ROW_ID}`);
+
+      expect(submits).toBe(2);
+    });
   });
 
   describe("partitionStuck", () => {
