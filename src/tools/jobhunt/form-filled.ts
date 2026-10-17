@@ -62,3 +62,56 @@ export function filledAnswerOf(action: FilledAction, fields: readonly ScrapedFie
     editable,
   };
 }
+
+export type UnansweredQuestion = Extract<FormFillAction, { kind: "ask" }>;
+
+export interface FormPlanSummary {
+  readonly filled: number;
+  readonly total: number;
+  readonly filledLabels: readonly string[];
+  readonly filledAnswers: readonly FilledAnswer[];
+  readonly unanswered: readonly UnansweredQuestion[];
+  readonly requiredUnanswered: readonly UnansweredQuestion[];
+  readonly hasCaptcha: boolean;
+  readonly readyToSubmit: boolean;
+}
+
+export function summariseFormPlan(
+  actions: readonly FormFillAction[],
+  fields: readonly ScrapedField[] = [],
+  verifiedSelectors?: ReadonlySet<string>,
+): FormPlanSummary {
+  const hasCaptcha = fields.some((f) => f.isCaptcha || f.type === "captcha");
+  const unanswered: UnansweredQuestion[] = [];
+  const filledAnswers: FilledAnswer[] = [];
+
+  for (const a of actions) {
+    if (a.kind === "ask") {
+      unanswered.push(a);
+    } else if (!verifiedSelectors || verifiedSelectors.has(a.selector)) {
+      filledAnswers.push(filledAnswerOf(a, fields));
+    } else {
+      unanswered.push({
+        selector: a.selector, label: a.label, kind: "ask", question: a.label,
+        required: true, fieldType: a.kind === "choose" ? a.fieldType : a.kind === "file" ? "file" : "text",
+        why: "fill attempted on page but did not verify in DOM",
+      });
+    }
+  }
+
+  const filledLabels = filledAnswers.map((f) => f.label);
+  const requiredUnanswered = unanswered.filter((u) => u.required);
+  const optionalUnanswered = unanswered.filter((u) => !u.required);
+  const orderedUnanswered = [...requiredUnanswered, ...optionalUnanswered];
+
+  return {
+    filled: filledLabels.length,
+    total: actions.length,
+    filledLabels,
+    filledAnswers,
+    unanswered: orderedUnanswered,
+    requiredUnanswered,
+    hasCaptcha,
+    readyToSubmit: requiredUnanswered.length === 0 && !hasCaptcha,
+  };
+}
