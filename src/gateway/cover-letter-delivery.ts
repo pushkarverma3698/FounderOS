@@ -35,8 +35,8 @@ const FOUNDER_CONTEXT =
   "engineering studio that has not yet taken on clients, and I ran a " +
   "guesthouse in Himachal Pradesh which I am closing in November 2026. Both " +
   "were real work. I am looking to come back into a team and can start " +
-  "immediately. I am relocating to the Netherlands and am eligible for the " +
-  "IND highly skilled migrant permit.";
+  "immediately. I am relocating to the Netherlands and hold a Dutch partner " +
+  "permit with full work rights.";
 
 /**
  * The founder's biography goes only into the founder's own letters. A letter
