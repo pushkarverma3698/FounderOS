@@ -367,8 +367,14 @@ export async function recordLearnedAnswer(profileId: string, question: string, a
       typeof current.raw["question_bank"] === "object" && current.raw["question_bank"] !== null
         ? (current.raw["question_bank"] as Record<string, string>)
         : {};
+    // explicitAnswerFor takes the FIRST entry whose normalised key matches, so an older spelling of this
+    // question ("Location (City)") would keep beating the new answer ("Location (City)*"): drop it.
+    const normQ = normalizeQuestionKey(cleanQ);
+    const bank = Object.fromEntries(
+      Object.entries(existingBank).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
+    );
     await writeApplyProfile(
-      { ...current.raw, question_bank: { ...existingBank, [cleanQ]: cleanA } },
+      { ...current.raw, question_bank: { ...bank, [cleanQ]: cleanA } },
       profilePath,
     );
   }

@@ -16,6 +16,7 @@ import {
   normalizeQuestionKey,
   type CandidateDossier,
 } from "./candidate-dossier.js";
+import { filledAnswerOf, type FilledAnswer } from "./form-filled.js";
 
 /** Minimum confidence score required to select a work-authorization option automatically. */
 export const ELIGIBILITY_CONFIDENCE_FLOOR = 0.7;
@@ -350,6 +351,7 @@ export interface FormPlanSummary {
   readonly filled: number;
   readonly total: number;
   readonly filledLabels: readonly string[];
+  readonly filledAnswers: readonly FilledAnswer[];
   readonly unanswered: readonly UnansweredQuestion[];
   readonly requiredUnanswered: readonly UnansweredQuestion[];
   readonly hasCaptcha: boolean;
@@ -363,13 +365,13 @@ export function summariseFormPlan(
 ): FormPlanSummary {
   const hasCaptcha = fields.some((f) => f.isCaptcha || f.type === "captcha");
   const unanswered: UnansweredQuestion[] = [];
-  const filledLabels: string[] = [];
+  const filledAnswers: FilledAnswer[] = [];
 
   for (const a of actions) {
     if (a.kind === "ask") {
       unanswered.push(a);
     } else if (!verifiedSelectors || verifiedSelectors.has(a.selector)) {
-      filledLabels.push(a.label);
+      filledAnswers.push(filledAnswerOf(a, fields));
     } else {
       unanswered.push({
         selector: a.selector, label: a.label, kind: "ask", question: a.label,
@@ -379,6 +381,7 @@ export function summariseFormPlan(
     }
   }
 
+  const filledLabels = filledAnswers.map((f) => f.label);
   const requiredUnanswered = unanswered.filter((u) => u.required);
   const optionalUnanswered = unanswered.filter((u) => !u.required);
   const orderedUnanswered = [...requiredUnanswered, ...optionalUnanswered];
@@ -387,6 +390,7 @@ export function summariseFormPlan(
     filled: filledLabels.length,
     total: actions.length,
     filledLabels,
+    filledAnswers,
     unanswered: orderedUnanswered,
     requiredUnanswered,
     hasCaptcha,

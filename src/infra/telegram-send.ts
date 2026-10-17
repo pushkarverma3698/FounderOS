@@ -10,7 +10,7 @@
  * Telegram chat after HITL approval.
  */
 
-import { Bot, InputFile } from "grammy";
+import { Bot, InputFile, type Api } from "grammy";
 import { env } from "../core/config.js";
 import { resolveJobsBotToken } from "./jobs-bot-token.js";
 import { childLogger } from "./logger.js";
@@ -201,4 +201,13 @@ export async function sendPhoto(
     ...(opts.caption ? { caption: opts.caption } : {}),
   });
   log.info({ chatId, bytes: png.length }, "Photo sent to Telegram");
+}
+
+/**
+ * Send a message to an explicit chat with grammy's own send options (parse mode, keyboard, link preview).
+ * Used by the apply answer page to deliver the refreshed card to the chat that started the apply, from an
+ * HTTP request with no Telegram context. A delivery failure reaches the caller, which decides what to do.
+ */
+export async function sendMessageTo(chatId: string | number, text: string, other?: Parameters<Api["sendMessage"]>[2]): Promise<void> {
+  await api().sendMessage(chatId, text, other);
 }
