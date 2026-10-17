@@ -14,8 +14,10 @@ export interface TapButton {
   readonly label: string;
   /** callback_data of an inline callback button. */
   readonly data?: string;
-  /** Target of an inline URL button; never tappable, printed so the tester can open it. */
+  /** Target of an inline URL or web_app button; never tappable, printed so the tester can open it. */
   readonly url?: string;
+  /** A web_app button: Telegram opens `url` inside the app as a Mini App. */
+  readonly webApp?: boolean;
 }
 
 const SUBMIT_CALLBACK_PREFIXES = ["jh:s:"] as const;

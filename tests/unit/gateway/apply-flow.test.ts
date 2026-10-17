@@ -2,8 +2,9 @@
  * Apply flow: hosted answer link, text card, re-ask guard
  * ========================================================
  * Proves, offline and with scripted runners:
- *  1. The preview is a text card with a URL button to the hosted answer page (no screenshot), and a
- *     snapshot the page can render is written.
+ *  1. The preview is a text card with a button to the hosted answer page (no screenshot), and a
+ *     snapshot the page can render is written. In a private chat the button opens the page inside
+ *     Telegram (web_app); in a group, or over plain http, Telegram refuses web_app, so it is a url button.
  *  2. A missing APPLY_LINK_SECRET / APPLY_LINK_BASE_URL is said plainly on the card; Telegram Q&A runs.
  *  3. Re-ask guard: a question answered in this session that comes back unfilled is not asked again;
  *     the card says it could not be filled and points at the answer page. Seen live on Telnyx, where
@@ -44,7 +45,7 @@ vi.mock("../../../src/db/apply-queries.js", () => ({
 
 const { handleAutoApplyCallback, tryHandlePendingApplyReply, setAutoApplyRunnerForTests, clearAutoApplySessionsForTests } =
   await import("../../../src/gateway/auto-apply.js");
-const { refillFromPage, tryLockApply, partitionStuck } = await import("../../../src/gateway/apply-flow.js");
+const { refillFromPage, tryLockApply, partitionStuck, opensInTelegram } = await import("../../../src/gateway/apply-flow.js");
 const { loadApplySnapshot, verifyApplyToken } = await import("../../../src/tools/jobhunt/apply-link.js");
 const { applyProfilePathFor, readApplyProfile } = await import("../../../src/tools/jobhunt/apply-profile.js");
 const { readCandidateDossier } = await import("../../../src/tools/jobhunt/candidate-dossier.js");
@@ -60,7 +61,7 @@ const ROW = {
 };
 
 type Prep = Awaited<ReturnType<typeof prepareApplicationForm>>;
-type Btn = { text: string; url?: string; callback_data?: string };
+type Btn = { text: string; url?: string; callback_data?: string; web_app?: { url: string } };
 
 function ask(label: string, over: Partial<UnansweredQuestion> = {}): UnansweredQuestion {
   return {
@@ -104,7 +105,7 @@ function makeCtx(chatId = 888) {
   const replies: Reply[] = [];
   const photos: unknown[] = [];
   const ctx = {
-    chat: { id: chatId, type: "private" },
+    chat: { id: chatId, type: chatId > 0 ? "private" : "supergroup" },
     from: { id: 12345 },
     match: "",
     reply: vi.fn(async (text: string, extra?: Record<string, unknown>) => {
@@ -126,6 +127,10 @@ function buttons(extra?: Record<string, unknown>): Btn[] {
 
 function urlButtons(replies: Reply[]): Btn[] {
   return replies.flatMap((r) => buttons(r.extra)).filter((b) => b.url !== undefined);
+}
+
+function webAppButtons(replies: Reply[]): Btn[] {
+  return replies.flatMap((r) => buttons(r.extra)).filter((b) => b.web_app !== undefined);
 }
 
 function hasSubmit(replies: Reply[]): boolean {
@@ -189,11 +194,12 @@ describe("apply flow", () => {
     const card = replies.find((r) => r.text.includes("Filled 4/5"));
     expect(card?.text).toContain("Telnyx");
     expect(card?.extra?.["link_preview_options"]).toEqual({ is_disabled: true });
-    const link = buttons(card?.extra).find((b) => b.url !== undefined);
+    const link = buttons(card?.extra).find((b) => b.web_app !== undefined);
     expect(link?.text).toMatch(/Open form to finish \(1 left\)/);
-    expect(link?.url?.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+    expect(link?.web_app?.url.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+    expect(urlButtons(replies).some((b) => b.url?.startsWith(`${BASE_URL}/apply/`))).toBe(false);
 
-    const token = (link?.url ?? "").slice(`${BASE_URL}/apply/`.length);
+    const token = (link?.web_app?.url ?? "").slice(`${BASE_URL}/apply/`.length);
     expect(verifyApplyToken(SECRET, token, PROFILE, Date.now())).toMatchObject({ ok: true, rowId: ROW_ID });
     const snap = loadApplySnapshot(ROW_ID, tmpDir);
     expect(snap).toMatchObject({ chatId: "888", profileId: PROFILE, company: "Telnyx", platform: "greenhouse" });
@@ -215,6 +221,7 @@ describe("apply flow", () => {
     const card = replies.find((r) => r.text.includes("Filled 4/5"));
     expect(card?.text).toContain("answer link unavailable: APPLY_LINK_SECRET not set");
     expect(urlButtons(replies)).toHaveLength(0);
+    expect(webAppButtons(replies)).toHaveLength(0);
     expect(replies.some((r) => r.text.includes("Question 1/1"))).toBe(true);
   });
 
@@ -232,7 +239,7 @@ describe("apply flow", () => {
     expect(stuck?.text).toContain(WHERE);
     expect(stuck?.text).toContain("The Netherlands");
     expect(stuck?.text).toContain("answer page");
-    expect(buttons(stuck?.extra).some((b) => b.url?.startsWith(`${BASE_URL}/apply/`))).toBe(true);
+    expect(buttons(stuck?.extra).some((b) => b.web_app?.url.startsWith(`${BASE_URL}/apply/`))).toBe(true);
     expect(hasSubmit(replies)).toBe(false);
     expect(replies.some((r) => r.text.includes("Form ready"))).toBe(false);
     expect(await tryHandlePendingApplyReply(ctx as never, "hello there")).toBe(false);
@@ -271,7 +278,7 @@ describe("apply flow", () => {
 
     const ready = replies.find((r) => r.text.includes("Form ready"));
     const all = buttons(ready?.extra);
-    expect(all[0]?.url?.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+    expect(all[0]?.web_app?.url.startsWith(`${BASE_URL}/apply/`)).toBe(true);
     expect(all.some((b) => b.callback_data === `jh:s:${ROW_ID}`)).toBe(true);
     expect(all.find((b) => b.url === ROW.url)?.text).toContain("Company page (not prefilled)");
     expect(all.some((b) => b.text.includes("Open form manually"))).toBe(false);
@@ -286,6 +293,7 @@ describe("apply flow", () => {
     const ready = replies.find((r) => r.text.includes("Form ready"));
     const all = buttons(ready?.extra);
     expect(all.filter((b) => b.url !== undefined).map((b) => b.text)).toEqual(["🔗 Company page (not prefilled)"]);
+    expect(webAppButtons(replies)).toHaveLength(0);
     expect(replies.find((r) => r.text.includes("Filled 4/4"))?.text).toContain("answer link unavailable: APPLY_LINK_BASE_URL not set");
   });
 
@@ -297,7 +305,56 @@ describe("apply flow", () => {
 
     const failed = replies.find((r) => r.text.includes("Could not submit"));
     expect(failed).toBeDefined();
-    expect(buttons(failed?.extra)[0]?.url?.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+    expect(buttons(failed?.extra)[0]?.web_app?.url.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+  });
+
+  describe("where the hosted button opens", () => {
+    const GROUP_CHAT = -1001234567890;
+
+    it("opens the page inside Telegram only for a private chat over HTTPS", () => {
+      expect(opensInTelegram("888", `${BASE_URL}/apply/x`)).toBe(true);
+      expect(opensInTelegram("-5000000001", `${BASE_URL}/apply/x`)).toBe(false);
+      expect(opensInTelegram(String(GROUP_CHAT), `${BASE_URL}/apply/x`)).toBe(false);
+      expect(opensInTelegram("888", "http://apply.example.test/apply/x")).toBe(false);
+      expect(opensInTelegram("unknown", `${BASE_URL}/apply/x`)).toBe(false);
+    });
+
+    it("keeps an ordinary url button in a group chat, where Telegram refuses web_app buttons", async () => {
+      script([prep([])]);
+      const { ctx, replies } = makeCtx(GROUP_CHAT);
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+
+      expect(webAppButtons(replies)).toHaveLength(0);
+      const ready = replies.find((r) => r.text.includes("Form ready"));
+      expect(buttons(ready?.extra)[0]?.url?.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+      const card = replies.find((r) => r.text.includes("Filled 4/4"));
+      expect(buttons(card?.extra)[0]?.url?.startsWith(`${BASE_URL}/apply/`)).toBe(true);
+    });
+
+    it("keeps an ordinary url button when the base URL is plain http", async () => {
+      process.env["APPLY_LINK_BASE_URL"] = "http://apply.example.test";
+      script([prep([])]);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+
+      expect(webAppButtons(replies)).toHaveLength(0);
+      expect(urlButtons(replies).some((b) => b.url?.startsWith("http://apply.example.test/apply/"))).toBe(true);
+    });
+
+    it("picks the button from the snapshot's chat on a page-triggered re-fill", async () => {
+      script([prep([ask(WHERE)]), prep([])]);
+      const group = makeCtx(GROUP_CHAT);
+      await handleAutoApplyCallback(group.ctx as never, `jh:f:${ROW_ID}`);
+      const snap = loadApplySnapshot(ROW_ID, tmpDir);
+      if (!snap) throw new Error("fixture snapshot missing");
+      const sent: Reply[] = [];
+      const sender = { text: async (html: string, kb?: unknown) => void sent.push({ text: html, extra: kb ? { reply_markup: kb } : undefined }) };
+      await refillFromPage(snap, [{ label: WHERE, answer: "Ireland" }], tryLockApply(ROW_ID) as () => void, sender);
+
+      expect(sent.some((m) => m.text.includes("Form ready"))).toBe(true);
+      expect(webAppButtons(sent)).toHaveLength(0);
+      expect(urlButtons(sent).some((b) => b.url?.startsWith(`${BASE_URL}/apply/`))).toBe(true);
+    });
   });
 
   it("deletes the snapshot on cancel and after a confirmed submit, so the link dies with the session", async () => {
@@ -399,7 +456,7 @@ describe("apply flow", () => {
       expect(replies.some((r) => r.text.includes("Ready to submit"))).toBe(false);
       const missing = replies.find((r) => r.text.includes("Still missing"));
       expect(missing?.text).toContain(WHERE);
-      expect(buttons(missing?.extra).some((b) => b.url?.startsWith(`${BASE_URL}/apply/`))).toBe(true);
+      expect(buttons(missing?.extra).some((b) => b.web_app?.url.startsWith(`${BASE_URL}/apply/`))).toBe(true);
       expect(prepareCalls).toBe(1);
     });
 
@@ -568,6 +625,30 @@ describe("apply flow", () => {
       expect(hasSubmit(replies)).toBe(false);
       expect(buttons(said?.extra).some((b) => b.callback_data === `jh:k:${ROW_ID}`)).toBe(true);
       expect(mockMarkRowApplied).not.toHaveBeenCalled();
+    });
+
+    // grammY polling runs updates one at a time, so in prod a double tap reaches the bot only after the first
+    // Submit finished, and by then Telegram has expired the tap (live run 2026-10-17, Telnyx, 06:58:36).
+    it("sends nothing on a second tap handled after the first Submit finished unconfirmed", async () => {
+      runner(async () => ({ ...SENT, confirmed: false, evidence: "no confirmation banner" }));
+      const first = makeCtx();
+      const second = makeCtx();
+      second.ctx.answerCallbackQuery.mockRejectedValue(new Error("400: Bad Request: query is too old"));
+      await handleAutoApplyCallback(first.ctx as never, `jh:s:${ROW_ID}`);
+      await handleAutoApplyCallback(second.ctx as never, `jh:s:${ROW_ID}`);
+
+      expect(submits).toBe(1);
+      expect(hasSubmit(second.replies)).toBe(false);
+      expect(second.replies.some((r) => r.text.includes("Nothing was sent again") && r.text.includes(`/apply j${ROW_ID.slice(0, 7)}`))).toBe(true);
+    });
+
+    it("sends again after an unconfirmed Submit only when the form is reopened on purpose", async () => {
+      runner(async () => ({ ...SENT, confirmed: false, evidence: "no confirmation banner" }));
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:s:${ROW_ID}`);
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:f:${ROW_ID}`);
+      await handleAutoApplyCallback(makeCtx().ctx as never, `jh:s:${ROW_ID}`);
+
+      expect(submits).toBe(2);
     });
   });
 
