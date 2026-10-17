@@ -10,8 +10,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,13 +22,20 @@ const SCRIPT = fileURLToPath(new URL("../../../scripts/apply-prod-env-overrides.
 function render(boxEnv: string, snapshot: string, extraEnv: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "prod-env-render-"));
   writeFileSync(join(dir, ".env"), boxEnv);
+  // The renderer asks tailscale for the node name (APPLY_LINK_BASE_URL). A stub that reports "not running"
+  // keeps these tests off the host's real tailnet, and fast on a machine that has the Tailscale CLI.
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "tailscale"), `#!/bin/sh\necho '{"BackendState":"Stopped"}'\n`);
+  chmodSync(join(bin, "tailscale"), 0o755);
   execFileSync("bash", [SCRIPT], {
     env: {
-      PATH: process.env["PATH"] ?? "",
+      PATH: `${bin}:${process.env["PATH"] ?? ""}`,
       APP_DIR: dir,
       PROD_DOTENV: Buffer.from(snapshot).toString("base64"),
       ...extraEnv,
     },
+    stdio: "pipe",
   });
   return readFileSync(join(dir, ".env"), "utf8");
 }
@@ -203,5 +210,87 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     const rendered = render("", SNAPSHOT_BASE);
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBeUndefined();
     expect(valueOf(rendered, "LANGCHAIN_TRACING_V2")).toBeUndefined();
+  });
+});
+
+describe("apply-prod-env-overrides.sh — apply link defaults (APPLY_LINK_BASE_URL / APPLY_LINK_SECRET)", () => {
+  const HOST = "turicks-dots.taile5afc3.ts.net";
+  const STATUS_OK = { BackendState: "Running", Self: { DNSName: `${HOST}.`, CapMap: { funnel: null, https: null } } };
+
+  /** Runs the real renderer with a stub `tailscale` first on PATH; returns the .env and everything the run printed. */
+  function renderWithTailscale(boxEnv: string, snapshot: string, status: unknown = STATUS_OK) {
+    const dir = mkdtempSync(join(tmpdir(), "prod-env-apply-link-"));
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "tailscale"), `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify(status)}\nJSON\n`);
+    chmodSync(join(bin, "tailscale"), 0o755);
+    const app = join(dir, "app");
+    mkdirSync(app);
+    writeFileSync(join(app, ".env"), boxEnv);
+    const r = spawnSync("bash", [SCRIPT], {
+      env: {
+        PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+        APP_DIR: app,
+        PROD_DOTENV: Buffer.from(snapshot).toString("base64"),
+      },
+      encoding: "utf8",
+    });
+    return { code: r.status, printed: `${r.stdout}\n${r.stderr}`, env: readFileSync(join(app, ".env"), "utf8") };
+  }
+
+  it("adds the public base URL from the tailscale DNS name (trailing dot stripped) and a 64-hex secret, once each", () => {
+    const { code, env } = renderWithTailscale("", SNAPSHOT_BASE);
+    expect(code).toBe(0);
+    expect(valueOf(env, "APPLY_LINK_BASE_URL")).toBe(`https://${HOST}`);
+    expect(valueOf(env, "APPLY_LINK_SECRET")).toMatch(/^[0-9a-f]{64}$/);
+    expect(countOf(env, "APPLY_LINK_BASE_URL")).toBe(1);
+    expect(countOf(env, "APPLY_LINK_SECRET")).toBe(1);
+  });
+
+  it("never prints the secret: not to stdout, not to stderr", () => {
+    const { env, printed } = renderWithTailscale("", SNAPSHOT_BASE);
+    const secret = valueOf(env, "APPLY_LINK_SECRET") ?? "";
+    expect(secret).toHaveLength(64);
+    expect(printed).not.toContain(secret);
+    expect(printed).toContain("APPLY_LINK_SECRET generated");
+  });
+
+  it("keeps the on-box values across a PROD_DOTENV render that lacks them, and a second render keeps the same secret", () => {
+    const first = renderWithTailscale("", SNAPSHOT_BASE).env;
+    const secret = valueOf(first, "APPLY_LINK_SECRET");
+    // The next deploy renders a snapshot that never carries the keys; the box values must survive it.
+    const second = renderWithTailscale(first, SNAPSHOT_BASE, { BackendState: "Stopped" }).env;
+    expect(valueOf(second, "APPLY_LINK_SECRET")).toBe(secret);
+    expect(valueOf(second, "APPLY_LINK_BASE_URL")).toBe(`https://${HOST}`);
+    expect(countOf(second, "APPLY_LINK_SECRET")).toBe(1);
+    expect(countOf(second, "APPLY_LINK_BASE_URL")).toBe(1);
+  });
+
+  it("never overwrites values that are already set", () => {
+    const { env } = renderWithTailscale(
+      "APPLY_LINK_BASE_URL=https://custom.example\nAPPLY_LINK_SECRET=founder-chosen-value\n",
+      SNAPSHOT_BASE,
+    );
+    expect(valueOf(env, "APPLY_LINK_BASE_URL")).toBe("https://custom.example");
+    expect(valueOf(env, "APPLY_LINK_SECRET")).toBe("founder-chosen-value");
+  });
+
+  it("a snapshot value wins over generation, and a present-but-EMPTY one counts as missing", () => {
+    const set = renderWithTailscale("", SNAPSHOT_BASE + "APPLY_LINK_SECRET=from-snapshot\n").env;
+    expect(valueOf(set, "APPLY_LINK_SECRET")).toBe("from-snapshot");
+    const empty = renderWithTailscale("", SNAPSHOT_BASE + "APPLY_LINK_SECRET=\nAPPLY_LINK_BASE_URL=\n").env;
+    expect(valueOf(empty, "APPLY_LINK_SECRET")).toMatch(/^[0-9a-f]{64}$/);
+    expect(valueOf(empty, "APPLY_LINK_BASE_URL")).toBe(`https://${HOST}`);
+    expect(countOf(empty, "APPLY_LINK_SECRET"), "no stale empty duplicate").toBe(1);
+    expect(countOf(empty, "APPLY_LINK_BASE_URL"), "no stale empty duplicate").toBe(1);
+  });
+
+  it("when tailscale cannot name the node: the render still succeeds, the URL stays unset, the secret is still created, and it says why", () => {
+    const { code, env, printed } = renderWithTailscale("", SNAPSHOT_BASE, { BackendState: "Stopped" });
+    expect(code).toBe(0);
+    expect(valueOf(env, "APPLY_LINK_BASE_URL")).toBeUndefined();
+    expect(valueOf(env, "APPLY_LINK_SECRET")).toMatch(/^[0-9a-f]{64}$/);
+    expect(printed).toContain("APPLY_LINK_BASE_URL not set");
+    expect(valueOf(env, "DATABASE_URL"), "the rest of the render is intact").toBe("postgres://snapshot/db");
   });
 });
