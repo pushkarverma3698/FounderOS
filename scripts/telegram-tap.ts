@@ -30,6 +30,7 @@ function buttonsOf(msg: Api.Message): TapButton[] {
     for (const b of row.buttons) {
       if (b instanceof Api.KeyboardButtonCallback) out.push({ label: b.text, data: b.data.toString("utf-8") });
       else if (b instanceof Api.KeyboardButtonUrl) out.push({ label: b.text, url: b.url });
+      else if (b instanceof Api.KeyboardButtonWebView) out.push({ label: b.text, url: b.url, webApp: true });
     }
   }
   return out;
@@ -42,7 +43,7 @@ function show(msg: Api.Message, tag: string): void {
   const text = (msg.message ?? "").trim();
   if (text) console.log(text.slice(0, 1500));
   for (const b of buttonsOf(msg)) {
-    console.log(b.url ? `   [${b.label}] ↗ ${b.url}` : `   [${b.label}] → ${b.data}`);
+    console.log(b.url ? `   [${b.label}] ${b.webApp ? "⧉ web_app" : "↗"} ${b.url}` : `   [${b.label}] → ${b.data}`);
   }
 }
 
