@@ -4,8 +4,40 @@ Follows `2026-10-16-ats-autoapply-qa-handoff.md`. Prod `8c8c4829` (promotion #11
 
 ## Verdict
 
-Ready for daily use up to the 🚀 Submit button, on Greenhouse, Ashby, Lever and Workable. Submit itself is
-NOT VERIFIED: nobody pressed it after the fixes, because a press sends a real application. Workday is unsupported.
+Updated after the real-Submit run below. Telegram drives the whole flow up to 🚀 Submit: fill, CV, cover letter,
+questions, answer page. No application has been sent end to end yet. Greenhouse, where most of the queue sits,
+asks for an emailed human-verification code after Submit, and the bot cannot enter it. Not ready for unattended
+daily use. Workday is unsupported.
+
+The first verdict, written before anyone pressed Submit: ready up to the 🚀 Submit button, with Submit NOT VERIFIED.
+
+## Real-Submit run (later on 10-17)
+
+The founder authorised real applications to three jobs on three ATSs. A subagent drove Telegram as the founder
+(MTProto, one script at a time). Prod `2a3130f2` carried #1192 (cover letter on /apply and Submit) and #1194 (send once).
+
+| Row | ATS | Card | Outcome |
+|---|---|---|---|
+| Telnyx `j4b71348` | Greenhouse | 17/18 → 18/18 after one tap (Veteran Status: decline) | Submit clicked. Greenhouse then emailed an 8-character code "to confirm you're a human"; Submit stays greyed until it is typed. Bot said "⚠ Could not confirm submission". Not sent. |
+| EMA `j5b1a4ab` | Ashby | 6/8 → 7/8 after an answer-page save | Required "Current Base Salary" has no source (only an expectation). Not submitted. |
+| AppZen `j339cbd6` | Lever | 9/16, 7 required | Seven required free-text ML/LLM experience questions with no source. Not submitted. |
+
+Postgres afterwards: all three `screened`, `applied_at` null. Gmail could not be checked: both Google tokens are revoked (`invalid_grant`).
+
+What worked through Telegram: the CV on all three (answer page "CV attached"), the cover letter on Telnyx (file field
+attached, not asked as text), option answers saved to the dossier, Cancel and re-`/apply` (~30 s), and an answer-page
+save that re-filled the form and posted a fresh card.
+
+Defects found:
+- Double tap on Submit. grammY polling handles updates one at a time, so the second tap ran after the first send ended
+  unconfirmed and passed #1194's lock. Only Telegram's 30 s tap expiry stopped it. Fixed in #1198, live on prod
+  `4f8c6c66` (promotion #1197, with #1196). Live-proven 07:35 UTC: a double tap on Telnyx's Submit gave one send
+  (one CV render in the log, Greenhouse code step again) and tap 2 replied "already clicked … Nothing was sent again".
+  The same deploy's card shows the answer-page button as a Telegram web_app button.
+- Stale cards keep live buttons after a newer card arrives.
+- A model 429 on the cover letter shows the raw provider error in the card, with no retry.
+- An answer-page save posts no 💾 line in Telegram.
+- Greenhouse's code step is reported as a generic "could not confirm", not as "type the code from your email".
 
 ## What we did
 
@@ -41,9 +73,12 @@ The founder reported "stuck, hallucinated, blank form". The causes were the loop
 
 ## Outstanding
 
-- Open defect: Telegram asks a file field ("Cover Letter") as a text question. A typed reply cannot fill a file input.
-  `promptCurrentQuestion` in `src/gateway/apply-flow.ts` has no file branch. The answer page already shows it read-only.
-- NOT VERIFIED: a real Submit (ATS accepts, row marked applied). Needs the founder's yes for one real application.
+- Fixed in #1190: Telegram asked a file field ("Cover Letter") as a text question. It now posts a 📎 notice.
+- NOT VERIFIED: a real Submit (ATS accepts, row marked applied). The run above reached Submit three times and sent
+  nothing. Next tries: a Greenhouse row with the founder typing the emailed code, or an Ashby/Lever row whose
+  required questions all have a source. Substitute rows need the founder's yes.
+- Founder decisions: EMA's current base salary, AppZen's seven experience answers, and whether Greenhouse
+  applications are finished by hand.
 - NOT VERIFIED live: the 410 page for an expired link. Unit-tested only.
 - Pre-existing and low risk: Submit does not re-check readiness, and "Form ready" does not mention a CAPTCHA.
   Both fail loudly, because Submit re-fills from scratch and marks a row applied only when the ATS confirms.
