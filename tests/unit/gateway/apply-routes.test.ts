@@ -90,7 +90,8 @@ describe("apply answer page routes", () => {
     held();
   });
   const sent: string[] = [];
-  const sender = { text: async (html: string) => void sent.push(html) };
+  const pushSent = async (html: string): Promise<void> => void sent.push(html);
+  const sender = { text: pushSent };
 
   async function start(env: Record<string, string | undefined>): Promise<void> {
     server = startJobsHealthServer(0, {
@@ -113,6 +114,7 @@ describe("apply answer page routes", () => {
     refill.mockClear();
     refill.mockImplementation(async (_s, _p, held) => void held());
     sent.length = 0;
+    sender.text = pushSent;
     clearAutoApplySessionsForTests();
     await start({ APPLY_LINK_SECRET: SECRET, APPLY_LINK_BASE_URL: "https://apply.example.test" });
   });
@@ -226,6 +228,39 @@ describe("apply answer page routes", () => {
       ]);
       expect(call[3]).toBe(sender);
       expect(lockIsFree()).toBe(true); // the lock was released after the re-fill
+    });
+
+    it("posts a 💾 line to Telegram naming what was saved, labels only, before the re-fill", async () => {
+      const order: string[] = [];
+      refill.mockImplementation(async (_s, _p, held) => {
+        order.push("refill");
+        held();
+      });
+      sender.text = async (html: string) => {
+        order.push("sent");
+        sent.push(html);
+      };
+      const res = await post(form({ [applyFieldName(WHY)]: "Remote-first culture", [applyFieldName("Email")]: "new@example.com" }));
+      expect(res.status).toBe(200);
+      await vi.waitFor(() => expect(refill).toHaveBeenCalledTimes(1));
+      const line = sent.find((m) => m.startsWith("💾"));
+      expect(line).toBeDefined();
+      expect(line).toContain("Workwize");
+      expect(line).toContain(WHY);
+      expect(line).toContain("Email");
+      expect(line).not.toContain("Remote-first");
+      expect(line).not.toContain("new@example.com");
+      expect(order).toEqual(["sent", "refill"]);
+    });
+
+    it("still re-fills when the 💾 line cannot be sent", async () => {
+      sender.text = async () => {
+        throw new Error("telegram down");
+      };
+      const res = await post(form({ [applyFieldName(WHY)]: "x" }));
+      expect(res.status).toBe(200);
+      await vi.waitFor(() => expect(refill).toHaveBeenCalledTimes(1));
+      expect(lockIsFree()).toBe(true);
     });
 
     it("says answer for one and skips empty fields", async () => {
