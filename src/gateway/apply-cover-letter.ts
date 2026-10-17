@@ -27,6 +27,32 @@ export type CoverLetterOutcome =
   | { readonly ok: false; readonly reason: string };
 
 const MAX_CHAT_LETTER_CHARS = 3500;
+const MAX_REASON_CHARS = 120;
+const RATE_LIMIT_RETRY_MS = 15_000;
+const RATE_LIMITED = /\b429\b|rate.?limit|too many requests|RESOURCE_EXHAUSTED|quota/i;
+
+export interface CoverLetterOptions {
+  /** Injected so tests do not wait out the backoff. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly retryMs?: number;
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The card shows one plain line, never a provider's JSON body or a stack. */
+function plainReason(raw: string): string {
+  if (RATE_LIMITED.test(raw)) return "model rate-limited";
+  const first = raw.split("\n")[0]?.trim() || "not written";
+  return first.length > MAX_REASON_CHARS ? `${first.slice(0, MAX_REASON_CHARS - 1)}…` : first;
+}
+
+/** Writes a letter; a rate-limited first try waits once and tries again. */
+async function writeWithRetry(row: JobApplication, cvText: string, opts: CoverLetterOptions): Promise<{ ok: true; letter: string } | { ok: false; reason: string }> {
+  const first = await writeCoverLetter(row, cvText);
+  if (first.ok || !RATE_LIMITED.test(first.reason)) return first;
+  await (opts.sleep ?? realSleep)(opts.retryMs ?? RATE_LIMIT_RETRY_MS);
+  return writeCoverLetter(row, cvText);
+}
 
 /** Named like the tailored CV (`cv-<company>-<id8>.pdf`): the recruiter sees this file name. */
 export function coverLetterPdfPath(artifactDir: string, row: Pick<JobApplication, "id" | "company">): string {
@@ -39,6 +65,7 @@ export async function resolveApplyCoverLetter(
   row: JobApplication,
   cvText: string | null,
   artifactDir: string,
+  opts: CoverLetterOptions = {},
 ): Promise<CoverLetterOutcome> {
   try {
     let text: string;
@@ -48,8 +75,8 @@ export async function resolveApplyCoverLetter(
       source = "archived";
     } else {
       if (!cvText) return { ok: false, reason: "no letter on file and the base CV could not be read" };
-      const written = await writeCoverLetter(row, cvText);
-      if (!written.ok) return { ok: false, reason: written.reason };
+      const written = await writeWithRetry(row, cvText, opts);
+      if (!written.ok) return { ok: false, reason: plainReason(written.reason) };
       text = written.letter.trim();
       source = "written";
     }
@@ -59,7 +86,7 @@ export async function resolveApplyCoverLetter(
     await fs.writeFile(pdfPath, (await renderCvToPdf(text)).pdfBuffer);
     return { ok: true, letter: { text, pdfPath }, source };
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    return { ok: false, reason: plainReason((err as Error).message) };
   }
 }
 
@@ -79,7 +106,7 @@ export function coverLetterLine(
   note: string | undefined,
   summary: Pick<FormPlanSummary, "filledLabels" | "unanswered">,
 ): string {
-  if (!letter) return `⚠ Cover letter: none (${safeHtml(note ?? "not written")}).`;
+  if (!letter) return `⚠ Cover letter not written: ${safeHtml(note ?? "no reason recorded")}.`;
   const taken = summary.filledLabels.find(isLetterLabel);
   if (taken) return `📄 Cover letter: attached (${safeHtml(taken)}).`;
   const missed = summary.unanswered.find((q) => isLetterLabel(q.label));
