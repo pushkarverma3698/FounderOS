@@ -18,7 +18,11 @@ import {
   writeApplyProfile,
   type ApplyProfile,
 } from "./apply-profile.js";
+import { buildDefaultDossierMarkdown } from "./dossier-template.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
+import { selfIdCategoryOf } from "./self-identification.js";
+
+export { buildDefaultDossierMarkdown };
 
 /** Minimum option text length for substring matching to avoid single-letter collisions. */
 export const MIN_SUBSTRING_MATCH_CHARS = 3;
@@ -98,7 +102,10 @@ export function matchChoiceOption(desiredAnswer: string, options: readonly strin
   return null;
 }
 
-/** Parse a candidate reference dossier Markdown document into structured facts, Q&As, and sections. */
+/** `- **Label**: answer`, where the label may itself hold `*`, `?` or `:` ("Are you based in …?*"). */
+const BOLD_KV = /^[-*•]?\s*\*\*(.+?)\*\*\s*[:=]\s*(.+)$/;
+
+/** Parse a candidate reference dossier Markdown document; a later line for the same key beats an earlier one. */
 export function parseDossierMarkdown(markdown: string): CandidateDossier {
   const facts: Record<string, string> = {};
   const qaPairs: Record<string, string> = {};
@@ -134,10 +141,11 @@ export function parseDossierMarkdown(markdown: string): CandidateDossier {
       continue;
     }
 
-    const kvMatch = /^(?:[-*•]\s*)?(?:\*\*([^*]+)\*\*|([^:=?]+(?:\?)?))\s*[:=]\s*(.+)$/.exec(line);
+    const boldMatch = BOLD_KV.exec(line);
+    const kvMatch = boldMatch ?? /^(?:[-*•]\s*)?(?:\*\*([^*]+)\*\*|([^:=?]+(?:\?)?))\s*[:=]\s*(.+)$/.exec(line);
     if (kvMatch) {
       const rawKey = (kvMatch[1] ?? kvMatch[2] ?? "").trim();
-      const val = kvMatch[3]!.trim();
+      const val = (boldMatch ? boldMatch[2]! : kvMatch[3]!).trim();
       const normKey = normalizeQuestionKey(rawKey);
       if (normKey && val) {
         if (rawKey.includes("?") || currentSection.includes("question") || currentSection.includes("learned")) {
@@ -244,6 +252,15 @@ const SEMANTIC_RULES: ReadonlyArray<{
   },
 ];
 
+/** The last `question_bank` entry for this normalised question: `recordLearnedAnswer` appends the newest. */
+function latestBankEntry(profile: ApplyProfile, normKey: string): { readonly key: string; readonly value: string } | null {
+  let latest: { key: string; value: string } | null = null;
+  for (const [k, v] of Object.entries(profile.question_bank ?? {})) {
+    if (normalizeQuestionKey(k) === normKey && v.trim()) latest = { key: k, value: v.trim() };
+  }
+  return latest;
+}
+
 /** The candidate's own answer to exactly this question: `question_bank` first, then the dossier. */
 export function explicitAnswerFor(
   question: string,
@@ -252,13 +269,24 @@ export function explicitAnswerFor(
 ): { readonly value: string; readonly source: string } | null {
   const normKey = normalizeQuestionKey(question);
   if (!normKey) return null;
-  for (const [k, v] of Object.entries(profile.question_bank ?? {})) {
-    if (normalizeQuestionKey(k) === normKey && v.trim()) return { value: v.trim(), source: `question_bank ("${k}")` };
-  }
+  const bank = latestBankEntry(profile, normKey);
+  if (bank) return { value: bank.value, source: `question_bank ("${bank.key}")` };
   const qa = dossier?.qaPairs[normKey]?.trim();
   if (qa) return { value: qa, source: `dossier Q&A ("${normKey}")` };
   const fact = dossier?.facts[normKey]?.trim();
   return fact ? { value: fact, source: `dossier fact ("${normKey}")` } : null;
+}
+
+/** Compare first lines only: the dossier keeps one line of a multi-line answer. */
+const answerKey = (s: string): string => normalizeQuestionKey(s.trim().split(/\r?\n/)[0]!) || s.trim();
+
+/** Why question_bank and the dossier disagree (nothing says which one is newer, so the form asks), or null. */
+export function storedAnswerConflict(question: string, profile: ApplyProfile, dossier?: CandidateDossier): string | null {
+  const normKey = normalizeQuestionKey(question);
+  const bank = normKey ? latestBankEntry(profile, normKey) : null;
+  const doc = dossier?.qaPairs[normKey]?.trim() || dossier?.facts[normKey]?.trim();
+  if (!bank || !doc || answerKey(bank.value) === answerKey(doc)) return null;
+  return `question_bank ("${bank.key}") and the candidate dossier hold different answers to this question, so it is asked instead of guessed`;
 }
 
 /** A phrase matches at a word start, so "city" never fires inside "ethnicity". */
@@ -301,44 +329,6 @@ export function lookupLearnedAnswer(
   return { kind: "value", value: rawAnswer, source };
 }
 
-/** Generate a starter Markdown reference dossier from a candidate's `ApplyProfile`. */
-export function buildDefaultDossierMarkdown(profile: ApplyProfile): string {
-  const a = profile.answers ?? {};
-  const lines = [
-    `# Candidate Reference Dossier — ${profile.first_name} ${profile.last_name}`,
-    "",
-    "## Core Facts",
-    `- **First Name**: ${profile.first_name}`,
-    `- **Last Name**: ${profile.last_name}`,
-    `- **Full Name**: ${profile.first_name} ${profile.last_name}`,
-    `- **Email**: ${profile.email}`,
-    `- **Phone**: ${profile.phone}`,
-    ...(profile.linkedin ? [`- **LinkedIn**: ${profile.linkedin}`] : []),
-    ...(profile.website ? [`- **Website**: ${profile.website}`] : []),
-    ...(a.github ? [`- **GitHub**: ${a.github}`] : []),
-    ...(a.location_city ? [`- **City**: ${a.location_city}`] : []),
-    ...(a.location_country ? [`- **Country**: ${a.location_country}`] : []),
-    `- **Work Authorization**: ${a.work_authorization ?? "unknown"}`,
-    ...(a.work_authorization_detail ? [`- **Work Authorization Detail**: ${a.work_authorization_detail}`] : []),
-    ...(a.salary_floor_eur_year !== undefined ? [`- **Salary Expectation**: ${a.salary_floor_eur_year}`] : []),
-    ...(a.years_experience !== undefined ? [`- **Years of Experience**: ${a.years_experience}`] : []),
-    ...(a.notice_period_days !== undefined ? [`- **Notice Period**: ${a.notice_period_days === 0 ? "Immediately" : `${a.notice_period_days} days`}`] : []),
-    ...(a.willing_to_relocate !== undefined ? [`- **Willing to Relocate**: ${a.willing_to_relocate ? "Yes" : "No"}`] : []),
-    ...(a.needs_relocation !== undefined ? [`- **Needs Relocation**: ${a.needs_relocation ? "Yes" : "No"}`] : []),
-    ...(a.current_company ? [`- **Current Company**: ${a.current_company}`] : []),
-    ...(a.current_title ? [`- **Current Title**: ${a.current_title}`] : []),
-    ...(a.highest_degree ? [`- **Highest Degree**: ${a.highest_degree}`] : []),
-    ...(a.university ? [`- **University**: ${a.university}`] : []),
-    ...(a.referral_source ? [`- **Referral Source**: ${a.referral_source}`] : []),
-    "",
-    "## Learned Form Answers",
-  ];
-  for (const [q, ans] of Object.entries(profile.question_bank ?? {})) {
-    lines.push(`- **${q}**: ${ans}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
 export async function readCandidateDossier(profileId: string = DEFAULT_PROFILE_ID): Promise<CandidateDossier | null> {
   try {
     const text = await fs.readFile(candidateDossierPathFor(profileId), "utf8");
@@ -355,41 +345,50 @@ export async function writeCandidateDossier(profileId: string, markdown: string)
   return path;
 }
 
+const LEARNED_HEADING = "## Learned Form Answers";
+
+/** `markdown` with `- **question**: answer` as its last line and no older learned line for that question. */
+function withLearnedLine(markdown: string, question: string, answer: string): string {
+  const line = `- **${question}**: ${answer}`;
+  const lines = markdown.trimEnd().split("\n");
+  const start = lines.findIndex((l) => l.trim() === LEARNED_HEADING);
+  if (start === -1) return `${markdown.trimEnd()}\n\n${LEARNED_HEADING}\n${line}\n`;
+  const normQ = normalizeQuestionKey(question);
+  const kept = lines.filter((l, i) => {
+    const m = i > start && normQ ? BOLD_KV.exec(l.trim()) : null;
+    return !m || normalizeQuestionKey(m[1]!) !== normQ;
+  });
+  return `${kept.join("\n")}\n${line}\n`;
+}
+
+const asRecord = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+
 export async function recordLearnedAnswer(profileId: string, question: string, answer: string): Promise<void> {
   const cleanQ = question.trim();
   const cleanA = answer.trim();
   if (!cleanQ || !cleanA) return;
+  const normQ = normalizeQuestionKey(cleanQ);
 
   const profilePath = applyProfilePathFor(profileId);
   const current = await readApplyProfile(profilePath);
   if (current.ok) {
-    const existingBank =
-      typeof current.raw["question_bank"] === "object" && current.raw["question_bank"] !== null
-        ? (current.raw["question_bank"] as Record<string, string>)
-        : {};
-    // explicitAnswerFor takes the FIRST entry whose normalised key matches, so an older spelling of this
-    // question ("Location (City)") would keep beating the new answer ("Location (City)*"): drop it.
-    const normQ = normalizeQuestionKey(cleanQ);
+    // One entry per question, the newest last: older spellings ("Location (City)" for "Location (City)*") go.
     const bank = Object.fromEntries(
-      Object.entries(existingBank).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
+      Object.entries(asRecord(current.raw["question_bank"])).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
     );
-    await writeApplyProfile(
-      { ...current.raw, question_bank: { ...bank, [cleanQ]: cleanA } },
-      profilePath,
-    );
+    // The candidate's own answer to a self-identification question is their setting for that category.
+    const category = selfIdCategoryOf(cleanQ);
+    const a = asRecord(current.raw["answers"]);
+    const selfId = category ? { answers: { ...a, self_identification: { ...asRecord(a["self_identification"]), [category]: cleanA } } } : {};
+    await writeApplyProfile({ ...current.raw, ...selfId, question_bank: { ...bank, [cleanQ]: cleanA } }, profilePath);
   }
 
-  const dossierPath = candidateDossierPathFor(profileId);
   const existingMd = await fs
-    .readFile(dossierPath, "utf8")
+    .readFile(candidateDossierPathFor(profileId), "utf8")
     // allow-failopen: when no dossier file exists yet on disk, initialize it from the profile or header.
-    .catch(() => (current.ok ? buildDefaultDossierMarkdown(current.profile) : `# Candidate Reference Dossier (${profileId})\n\n## Learned Form Answers\n`));
+    .catch(() => (current.ok ? buildDefaultDossierMarkdown(current.profile) : `# Candidate Reference Dossier (${profileId})\n\n${LEARNED_HEADING}\n`));
 
-  const line = `- **${cleanQ}**: ${cleanA}`;
-  if (!existingMd.includes(line)) {
-    const updated = existingMd.includes("## Learned Form Answers")
-      ? `${existingMd.trimEnd()}\n${line}\n`
-      : `${existingMd.trimEnd()}\n\n## Learned Form Answers\n${line}\n`;
-    await writeCandidateDossier(profileId, updated);
-  }
+  const updated = withLearnedLine(existingMd, cleanQ, cleanA);
+  if (updated !== existingMd) await writeCandidateDossier(profileId, updated);
 }
