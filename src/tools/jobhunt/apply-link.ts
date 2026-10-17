@@ -136,6 +136,9 @@ export const applySnapshotSchema = z.object({
   targetUrl: z.string(),
   platform: z.string(),
   resumePath: z.string(),
+  /** The letter attached on this run; absent when none was produced (`coverLetterNote` says why). */
+  coverLetter: z.object({ text: z.string(), pdfPath: z.string() }).optional(),
+  coverLetterNote: z.string().optional(),
   summary: z.object({
     filled: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),

@@ -151,6 +151,7 @@ function script(results: Prep[], submitOk = true): void {
   setAutoApplyRunnerForTests({
     prepare: async () => results[Math.min(prepareCalls++, results.length - 1)] as Prep,
     submit: async () => (submitOk ? sent : failed) as never,
+    coverLetter: async () => ({ ok: false, reason: "not in this test" }),
   });
 }
 
@@ -486,6 +487,87 @@ describe("apply flow", () => {
 
       expect(hasSubmit(replies)).toBe(false);
       expect(replies.some((r) => r.text.includes("Not ready to submit") && r.text.includes(COVER))).toBe(true);
+    });
+  });
+
+  // A Submit press sends a real application: a double tap, an old card, or /apply on an applied row must not send a second one.
+  describe("submit once", () => {
+    const APPLIED = { ...ROW, stage: "applied", applied_at: new Date("2026-10-17T09:00:00Z") };
+    const SENT = { ok: true, platform: "greenhouse", clicked: true, confirmed: true, evidence: "Confirmed", afterScreenshotPng: Buffer.from("after") };
+    let submits: number;
+
+    function runner(submit: () => Promise<unknown>): void {
+      submits = 0;
+      prepareCalls = 0;
+      setAutoApplyRunnerForTests({
+        prepare: async () => {
+          prepareCalls++;
+          return prep([]);
+        },
+        submit: async () => {
+          submits++;
+          return (await submit()) as never;
+        },
+        coverLetter: async () => ({ ok: false, reason: "not in this test" }),
+      });
+    }
+
+    it("refuses Submit on a row already marked applied, and sends nothing", async () => {
+      runner(async () => SENT);
+      mockGetApplicationById.mockResolvedValue(APPLIED);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:s:${ROW_ID}`);
+
+      expect(submits).toBe(0);
+      expect(mockMarkRowApplied).not.toHaveBeenCalled();
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: "Already applied" });
+      expect(replies.some((r) => r.text.includes("Already applied") && r.text.includes("2026-10-17"))).toBe(true);
+    });
+
+    it("sends one application when Submit is tapped twice before the first finishes", async () => {
+      let finish = (): void => undefined;
+      const held = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      runner(async () => {
+        await held;
+        return SENT;
+      });
+      const first = makeCtx();
+      const second = makeCtx();
+      const running = handleAutoApplyCallback(first.ctx as never, `jh:s:${ROW_ID}`);
+      await vi.waitFor(() => expect(submits).toBe(1));
+      const again = handleAutoApplyCallback(second.ctx as never, `jh:s:${ROW_ID}`);
+      finish();
+      await Promise.all([running, again]);
+
+      expect(submits).toBe(1);
+      expect(mockMarkRowApplied).toHaveBeenCalledTimes(1);
+      expect(second.replies.some((r) => r.text.includes("already being filled or submitted"))).toBe(true);
+    });
+
+    it("does not reopen the form for a row already marked applied", async () => {
+      runner(async () => SENT);
+      mockGetApplicationById.mockResolvedValue(APPLIED);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:f:${ROW_ID}`);
+
+      expect(prepareCalls).toBe(0);
+      expect(hasSubmit(replies)).toBe(false);
+      expect(replies.some((r) => r.text.includes("Already applied") && r.text.includes("2026-10-17"))).toBe(true);
+    });
+
+    it("does not offer Submit again when the click went through but no confirmation came back", async () => {
+      const unconfirmed = { ...SENT, confirmed: false, evidence: "Clicked submit; no error appeared, but no confirmation banner" };
+      runner(async () => unconfirmed);
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:s:${ROW_ID}`);
+
+      const said = replies.find((r) => r.text.includes("Could not confirm"));
+      expect(said?.text).toContain("Check your email");
+      expect(hasSubmit(replies)).toBe(false);
+      expect(buttons(said?.extra).some((b) => b.callback_data === `jh:k:${ROW_ID}`)).toBe(true);
+      expect(mockMarkRowApplied).not.toHaveBeenCalled();
     });
   });
 

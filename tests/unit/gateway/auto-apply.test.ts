@@ -193,6 +193,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
 
     let prepCallCount = 0;
     setAutoApplyRunnerForTests({
+      coverLetter: async () => ({ ok: false, reason: "not in this test" }),
       prepare: async (_url, _company, profile, _row, dossier) => {
         prepCallCount += 1;
         const hasLearnedWhy =
@@ -301,6 +302,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
     mockGetApplicationById.mockResolvedValue(tashiRow);
 
     setAutoApplyRunnerForTests({
+      coverLetter: async () => ({ ok: false, reason: "not in this test" }),
       prepare: async (_url, _company, profile) => {
         const answered = profile.question_bank?.["Preferred office location"];
         return {

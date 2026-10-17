@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findButton, tapRefusal, type TapButton } from "../../../scripts/lib/tap-guard.js";
+import { allowedSubmitRows, findButton, tapRefusal, type TapButton } from "../../../scripts/lib/tap-guard.js";
 
 const CARD: TapButton[] = [
   { label: "Yes", data: "jh:q:2f1c6a4e-0000-4000-8000-000000000001:0" },
@@ -27,5 +27,29 @@ describe("tap-guard: the live tester never presses Submit", () => {
     expect(findButton(CARD, "jh:q:2f1c6a4e-0000-4000-8000-000000000001:1")?.label).toBe("No");
     expect(findButton(CARD, "jh:q:2f1c6a4e-0000-4000-8000-000000000001:7")).toBeUndefined();
     expect(findButton(CARD, "https://node.example.ts.net/apply/x")).toBeUndefined();
+  });
+});
+
+describe("tap-guard: Submit only for rows the founder named in TAP_ALLOW_SUBMIT_ROWS", () => {
+  const ROW = "2f1c6a4e-0000-4000-8000-000000000001";
+  const OTHER = "2f1c6a4e-0000-4000-8000-000000000002";
+
+  it("reads a comma-separated list of row ids and ignores blanks", () => {
+    expect(allowedSubmitRows(` ${ROW} ,, ${OTHER} `)).toEqual([ROW, OTHER]);
+    expect(allowedSubmitRows(undefined)).toEqual([]);
+    expect(allowedSubmitRows("")).toEqual([]);
+  });
+
+  it("presses Submit for a named row", () => {
+    expect(tapRefusal(CARD[2]!, [ROW])).toBeNull();
+  });
+
+  it("still refuses Submit for any row that is not named, and a prefix of the id is not a match", () => {
+    expect(tapRefusal({ label: "🚀 Submit Application", data: `jh:s:${OTHER}` }, [ROW])).toMatch(/Submit/);
+    expect(tapRefusal({ label: "🚀 Submit Application", data: "jh:s:2f1c6a4e" }, [ROW])).toMatch(/Submit/);
+  });
+
+  it("never lets the allow list open a Submit-labelled button that is not the auto-apply callback", () => {
+    expect(tapRefusal({ label: "✅ submit now", data: `zz:${ROW}` }, [ROW])).toMatch(/Submit/);
   });
 });
