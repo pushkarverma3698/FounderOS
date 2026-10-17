@@ -44,6 +44,12 @@ describe("tap-guard: Submit only for rows the founder named in TAP_ALLOW_SUBMIT_
     expect(tapRefusal(CARD[2]!, [ROW])).toBeNull();
   });
 
+  it("presses a named row's Submit that carries a card stamp, and refuses a stamped Submit for any other row", () => {
+    expect(tapRefusal({ label: "🚀 Submit Application", data: `jh:s:${ROW}:mfz3k2a1` }, [ROW])).toBeNull();
+    expect(tapRefusal({ label: "🚀 Submit Application", data: `jh:s:${OTHER}:mfz3k2a1` }, [ROW])).toMatch(/Submit/);
+    expect(tapRefusal({ label: "🚀 Submit Application", data: `jh:s:${ROW}:mfz3k2a1` })).toMatch(/Submit/);
+  });
+
   it("still refuses Submit for any row that is not named, and a prefix of the id is not a match", () => {
     expect(tapRefusal({ label: "🚀 Submit Application", data: `jh:s:${OTHER}` }, [ROW])).toMatch(/Submit/);
     expect(tapRefusal({ label: "🚀 Submit Application", data: "jh:s:2f1c6a4e" }, [ROW])).toMatch(/Submit/);
