@@ -84,6 +84,14 @@ async function chooseInField(
 
   const inputs = page.locator(selector);
   const count = await inputs.count();
+  // allow-failopen: an unreadable tag means no button group; the input loop below handles it.
+  if (count > 0 && (await inputs.first().evaluate((el) => el.tagName).catch(() => "")) === "BUTTON") {
+    // Ashby Yes/No buttons: exact text only, so "No" can never press "Yes"; React confirms with aria-pressed.
+    const button = inputs.filter({ hasText: new RegExp(`^\\s*${optionText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i") });
+    if ((await button.count()) !== 1) return false;
+    await button.click({ timeout: 5_000 });
+    return (await button.getAttribute("aria-pressed")) === "true";
+  }
   if (count === 1 && fieldType === "checkbox") {
     const single = inputs.first();
     // allow-failopen: styled checkbox fallback to .click() when .check() actionability fails.

@@ -60,6 +60,8 @@ export interface PendingApplySession {
   /** Questions the founder skipped that the form still shows unfilled. */
   readonly skipped: UnansweredQuestion[];
   questionIndex: number;
+  /** Minted per card run and carried in its buttons, so a tap on a superseded card is refused. */
+  readonly cardStamp?: string;
 }
 
 export type SessionBase = Pick<
@@ -69,6 +71,26 @@ export type SessionBase = Pick<
 
 export function newSession(base: SessionBase, answered: AnsweredEntry[] = []): PendingApplySession {
   return { ...base, unanswered: [], stuck: [], answered, skipped: [], questionIndex: 0 };
+}
+
+// ── card stamps ─────────────────────────────────────────────────────────────────────────────────
+
+let stampSeq = Date.now();
+/** Unique per card run, also across restarts (seeded from the clock); 8 base36 chars keeps buttons within 64 bytes. */
+export const mintCardStamp = (): string => (stampSeq++).toString(36);
+/** Callback suffix for Submit / Cancel buttons on this session's card. */
+export const cardTag = (s?: PendingApplySession): string => (s?.cardStamp ? `:${s.cardStamp}` : "");
+/** Callback suffix for the current question's answer buttons: also stale once the next question is asked. */
+export const questionTag = (s?: PendingApplySession): string => (s?.cardStamp ? `:${s.cardStamp}.${s.questionIndex}` : "");
+
+/**
+ * True when a tap carries a stamp that is not the row's current card. Unstamped taps (cards sent before this
+ * change) and taps with no live session (after a restart) are judged by the existing guards instead.
+ */
+export function isStaleTap(rowId: string, kind: "q" | "s" | "k", stamp: string | undefined): boolean {
+  const session = sessionsByRow.get(rowId);
+  if (!stamp || !session?.cardStamp) return false;
+  return `:${stamp}` !== (kind === "q" ? questionTag(session) : cardTag(session));
 }
 
 export function ctxSender(ctx: Context): ApplySender {
