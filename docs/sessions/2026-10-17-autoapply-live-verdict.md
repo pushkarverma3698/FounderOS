@@ -30,7 +30,10 @@ save that re-filled the form and posted a fresh card.
 
 Defects found:
 - Double tap on Submit. grammY polling handles updates one at a time, so the second tap ran after the first send ended
-  unconfirmed and passed #1194's lock. Only Telegram's 30 s tap expiry stopped it. Fixed in #1198.
+  unconfirmed and passed #1194's lock. Only Telegram's 30 s tap expiry stopped it. Fixed in #1198, live on prod
+  `4f8c6c66` (promotion #1197, with #1196). Live-proven 07:35 UTC: a double tap on Telnyx's Submit gave one send
+  (one CV render in the log, Greenhouse code step again) and tap 2 replied "already clicked … Nothing was sent again".
+  The same deploy's card shows the answer-page button as a Telegram web_app button.
 - Stale cards keep live buttons after a newer card arrives.
 - A model 429 on the cover letter shows the raw provider error in the card, with no retry.
 - An answer-page save posts no 💾 line in Telegram.
