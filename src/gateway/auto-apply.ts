@@ -4,11 +4,14 @@
  * Connects Telegram (`/apply`, `/wife_apply`, and the `🚀 Auto-Apply` button)
  * to the headless Playwright form runner and candidate dossier (ADR-018:
  * fills and previews automatically, submits only when the user taps Submit).
+ *
+ * This file is the command and the button handlers. The card, the answer-page link, the re-ask guard
+ * and the per-row lock live in apply-flow.ts / apply-session.ts.
  */
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { InlineKeyboard, InputFile, type Context } from "grammy";
+import { InputFile, type Context } from "grammy";
 import { ARTIFACT_ROOT, TENANT } from "../core/config.js";
 import { getApplicationById } from "../db/apply-queries.js";
 import type { JobApplication } from "../db/schema.js";
@@ -18,51 +21,29 @@ import { DRAFT_SECTIONS, getApplyUrl, tailoredCvPath } from "../tools/jobhunt/ap
 import { applyProfilePathFor, readApplyProfile, type ApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { readCandidateDossier, recordLearnedAnswer } from "../tools/jobhunt/candidate-dossier.js";
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
-import type { FormPlanSummary, UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
-import { prepareApplicationForm, submitApplicationForm } from "../tools/jobhunt/form-runner.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
+import { advanceAfterQuestion, answerLink, buildSubmitKeyboard, runFormPrepAndPrompt } from "./apply-flow.js";
+import {
+  acquireApplyLock,
+  ctxSender,
+  endSession,
+  getRunnerDeps,
+  markSkipped,
+  newSession,
+  rememberAnswer,
+  sessionForChat,
+  sessionForRow,
+} from "./apply-session.js";
 import { markRowApplied } from "./jobhunt-buttons.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
 import { parseRowRef, resolveRowRef, unresolvedMessage } from "./jobhunt-row-ref.js";
 import { safeHtml } from "./safe-html.js";
 
+export { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests } from "./apply-session.js";
+
 const log = childLogger({ module: "gateway:auto-apply" });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_BUTTON_OPTIONS = 6;
-const MAX_BUTTON_LABEL_CHARS = 36;
-
-export interface PendingApplySession {
-  readonly rowId: string;
-  readonly chatId: string;
-  readonly profileId: string;
-  readonly candidateName: string;
-  readonly company: string;
-  readonly title: string;
-  readonly targetUrl: string;
-  readonly resumePdfPath: string;
-  readonly unanswered: readonly UnansweredQuestion[];
-  questionIndex: number;
-}
-
-const sessionsByChat = new Map<string, PendingApplySession>();
-const sessionsByRow = new Map<string, PendingApplySession>();
-
-export interface AutoApplyRunnerDeps {
-  readonly prepare: typeof prepareApplicationForm;
-  readonly submit: typeof submitApplicationForm;
-}
-
-let runnerDeps: AutoApplyRunnerDeps = { prepare: prepareApplicationForm, submit: submitApplicationForm };
-
-export function setAutoApplyRunnerForTests(override?: Partial<AutoApplyRunnerDeps>): void {
-  runnerDeps = { prepare: override?.prepare ?? prepareApplicationForm, submit: override?.submit ?? submitApplicationForm };
-}
-
-export function clearAutoApplySessionsForTests(): void {
-  sessionsByChat.clear();
-  sessionsByRow.clear();
-}
 
 function artifactDirForChat(chatId: string): string {
   return path.join(ARTIFACT_ROOT, `${TENANT}:${chatId}`.replace(/[^a-zA-Z0-9_.-]/g, "_"));
@@ -75,13 +56,6 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function formatSummaryLine(summary: FormPlanSummary): string {
-  const parts = [`Filled ${summary.filled}/${summary.total} fields`];
-  if (summary.unanswered.length > 0) parts.push(`${summary.unanswered.length} unanswered (${summary.requiredUnanswered.length} required)`);
-  if (summary.hasCaptcha) parts.push("CAPTCHA detected");
-  return parts.join(" · ");
 }
 
 async function resolveResumePdf(
@@ -112,93 +86,6 @@ async function resolveResumePdf(
   }
 }
 
-function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  const opts = q.options ?? [];
-  if (opts.length > 0 && opts.length <= MAX_BUTTON_OPTIONS) {
-    opts.forEach((opt, idx) => {
-      const label = opt.length > MAX_BUTTON_LABEL_CHARS ? `${opt.slice(0, MAX_BUTTON_LABEL_CHARS - 1)}…` : opt;
-      kb.text(label, `${JOB_CALLBACK_PREFIX}q:${rowId}:${idx}`).row();
-    });
-  }
-  return kb.text("⏭ Skip this question", `${JOB_CALLBACK_PREFIX}q:${rowId}:skip`).text("✖ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
-}
-
-function buildSubmitKeyboard(rowId: string, targetUrl: string): InlineKeyboard {
-  const kb = new InlineKeyboard()
-    .text("🚀 Submit Application", `${JOB_CALLBACK_PREFIX}s:${rowId}`)
-    .text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`)
-    .row();
-  if (/^https?:\/\//i.test(targetUrl)) kb.url("🔗 Open form manually", targetUrl);
-  return kb;
-}
-
-async function promptCurrentQuestion(ctx: Context, session: PendingApplySession): Promise<void> {
-  const q = session.unanswered[session.questionIndex];
-  if (!q) return;
-  const opts = q.options ?? [];
-  const optionsHint =
-    opts.length > MAX_BUTTON_OPTIONS
-      ? `\nOptions: <i>${safeHtml(opts.slice(0, 12).join(" | "))}</i>`
-      : opts.length > 0
-        ? "\n<i>Tap an option below or reply with your exact answer:</i>"
-        : "\n<i>Reply to this message with your answer (I'll save it to your dossier so I never ask again):</i>";
-
-  await ctx.reply(
-    `❓ <b>Question ${session.questionIndex + 1}/${session.unanswered.length} for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\n\n<b>${safeHtml(q.label)}</b>${optionsHint}`,
-    { parse_mode: "HTML", reply_markup: buildQuestionKeyboard(session.rowId, q) },
-  );
-}
-
-async function runFormPrepAndPrompt(ctx: Context, session: PendingApplySession): Promise<void> {
-  const loadedProfile = await readApplyProfile(applyProfilePathFor(session.profileId));
-  if (!loadedProfile.ok) {
-    await ctx.reply(`⚠ Cannot auto-fill: ${safeHtml(loadedProfile.reason)}`, { parse_mode: "HTML" });
-    return;
-  }
-  const dossier = (await readCandidateDossier(session.profileId)) ?? undefined;
-  const prep = await runnerDeps.prepare(session.targetUrl, session.company, loadedProfile.profile, { resumePath: session.resumePdfPath }, dossier);
-
-  if (!prep.ok) {
-    await ctx.reply(`⚠ Form preparation failed for ${safeHtml(session.company)}: ${safeHtml(prep.reason)}`, { parse_mode: "HTML" });
-    return;
-  }
-
-  const summaryText = formatSummaryLine(prep.summary);
-  if (prep.screenshotPng.length > 0) {
-    await ctx.replyWithPhoto(new InputFile(prep.screenshotPng, `apply-preview-${session.rowId.slice(0, 8)}.png`), {
-      caption: `${session.company} — ${session.title} (${prep.platform})\n${summaryText}`,
-    });
-  } else {
-    await ctx.reply(
-      `<b>${safeHtml(session.company)} — ${safeHtml(session.title)}</b> (${safeHtml(prep.platform)})\n${safeHtml(summaryText)}`,
-      { parse_mode: "HTML" },
-    );
-  }
-
-  const updated: PendingApplySession = { ...session, targetUrl: prep.targetUrl, unanswered: prep.summary.unanswered, questionIndex: 0 };
-  sessionsByChat.set(session.chatId, updated);
-  sessionsByRow.set(session.rowId, updated);
-
-  if (prep.summary.requiredUnanswered.length > 0) {
-    await promptCurrentQuestion(ctx, updated);
-    return;
-  }
-
-  const optionalNote =
-    prep.summary.unanswered.length > 0
-      ? `\n<i>(${prep.summary.unanswered.length} optional questions remaining — you can submit now or answer them below.)</i>`
-      : "";
-
-  await ctx.reply(
-    `✅ <b>Form ready for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\nAll required fields and CV are filled. Tap <b>Submit Application</b> to send it now.${optionalNote}`,
-    { parse_mode: "HTML", reply_markup: buildSubmitKeyboard(session.rowId, prep.targetUrl) },
-  );
-
-  if (prep.summary.unanswered.length > 0) {
-    await promptCurrentQuestion(ctx, updated);
-  }
-}
 
 /** Start the one-click auto-apply flow for a resolved row. */
 export async function startAutoApplyForRow(ctx: Context, row: JobApplication, profile: JobSearchProfile): Promise<void> {
@@ -221,11 +108,19 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
     return;
   }
 
-  await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
-  await runFormPrepAndPrompt(ctx, {
-    rowId: row.id, chatId, profileId: profile.id, candidateName: profile.candidateName,
-    company: row.company, title: row.title, targetUrl, resumePdfPath: pdfResolved.pdfPath, unanswered: [], questionIndex: 0,
-  });
+  const send = ctxSender(ctx);
+  const held = await acquireApplyLock(send, row.id);
+  if (!held) return;
+  try {
+    await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
+    const base = {
+      rowId: row.id, chatId, profileId: profile.id, candidateName: profile.candidateName,
+      company: row.company, title: row.title, targetUrl, resumePdfPath: pdfResolved.pdfPath,
+    };
+    await runFormPrepAndPrompt(send, newSession(base), held);
+  } finally {
+    held();
+  }
 }
 
 /** `/apply <rank|id>` and `/wife_apply <rank|id>` command handler. */
@@ -248,28 +143,19 @@ export async function handleAutoApply(ctx: Context): Promise<void> {
   await startAutoApplyForRow(ctx, resolved.row, selected.profile);
 }
 
-async function advanceAfterAnswer(ctx: Context, session: PendingApplySession): Promise<void> {
-  session.questionIndex += 1;
-  if (session.questionIndex < session.unanswered.length) {
-    await promptCurrentQuestion(ctx, session);
-    return;
-  }
-  await ctx.reply(`🔄 Re-filling ${safeHtml(session.company)}'s form with your saved answers…`, { parse_mode: "HTML" });
-  await runFormPrepAndPrompt(ctx, session);
-}
-
 /** Intercept plain-text replies when the chat has an active unanswered form question. */
 export async function tryHandlePendingApplyReply(ctx: Context, text: string): Promise<boolean> {
   const trimmed = text.trim();
   if (!trimmed || trimmed.startsWith("/")) return false;
-  const session = sessionsByChat.get(String(ctx.chat?.id ?? ""));
+  const session = sessionForChat(String(ctx.chat?.id ?? ""));
   const q = session?.unanswered[session.questionIndex];
   if (!session || !q) return false;
 
   await recordLearnedAnswer(session.profileId, q.label, trimmed);
+  rememberAnswer(session, q.label, trimmed);
   log.info({ profileId: session.profileId, question: q.label }, "Saved learned form answer from chat reply");
   await ctx.reply(`💾 Saved to ${safeHtml(session.candidateName)}'s dossier: <b>${safeHtml(q.label)}</b> → <code>${safeHtml(trimmed)}</code>`, { parse_mode: "HTML" });
-  await advanceAfterAnswer(ctx, session);
+  await advanceAfterQuestion(ctxSender(ctx), session);
   return true;
 }
 
@@ -281,9 +167,7 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   if (kind !== "f" && kind !== "q" && kind !== "s" && kind !== "k") return false;
 
   if (kind === "k") {
-    const session = sessionsByRow.get(rowId);
-    if (session) sessionsByChat.delete(session.chatId);
-    sessionsByRow.delete(rowId);
+    endSession(rowId);
     await ctx.answerCallbackQuery({ text: "Cancelled auto-apply" });
     await ctx.reply("⏭ Cancelled auto-apply session.");
     return true;
@@ -301,7 +185,7 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   }
 
   if (kind === "q") {
-    const session = sessionsByRow.get(rowId);
+    const session = sessionForRow(rowId);
     const q = session?.unanswered[session.questionIndex];
     if (!session || !q) {
       await ctx.answerCallbackQuery({ text: "Question session expired — tap Auto-Apply again." });
@@ -309,15 +193,8 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
     }
     if (choiceToken === "skip") {
       await ctx.answerCallbackQuery({ text: "Skipped question" });
-      session.questionIndex += 1;
-      if (session.questionIndex < session.unanswered.length) {
-        await promptCurrentQuestion(ctx, session);
-      } else {
-        await ctx.reply(`✅ Ready to submit for <b>${safeHtml(session.company)}</b> (with skipped optional/unknown field).`, {
-          parse_mode: "HTML",
-          reply_markup: buildSubmitKeyboard(session.rowId, session.targetUrl),
-        });
-      }
+      markSkipped(session, q);
+      await advanceAfterQuestion(ctxSender(ctx), session);
       return true;
     }
     const idx = Number(choiceToken);
@@ -327,9 +204,10 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
       return true;
     }
     await recordLearnedAnswer(session.profileId, q.label, chosen);
+    rememberAnswer(session, q.label, chosen);
     await ctx.answerCallbackQuery({ text: `Saved: ${chosen.slice(0, 30)}` });
     await ctx.reply(`💾 Saved to ${safeHtml(session.candidateName)}'s dossier: <b>${safeHtml(q.label)}</b> → <code>${safeHtml(chosen)}</code>`, { parse_mode: "HTML" });
-    await advanceAfterAnswer(ctx, session);
+    await advanceAfterQuestion(ctxSender(ctx), session);
     return true;
   }
 
@@ -354,14 +232,14 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   await ctx.reply(`🚀 Submitting your application to <b>${safeHtml(row.company)}</b>…`, { parse_mode: "HTML" });
 
   const dossier = (await readCandidateDossier(profile.id)) ?? undefined;
-  const session = sessionsByRow.get(rowId);
+  const session = sessionForRow(rowId);
   const targetUrl = session?.targetUrl ?? getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
-  const result = await runnerDeps.submit(targetUrl, row.company, loaded.profile, { resumePath: pdfResolved.pdfPath }, dossier);
+  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, { resumePath: pdfResolved.pdfPath }, dossier);
 
   if (!result.ok) {
     await ctx.reply(`⚠ <b>Could not submit for ${safeHtml(row.company)}</b>: ${safeHtml(result.reason)}`, {
       parse_mode: "HTML",
-      reply_markup: buildSubmitKeyboard(row.id, targetUrl),
+      reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id)),
     });
     return true;
   }
@@ -374,8 +252,7 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
 
   if (result.confirmed) {
     await markRowApplied(row);
-    sessionsByRow.delete(rowId);
-    if (session) sessionsByChat.delete(session.chatId);
+    endSession(rowId);
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(
       // allow-failopen: cosmetic; the application is already submitted and recorded.
       () => undefined,
@@ -384,7 +261,7 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   } else {
     await ctx.reply(
       `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\nCheck the screenshot above or open the form directly.`,
-      { parse_mode: "HTML", reply_markup: buildSubmitKeyboard(row.id, targetUrl) },
+      { parse_mode: "HTML", reply_markup: buildSubmitKeyboard(row.id, targetUrl, answerLink(row.id)) },
     );
   }
   return true;
