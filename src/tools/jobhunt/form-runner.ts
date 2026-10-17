@@ -17,6 +17,7 @@ import {
   type FormPlanSummary,
   type RowApplicationFacts,
 } from "./form-brain.js";
+import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormUrl,
   resolveFormTargetUrl,
@@ -47,34 +48,7 @@ async function typeIntoField(page: Page, selector: string, value: string): Promi
   const role = await locator.getAttribute("role").catch(() => null);
   const isCombobox = role?.toLowerCase() === "combobox";
 
-  if (isCombobox) {
-    await locator.click({ timeout: 5_000 });
-    await locator.pressSequentially(value, { delay: 25, timeout: 10_000 });
-    await page.waitForTimeout(400);
-
-    // allow-failopen: clicking matching menu option directly when available, otherwise fall back to Enter.
-    const optClicked = await page.locator('[class*="option" i]').filter({ hasText: new RegExp(value, "i") }).first().click({ timeout: 2_500 }).then(() => true).catch(() => false);
-    if (!optClicked) {
-      // allow-failopen: arrow down fallback.
-      await page.keyboard.press("ArrowDown").catch(() => undefined);
-      // allow-failopen: enter fallback.
-      await page.keyboard.press("Enter").catch(() => undefined);
-    }
-    await page.waitForTimeout(300);
-    const verified = await locator
-      .evaluate((el, expected) => {
-        const inp = el as unknown as DomElement;
-        if (inp.value && inp.value.toLowerCase().includes(expected.toLowerCase())) return true;
-        const container = inp.closest('.select__control, [class*="control" i], [class*="combobox" i], .field') ?? inp.parentElement?.parentElement;
-        const singleVal = container?.querySelector('[class*="single-value" i], [class*="singleValue" i]');
-        if (singleVal?.textContent?.trim()) return true;
-        const text = (container?.textContent ?? "").toLowerCase();
-        return text.includes(expected.toLowerCase());
-      }, value)
-      // allow-failopen: unreadable DOM reports false (unverified).
-      .catch(() => false);
-    return verified;
-  }
+  if (isCombobox) return typeIntoCombobox(page, locator, value);
 
   await locator.fill(value, { timeout: 5_000 });
   await page.waitForTimeout(CONTROLLED_INPUT_SETTLE_MS);
@@ -97,6 +71,9 @@ async function chooseInField(
 ): Promise<boolean> {
   if (fieldType === "select") {
     const selectLoc = page.locator(selector).first();
+    // allow-failopen: a missing role means a native <select>, handled below.
+    const role = await selectLoc.getAttribute("role").catch(() => null);
+    if (role?.toLowerCase() === "combobox") return chooseComboboxOption(page, selectLoc, optionText);
     const selected = await selectLoc
       .selectOption({ label: optionText }, { timeout: 5_000 })
       .then((vals) => vals.length > 0)
@@ -153,6 +130,7 @@ export async function executeFormPlan(
   page: Page,
   actions: readonly FormFillAction[],
 ): Promise<ReadonlySet<string>> {
+  await installEvaluateShim(page);
   const verified = new Set<string>();
   for (const action of actions) {
     if (action.kind === "ask") continue;

@@ -10,6 +10,7 @@
 
 import type { ApplyProfile, WorkAuthorization } from "./apply-profile.js";
 import {
+  explicitAnswerFor,
   lookupLearnedAnswer,
   matchChoiceOption,
   normalizeQuestionKey,
@@ -62,9 +63,13 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
   yearsExperience: ["years of experience", "years experience", "jaren ervaring"],
 };
 
+/** "Are you based in …?" is a yes/no question, not a place to type the candidate's city. */
+const YES_NO_QUESTION_START = /^(?:are|do|does|did|have|has|is|can|could|will|would|should)\b/;
+
 function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): boolean {
   const n = normalizeQuestionKey(label);
   if (!n) return false;
+  if ((group === "location" || group === "country") && YES_NO_QUESTION_START.test(n)) return false;
   if (group === "location" && (n.includes("office") || n.includes("days a week") || n.includes("can you come"))) {
     return false;
   }
@@ -137,11 +142,7 @@ export function chooseEligibility(
     required: field.required, fieldType: field.type, options: field.options, why,
   });
 
-  const normQ = normalizeQuestionKey(label);
-  const explicitBankAnswer =
-    (profile.question_bank
-      ? Object.entries(profile.question_bank).find(([k]) => normalizeQuestionKey(k) === normQ)?.[1]
-      : undefined) ?? dossier?.qaPairs[normQ];
+  const explicitBankAnswer = explicitAnswerFor(label, profile, dossier)?.value;
 
   if (explicitBankAnswer && field.options && field.options.length > 0) {
     const matched = matchChoiceOption(explicitBankAnswer, field.options);
@@ -190,6 +191,19 @@ function textActionFor(field: ScrapedField, value: string | undefined, why: stri
   const clean = value?.trim();
   if (!clean) return null;
   return { selector: field.selector, label: field.label || why, kind: "value", value: clean, confidence: 1, why };
+}
+
+/** A number input rejects words: keep a leading number, read "immediately"/"asap" as 0, otherwise ask. */
+function fitToField(field: ScrapedField, action: FormFillAction): FormFillAction {
+  if (field.type !== "number" || action.kind !== "value") return action;
+  const lead = /^\s*(-?\d+(?:[.,]\d+)*)/.exec(action.value)?.[1];
+  const num = lead && /^-?\d{1,3}(?:,\d{3})+$/.test(lead) ? lead.replace(/,/g, "") : lead?.replace(",", ".");
+  const value = num ?? (/immediate|asap/i.test(action.value) ? "0" : undefined);
+  if (value !== undefined) return { ...action, value };
+  return {
+    selector: field.selector, label: field.label, kind: "ask", question: field.label || "Number field",
+    required: field.required, fieldType: field.type, why: `known answer "${action.value}" is not a number`,
+  };
 }
 
 function matchStandardTextField(
@@ -258,17 +272,12 @@ export function buildFormFillPlan(
     }
 
     if (isEligibilityField(field)) {
-      const normQ = normalizeQuestionKey(field.label);
       const explicitTextAnswer =
-        field.type === "text" || field.type === "textarea"
-          ? (profile.question_bank
-              ? Object.entries(profile.question_bank).find(([k]) => normalizeQuestionKey(k) === normQ)?.[1]
-              : undefined) ?? dossier?.qaPairs[normQ]
-          : undefined;
-      if (explicitTextAnswer?.trim()) {
+        field.type === "text" || field.type === "textarea" ? explicitAnswerFor(field.label, profile, dossier) : null;
+      if (explicitTextAnswer) {
         actions.push({
           selector: field.selector, label: field.label || "Work authorization", kind: "value",
-          value: explicitTextAnswer.trim(), confidence: 1, why: "explicitly answered in candidate question bank",
+          value: explicitTextAnswer.value, confidence: 1, why: "explicitly answered in candidate question bank",
         });
       } else {
         actions.push(chooseEligibility(field, profile, dossier));
@@ -302,9 +311,10 @@ export function buildFormFillPlan(
 
     const isChoiceType = field.type === "checkbox-group" || field.type === "radio-group" || field.type === "select";
     if (!isChoiceType) {
-      const standard = matchStandardTextField(field, profile, row);
-      if (standard) {
-        actions.push(standard);
+      const explicit = explicitAnswerFor(field.label, profile, dossier);
+      const direct = explicit ? textActionFor(field, explicit.value, explicit.source) : matchStandardTextField(field, profile, row);
+      if (direct) {
+        actions.push(fitToField(field, direct));
         continue;
       }
     }
@@ -314,7 +324,7 @@ export function buildFormFillPlan(
       actions.push(
         learned.kind === "choose"
           ? { selector: field.selector, label: field.label, kind: "choose", fieldType: field.type, option: learned.value, confidence: 0.95, why: learned.source }
-          : { selector: field.selector, label: field.label, kind: "value", value: learned.value, confidence: 0.95, why: learned.source },
+          : fitToField(field, { selector: field.selector, label: field.label, kind: "value", value: learned.value, confidence: 0.95, why: learned.source }),
       );
       continue;
     }
