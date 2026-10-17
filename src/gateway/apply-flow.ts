@@ -5,7 +5,9 @@
  * the button handlers; this module owns the card the founder sees:
  *
  *  - a text card (no screenshot: the filled copy only ever existed in headless Chromium on the VPS) with
- *    a URL button to the hosted answer page, backed by a snapshot the page renders;
+ *    a button to the hosted answer page, backed by a snapshot the page renders. In a private chat the
+ *    button is a web_app button, so the page opens inside Telegram; Telegram refuses web_app buttons in
+ *    groups and for non-HTTPS URLs, so there it stays an ordinary url button;
  *  - the re-ask guard: a question answered in this session that comes back unfilled is never asked
  *    again; the card says what could not be filled and points at the answer page;
  *  - Submit only when no required field is missing (stuck, or skipped by the founder);
@@ -64,6 +66,17 @@ export interface AnswerLink {
   /** Questions still unfilled on the page (drives the button label). */
   readonly left: number;
   readonly reason: string;
+  /** Open the page inside Telegram (web_app button) rather than in the browser (url button). */
+  readonly inTelegram: boolean;
+}
+
+/** Telegram takes an inline web_app button only in a private chat (positive chat id) and only for an HTTPS URL. */
+export const opensInTelegram = (chatId: string, url: string): boolean => /^[1-9]\d*$/.test(chatId) && /^https:\/\//i.test(url);
+
+const noLink = (reason: string): AnswerLink => ({ url: null, left: 0, reason, inTelegram: false });
+
+function linkTo(url: string, snap: ApplySnapshot): AnswerLink {
+  return { url, left: snap.summary.unanswered.length, reason: "", inTelegram: opensInTelegram(snap.chatId, url) };
 }
 
 const isHttp = (url: string): boolean => /^https?:\/\//i.test(url);
@@ -72,10 +85,10 @@ const answerLabel = (left: number): string => (left > 0 ? `📝 Open form to fin
 /** The link to an already saved snapshot (Submit and failure replies). Reads the env at call time. */
 export function answerLink(rowId: string): AnswerLink {
   const cfg = readApplyLinkConfig();
-  if (!cfg.ok) return { url: null, left: 0, reason: cfg.reason };
+  if (!cfg.ok) return noLink(cfg.reason);
   const snap = loadApplySnapshot(rowId);
-  if (!snap) return { url: null, left: 0, reason: "answer page expired, run /apply again" };
-  return { url: buildApplyUrl(cfg, rowId, snap.profileId), left: snap.summary.unanswered.length, reason: "" };
+  if (!snap) return noLink("answer page expired, run /apply again");
+  return linkTo(buildApplyUrl(cfg, rowId, snap.profileId), snap);
 }
 
 /** Saves the snapshot the page renders and returns its link. Missing env or a failed save is logged and returned. */
@@ -83,16 +96,16 @@ function persistAndLink(snap: ApplySnapshot): AnswerLink {
   const cfg = readApplyLinkConfig();
   if (!cfg.ok) {
     log.warn({ rowId: snap.rowId, reason: cfg.reason }, "apply answer link unavailable");
-    return { url: null, left: 0, reason: cfg.reason };
+    return noLink(cfg.reason);
   }
   try {
     saveApplySnapshot(snap);
   } catch (err) {
     const reason = `snapshot not saved (${(err as Error).message})`;
     log.warn({ rowId: snap.rowId, reason }, "apply answer link unavailable");
-    return { url: null, left: 0, reason };
+    return noLink(reason);
   }
-  return { url: buildApplyUrl(cfg, snap.rowId, snap.profileId), left: snap.summary.unanswered.length, reason: "" };
+  return linkTo(buildApplyUrl(cfg, snap.rowId, snap.profileId), snap);
 }
 
 /** A file input: no typed reply or option can fill it, so it is never asked as a text question. */
@@ -114,10 +127,17 @@ export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion): Inl
   return kb.text("⏭ Skip this question", `${JOB_CALLBACK_PREFIX}q:${rowId}:skip`).text("✖ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
 }
 
+/** Adds the hosted answer-page button, when there is a link: inside Telegram where it can, else a url button. */
+function withAnswerButton(kb: InlineKeyboard, link: AnswerLink): InlineKeyboard {
+  if (!link.url) return kb;
+  const label = answerLabel(link.left);
+  return link.inTelegram ? kb.webApp(label, link.url) : kb.url(label, link.url);
+}
+
 /** Hosted link first, then Submit and Cancel, then the company page (labelled: it is not prefilled). */
 export function buildSubmitKeyboard(rowId: string, targetUrl: string, link: AnswerLink): InlineKeyboard {
   const kb = new InlineKeyboard();
-  if (link.url) kb.url(answerLabel(link.left), link.url).row();
+  if (link.url) withAnswerButton(kb, link).row();
   kb.text("🚀 Submit Application", `${JOB_CALLBACK_PREFIX}s:${rowId}`).text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
   if (isHttp(targetUrl)) kb.row().url(COMPANY_PAGE_LABEL, targetUrl);
   return kb;
@@ -126,7 +146,7 @@ export function buildSubmitKeyboard(rowId: string, targetUrl: string, link: Answ
 /** No Submit: something required is still missing. */
 export function buildBlockedKeyboard(rowId: string, targetUrl: string, link: AnswerLink): InlineKeyboard {
   const kb = new InlineKeyboard();
-  if (link.url) kb.url(answerLabel(link.left), link.url).row();
+  if (link.url) withAnswerButton(kb, link).row();
   kb.text("⏭ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}`);
   if (isHttp(targetUrl)) kb.row().url(COMPANY_PAGE_LABEL, targetUrl);
   return kb;
@@ -279,7 +299,7 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
       coverLetterLine(session.coverLetter, session.coverLetterNote, prep.summary),
     ];
     if (!link.url) lines.push(`<i>answer link unavailable: ${safeHtml(link.reason)}</i>`);
-    await send.text(lines.join("\n"), link.url ? new InlineKeyboard().url(answerLabel(link.left), link.url) : undefined);
+    await send.text(lines.join("\n"), link.url ? withAnswerButton(new InlineKeyboard(), link) : undefined);
 
     if (part.pending.some((q) => q.required)) {
       await promptCurrentQuestion(send, updated);
