@@ -23,7 +23,15 @@ import { readCandidateDossier, recordLearnedAnswer } from "../tools/jobhunt/cand
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
-import { advanceAfterQuestion, answerLink, buildSubmitKeyboard, runFormPrepAndPrompt } from "./apply-flow.js";
+import {
+  advanceAfterQuestion,
+  answerLink,
+  buildQuestionKeyboard,
+  buildSubmitKeyboard,
+  fileQuestionNotice,
+  isFileQuestion,
+  runFormPrepAndPrompt,
+} from "./apply-flow.js";
 import {
   acquireApplyLock,
   ctxSender,
@@ -150,6 +158,13 @@ export async function tryHandlePendingApplyReply(ctx: Context, text: string): Pr
   const session = sessionForChat(String(ctx.chat?.id ?? ""));
   const q = session?.unanswered[session.questionIndex];
   if (!session || !q) return false;
+  if (isFileQuestion(q)) {
+    await ctx.reply(`📎 ${fileQuestionNotice(q)} A typed reply cannot fill it. Nothing was saved.`, {
+      parse_mode: "HTML",
+      reply_markup: buildQuestionKeyboard(session.rowId, q),
+    });
+    return true;
+  }
 
   await recordLearnedAnswer(session.profileId, q.label, trimmed);
   rememberAnswer(session, q.label, trimmed);

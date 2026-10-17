@@ -94,9 +94,16 @@ function persistAndLink(snap: ApplySnapshot): AnswerLink {
   return { url: buildApplyUrl(cfg, snap.rowId, snap.profileId), left: snap.summary.unanswered.length, reason: "" };
 }
 
+/** A file input: no typed reply or option can fill it, so it is never asked as a text question. */
+export const isFileQuestion = (q: UnansweredQuestion): boolean => q.fieldType === "file";
+
+export function fileQuestionNotice(q: UnansweredQuestion): string {
+  return `<b>${safeHtml(q.label)}</b> is a file upload: attach it on the company page, or skip.`;
+}
+
 export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion): InlineKeyboard {
   const kb = new InlineKeyboard();
-  const opts = q.options ?? [];
+  const opts = isFileQuestion(q) ? [] : (q.options ?? []);
   if (opts.length > 0 && opts.length <= MAX_BUTTON_OPTIONS) {
     opts.forEach((opt, idx) => {
       const label = opt.length > MAX_BUTTON_LABEL_CHARS ? `${opt.slice(0, MAX_BUTTON_LABEL_CHARS - 1)}…` : opt;
@@ -134,6 +141,11 @@ export function formatSummaryLine(summary: FormPlanSummary): string {
 export async function promptCurrentQuestion(send: ApplySender, session: PendingApplySession): Promise<void> {
   const q = session.unanswered[session.questionIndex];
   if (!q) return;
+  const head = `❓ <b>Question ${session.questionIndex + 1}/${session.unanswered.length} for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\n\n`;
+  if (isFileQuestion(q)) {
+    await send.text(head + fileQuestionNotice(q), buildQuestionKeyboard(session.rowId, q));
+    return;
+  }
   const opts = q.options ?? [];
   const optionsHint =
     opts.length > MAX_BUTTON_OPTIONS
@@ -141,10 +153,7 @@ export async function promptCurrentQuestion(send: ApplySender, session: PendingA
       : opts.length > 0
         ? "\n<i>Tap an option below or reply with your exact answer:</i>"
         : "\n<i>Reply to this message with your answer (I'll save it to your dossier so I never ask again):</i>";
-  await send.text(
-    `❓ <b>Question ${session.questionIndex + 1}/${session.unanswered.length} for ${safeHtml(session.company)}</b> (${safeHtml(session.candidateName)})\n\n<b>${safeHtml(q.label)}</b>${optionsHint}`,
-    buildQuestionKeyboard(session.rowId, q),
-  );
+  await send.text(`${head}<b>${safeHtml(q.label)}</b>${optionsHint}`, buildQuestionKeyboard(session.rowId, q));
 }
 
 // ── card, verdict, re-fill ──────────────────────────────────────────────────────────────────────
