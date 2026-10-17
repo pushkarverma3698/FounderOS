@@ -10,14 +10,15 @@
  *   node --import tsx/esm --env-file=.env scripts/telegram-tap.ts tap <messageId> <callbackData> [waitSeconds]
  *   node --import tsx/esm --env-file=.env scripts/telegram-tap.ts say "<text>" [waitSeconds]
  *
- * It never presses Submit (scripts/lib/tap-guard.ts), and it taps only a callback that is on that message.
+ * It never presses Submit (scripts/lib/tap-guard.ts) unless the row is named in TAP_ALLOW_SUBMIT_ROWS for a run
+ * the founder authorised, and it taps only a callback that is on that message.
  * Costs whatever the tapped flow costs; it belongs in the live-verification zone, like telegram-probe.ts.
  */
 
 import { Api, type TelegramClient } from "telegram";
 import { connect, probePeer, sleep, POLL_INTERVAL_MS, QUIET_CYCLES } from "./lib/mtproto.js";
 import type { ProbePeer } from "./lib/probe-peer.js";
-import { findButton, tapRefusal, type TapButton } from "./lib/tap-guard.js";
+import { allowedSubmitRows, findButton, tapRefusal, type TapButton } from "./lib/tap-guard.js";
 
 const DEFAULT_WAIT_S = 180;
 const WINDOW = 30;
@@ -92,7 +93,7 @@ async function tap(client: TelegramClient, peer: ProbePeer, msgId: number, data:
   if (!(msg instanceof Api.Message)) throw new Error(`message #${msgId} not found in this chat`);
   const button = findButton(buttonsOf(msg), data);
   if (!button) throw new Error(`message #${msgId} has no button with callback data ${data}`);
-  const refusal = tapRefusal(button);
+  const refusal = tapRefusal(button, allowedSubmitRows(process.env["TAP_ALLOW_SUBMIT_ROWS"]));
   if (refusal) throw new Error(refusal);
   const [latest] = await client.getMessages(peer, { limit: 1 });
   const edits = await editStamps(client, peer);
