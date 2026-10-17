@@ -90,6 +90,11 @@ export function botSender(chatId: string): ApplySender {
 const sessionsByChat = new Map<string, PendingApplySession>();
 const sessionsByRow = new Map<string, PendingApplySession>();
 const locks = new Map<string, { readonly at: number }>();
+/**
+ * Rows whose Submit was clicked with no confirmation back. grammY runs updates one at a time, so a double tap
+ * arrives after the first send has finished and released the lock; this refuses it until the form is reopened.
+ */
+const unconfirmedClicks = new Map<string, Date>();
 
 export const sessionForChat = (chatId: string): PendingApplySession | undefined => sessionsByChat.get(chatId);
 export const sessionForRow = (rowId: string): PendingApplySession | undefined => sessionsByRow.get(rowId);
@@ -134,7 +139,12 @@ export function clearAutoApplySessionsForTests(): void {
   sessionsByChat.clear();
   sessionsByRow.clear();
   locks.clear();
+  unconfirmedClicks.clear();
 }
+
+export const unconfirmedClickAt = (rowId: string): Date | undefined => unconfirmedClicks.get(rowId);
+export const noteUnconfirmedClick = (rowId: string): void => void unconfirmedClicks.set(rowId, new Date());
+export const forgetUnconfirmedClick = (rowId: string): void => void unconfirmedClicks.delete(rowId);
 
 /**
  * One re-fill per application row at a time, across the Telegram path and the answer page. Returns a

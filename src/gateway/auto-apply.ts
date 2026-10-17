@@ -38,13 +38,16 @@ import {
   acquireApplyLock,
   ctxSender,
   endSession,
+  forgetUnconfirmedClick,
   getRunnerDeps,
   markSkipped,
   newSession,
+  noteUnconfirmedClick,
   rememberAnswer,
   sessionForChat,
   sessionForRow,
   tryLockApply,
+  unconfirmedClickAt,
 } from "./apply-session.js";
 import { markRowApplied } from "./jobhunt-buttons.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
@@ -116,6 +119,18 @@ function appliedOn(row: JobApplication): string | null {
 const alreadyAppliedMessage = (row: JobApplication, on: string): string =>
   `✅ Already applied to <b>${safeHtml(row.company)}</b> (${safeHtml(row.title)}) on ${on}. Nothing was sent again.`;
 
+const alreadyClickedMessage = (row: JobApplication, at: Date): string =>
+  `⚠ Submit for <b>${safeHtml(row.company)}</b> was already clicked at ${at.toISOString().slice(11, 16)} UTC with no confirmation. ` +
+  `Nothing was sent again. Check your email first; to retry, send <code>/apply ${shortJobId(row.id)}</code>.`;
+
+/** Answer a refused tap. A tap that waited behind an earlier Submit has expired; the reply after it still goes out. */
+function answerLateTap(ctx: Context, text: string): Promise<unknown> {
+  return ctx.answerCallbackQuery({ text }).catch(
+    // allow-failopen: Telegram refuses answers to expired taps; the chat reply that follows says what happened.
+    () => undefined,
+  );
+}
+
 /** Start the one-click auto-apply flow for a resolved row. */
 export async function startAutoApplyForRow(ctx: Context, row: JobApplication, profile: JobSearchProfile): Promise<void> {
   const on = appliedOn(row);
@@ -146,6 +161,7 @@ export async function startAutoApplyForRow(ctx: Context, row: JobApplication, pr
   const send = ctxSender(ctx);
   const held = await acquireApplyLock(send, row.id);
   if (!held) return;
+  forgetUnconfirmedClick(row.id); // reopening the form is the deliberate retry the unconfirmed reply names
   try {
     await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
     const letter = await resolveCoverLetter(row, profile, artifactDir);
@@ -259,7 +275,7 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
   // Lock before reading the row: a second tap is refused, and never reads a row the first is about to mark applied.
   const release = tryLockApply(rowId);
   if (!release) {
-    await ctx.answerCallbackQuery({ text: "Already in progress" });
+    await answerLateTap(ctx, "Already in progress");
     await ctx.reply("⏳ This application is already being filled or submitted. Nothing was sent twice.");
     return true;
   }
@@ -280,8 +296,14 @@ async function submitRow(ctx: Context, rowId: string): Promise<void> {
   }
   const on = appliedOn(row);
   if (on) {
-    await ctx.answerCallbackQuery({ text: "Already applied" });
+    await answerLateTap(ctx, "Already applied");
     await ctx.reply(alreadyAppliedMessage(row, on), { parse_mode: "HTML" });
+    return;
+  }
+  const clickedAt = unconfirmedClickAt(rowId);
+  if (clickedAt) {
+    await answerLateTap(ctx, "Already sent once");
+    await ctx.reply(alreadyClickedMessage(row, clickedAt), { parse_mode: "HTML" });
     return;
   }
   const profile = getProfile(row.profile_id);
@@ -329,6 +351,7 @@ async function submitRow(ctx: Context, rowId: string): Promise<void> {
     await ctx.reply(`✅ <b>Application submitted and marked applied</b> — ${safeHtml(row.company)} (${safeHtml(row.title)}). It's off today's queue.`, { parse_mode: "HTML" });
   } else {
     // The click went through, so the application may have arrived: no Submit here or on the tapped card.
+    noteUnconfirmedClick(row.id);
     await dropTappedKeyboard(ctx);
     await ctx.reply(
       `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\n` +
