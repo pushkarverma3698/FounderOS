@@ -100,6 +100,9 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
     const defaultProfilePath = path.join(tmpDir, "apply-profile.json");
     process.env["APPLY_PROFILE_PATH"] = defaultProfilePath;
     delete process.env["CANDIDATE_DOSSIER_PATH"];
+    process.env["FOUNDEROS_DATA_ROOT"] = tmpDir;
+    process.env["APPLY_LINK_SECRET"] = "s3cret-for-tests-0123456789abcdef";
+    process.env["APPLY_LINK_BASE_URL"] = "https://apply.example.test";
 
     await fs.writeFile(
       defaultProfilePath,
@@ -140,6 +143,9 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
 
   afterEach(async () => {
     setAutoApplyRunnerForTests(undefined);
+    delete process.env["FOUNDEROS_DATA_ROOT"];
+    delete process.env["APPLY_LINK_SECRET"];
+    delete process.env["APPLY_LINK_BASE_URL"];
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -246,7 +252,9 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
     await handleAutoApply(ctx as never);
 
     expect(prepCallCount).toBe(1);
-    expect(photos).toHaveLength(1);
+    // The screenshot is gone: the preview is a text card with the hosted-page link button.
+    expect(photos).toHaveLength(0);
+    expect(replies.some((r) => r.text.includes("Workwize") && r.text.includes("Filled"))).toBe(true);
     expect(replies.some((r) => r.text.includes("Question 1/1 for Workwize"))).toBe(true);
     expect(replies.some((r) => r.text.includes("Why Workwize?"))).toBe(true);
 
