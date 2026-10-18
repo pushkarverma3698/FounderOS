@@ -19,11 +19,9 @@
 import type { Context } from "grammy";
 import {
   applyProfilePathFor,
-  parseApplyProfile,
   readApplyProfile,
   renderApplyProfile,
   setProfileField,
-  writeApplyProfile,
 } from "../tools/jobhunt/apply-profile.js";
 import {
   buildDefaultDossierMarkdown,
@@ -32,6 +30,7 @@ import {
   recordLearnedAnswer,
   writeCandidateDossier,
 } from "../tools/jobhunt/candidate-dossier.js";
+import { setProfilePath } from "../tools/jobhunt/answer-store.js";
 import { childLogger } from "./../infra/logger.js";
 import { safeHtml } from "./safe-html.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
@@ -201,22 +200,18 @@ export async function handleProfile(ctx: Context): Promise<void> {
     });
     return;
   }
-
-  // RE-VALIDATED BEFORE IT IS WRITTEN. `/profile set email nonsense` must fail
-  // in Telegram, where he can retype it, rather than on a form three days later.
-  const revalidated = parseApplyProfile(JSON.stringify(edited.next));
-  if (!revalidated.ok) {
-    await ctx.reply(
-      `That would break the profile — ${safeHtml(revalidated.reason)}. Nothing was changed.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-
+  // Saved through the answer store: validated, backed up, written atomically with the dossier Core Facts
+  // in step (a profile-only edit of salary or notice period changed nothing a form would read).
+  // `/profile set email nonsense` must fail here, where he can retype it, rather than on a form three days later.
+  let saved: Awaited<ReturnType<typeof setProfilePath>>;
   try {
-    await writeApplyProfile(edited.next, path);
+    saved = await setProfilePath(arg.profile.id, command.path, command.value);
   } catch (err) {
     await ctx.reply(`Couldn't save the profile: ${safeHtml((err as Error).message)}. Nothing changed.`);
+    return;
+  }
+  if (!saved.ok) {
+    await ctx.reply(`That would break the profile — ${safeHtml(saved.reason)}. Nothing was changed.`, { parse_mode: "HTML" });
     return;
   }
 
