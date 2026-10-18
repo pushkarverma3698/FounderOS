@@ -95,7 +95,10 @@ export function answerLink(rowId: string): AnswerLink {
 }
 
 /** Saves the snapshot the page renders and returns its link. Missing env or a failed save is logged and returned. */
-function persistAndLink(snap: ApplySnapshot): AnswerLink {
+function persistAndLink(fresh: ApplySnapshot): AnswerLink {
+  // A re-fill must not wipe the unconfirmed-submit guard; only reopening the form from Telegram does.
+  const carried = loadApplySnapshot(fresh.rowId)?.unconfirmedAt;
+  const snap = carried === undefined ? fresh : { ...fresh, unconfirmedAt: carried };
   const cfg = readApplyLinkConfig();
   if (!cfg.ok) {
     log.warn({ rowId: snap.rowId, reason: cfg.reason }, "apply answer link unavailable");
