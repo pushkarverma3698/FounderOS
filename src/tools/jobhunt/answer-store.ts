@@ -10,6 +10,7 @@
  * newest 30 kept, mode 0600.
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { syncCoreFacts } from "./answer-core-facts.js";
@@ -51,11 +52,14 @@ export interface Reject {
 export type Mutation = (state: AnswerState) => AnswerState | Reject | null;
 export type SaveResult =
   | { readonly ok: true; readonly changed: boolean; readonly profile?: ApplyProfile; readonly dossierMarkdown?: string }
-  | { readonly ok: false; readonly reason: string };
+  | { readonly ok: false; readonly reason: string; readonly stale?: true };
 export interface SaveOptions {
   readonly backup?: boolean;
   readonly backupMinIntervalMs?: number;
+  /** Checked under the per-profile lock against the state about to change; false refuses the save as stale (editor baseVersion). */
+  readonly precondition?: (state: AnswerState) => boolean;
 }
+export type RestoreResult = { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly stale?: true };
 export interface AnswerBackup {
   readonly ts: string;
   readonly json: boolean;
@@ -65,6 +69,11 @@ export interface LearnedAnswer {
   readonly question: string;
   readonly answer: string;
   readonly source: "question_bank" | "dossier" | "both";
+}
+
+/** A short fingerprint of the answers as they stand; the editor sends it back to prove it saw the latest. */
+export function answerVersion(state: AnswerState): string {
+  return createHash("sha256").update(JSON.stringify(state.profile)).update("\u0000").update(state.dossierMarkdown).digest("hex").slice(0, 16);
 }
 
 const asRecord = (v: unknown): Record<string, unknown> =>
@@ -145,7 +154,11 @@ export async function backupAnswerFiles(
 async function restoreUnlocked(
   profileId: string,
   ts: string,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+  precondition?: (state: AnswerState | null) => boolean,
+): Promise<RestoreResult> {
+  if (precondition && !precondition((await readAnswerState(profileId)).state)) {
+    return { ok: false, reason: "the answers changed since you loaded them", stale: true };
+  }
   if (!TS_RE.test(ts)) return { ok: false, reason: `not a backup timestamp: ${ts}` };
   const dir = backupDirFor(profileId);
   const json = await readOrNull(join(dir, `${ts}.json`));
@@ -218,7 +231,11 @@ async function saveAnswersUnlocked(profileId: string, mutate: Mutation, opts: Sa
   if (!current.ok) return { ok: false, reason: current.reason };
   const existingMd = (await readOrNull(dossierPath)) ?? buildDefaultDossierMarkdown(current.profile);
 
-  const out = mutate({ profile: current.raw, dossierMarkdown: existingMd });
+  const before: AnswerState = { profile: current.raw, dossierMarkdown: existingMd };
+  if (opts.precondition && !opts.precondition(before)) {
+    return { ok: false, reason: "the answers changed since you loaded them", stale: true };
+  }
+  const out = mutate(before);
   if (out === null) return { ok: true, changed: false };
   if ("reject" in out) return { ok: false, reason: out.reject };
 
@@ -342,6 +359,17 @@ export function saveAnswers(profileId: string, mutate: Mutation, opts: SaveOptio
 export function restoreAnswerBackup(
   profileId: string,
   ts: string,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
-  return withKeyLock(profileId, () => restoreUnlocked(profileId, ts));
+  precondition?: (state: AnswerState | null) => boolean,
+): Promise<RestoreResult> {
+  return withKeyLock(profileId, () => restoreUnlocked(profileId, ts, precondition));
+}
+
+/** The answers as a save would see them (profile JSON plus dossier), or the reason the profile cannot be read. */
+export async function readAnswerState(
+  profileId: string,
+): Promise<{ readonly state: AnswerState | null; readonly profile?: ApplyProfile; readonly reason?: string }> {
+  const current = await readApplyProfile(applyProfilePathFor(profileId));
+  if (!current.ok) return { state: null, reason: current.reason };
+  const md = (await readOrNull(candidateDossierPathFor(profileId))) ?? buildDefaultDossierMarkdown(current.profile);
+  return { state: { profile: current.raw, dossierMarkdown: md }, profile: current.profile };
 }

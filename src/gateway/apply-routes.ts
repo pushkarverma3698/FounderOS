@@ -32,6 +32,7 @@ import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE } from "./apply-api
 import { APPLY_PAGE_HEADERS, applyPageHeaders, escapeHtml, renderApplyPage, renderNoticePage } from "./apply-page.js";
 import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySender } from "./apply-session.js";
 import { runSubmit } from "./apply-submit.js";
+import { handleProfileEditor, isProfileEditorPath } from "./profile-api.js";
 
 const log = logger.child({ module: "apply-routes" });
 
@@ -186,6 +187,10 @@ export async function handleApplyRequest(
     const method = req.method ?? "";
     if (method !== "GET" && method !== "POST") {
       text(res, 405, "Method not allowed", { Allow: "GET, POST" });
+      return;
+    }
+    if (isProfileEditorPath(req.url)) {
+      await handleProfileEditor(req, res, deps);
       return;
     }
     const [token = "", action, ...extra] = pathParts(req.url);
