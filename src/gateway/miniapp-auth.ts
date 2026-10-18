@@ -11,14 +11,16 @@
  * with a newline. A valid hash proves Telegram issued the payload to that user; it does not prove
  * the user may touch this application, so the caller also compares the mapped profile with the
  * snapshot's. The user to profile map is the one the jobs bot already uses (JOBHUNT_SENDER_PROFILES),
- * so there is one place that says who is who. A user that is not in it is rejected, not defaulted.
+ * so there is one place that says who is who, and an entry there always wins. One fallback: the
+ * founder's private chat id (TELEGRAM_CHAT_ID, a positive integer, equal to his user id) maps to the
+ * default profile, so sign-in works where the map is not set. Any other user is rejected, not defaulted.
  *
  * Pure: no I/O, the clock and the environment are arguments.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { resolveJobsBotToken } from "../infra/jobs-bot-token.js";
-import { resolveProfileToken } from "../tools/jobhunt/profile-config.js";
+import { getProfile, resolveProfileToken } from "../tools/jobhunt/profile-config.js";
 import { parseSenderProfiles } from "./jobhunt-sender-profile.js";
 
 /** initData older than this is refused: a copied payload stops working within the hour. */
@@ -71,6 +73,11 @@ export function verifyInitData(initData: string, botToken: string, nowMs: number
   return { ok: true, userId, authDate };
 }
 
+/** The founder's private chat id is his Telegram user id: a plain positive integer, never a group (negative) id. */
+function isFounder(userId: number, chatId: string | undefined): boolean {
+  return chatId !== undefined && /^[1-9]\d*$/.test(chatId) && Number(chatId) === userId;
+}
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 /** The jobs bot's token (the bot that sent the card, so the one that signs initData) and the user to profile map, from `env`. */
@@ -85,6 +92,9 @@ export function authenticateMiniApp(header: string | undefined, env: Env, nowMs:
   const verified = verifyInitData(header ?? "", token, nowMs);
   if (!verified.ok) return verified;
   const profileToken = parseSenderProfiles(env["JOBHUNT_SENDER_PROFILES"]).get(verified.userId);
+  if (!profileToken && isFounder(verified.userId, env["TELEGRAM_CHAT_ID"])) {
+    return { ok: true, userId: verified.userId, profileId: getProfile().id };
+  }
   const profileId = profileToken ? resolveProfileToken(profileToken) : null;
   if (!profileId) return { ok: false, reason: "unknown-user" };
   return { ok: true, userId: verified.userId, profileId };

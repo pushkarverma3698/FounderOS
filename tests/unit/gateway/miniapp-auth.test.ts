@@ -77,3 +77,28 @@ describe("authenticateMiniApp", () => {
     expect(authenticateMiniApp(good(111), legacy, NOW).ok).toBe(true);
   });
 });
+
+describe("authenticateMiniApp founder fallback (TELEGRAM_CHAT_ID)", () => {
+  const base = { JOBS_BOT_TOKEN: BOT };
+
+  it("maps the founder id equal to TELEGRAM_CHAT_ID to the default profile when there is no map", () => {
+    const got = authenticateMiniApp(good(111), { ...base, TELEGRAM_CHAT_ID: "111" }, NOW);
+    expect(got).toMatchObject({ ok: true, userId: 111, profileId: "pushkar-nl-tech" });
+  });
+
+  it("still rejects any other user when there is no map", () => {
+    expect(authenticateMiniApp(good(333), { ...base, TELEGRAM_CHAT_ID: "111" }, NOW)).toEqual({ ok: false, reason: "unknown-user" });
+  });
+
+  it("lets an explicit map entry for the founder id win over the fallback", () => {
+    const env = { ...base, TELEGRAM_CHAT_ID: "222", JOBHUNT_SENDER_PROFILES: "222=wife" };
+    expect(authenticateMiniApp(good(222), env, NOW)).toMatchObject({ ok: true, profileId: "wife-nl-finance" });
+  });
+
+  it("never matches a negative, zero or garbage TELEGRAM_CHAT_ID", () => {
+    for (const bad of ["-111", "0", "abc", "111abc", "1.5", "", " "]) {
+      expect(authenticateMiniApp(good(111), { ...base, TELEGRAM_CHAT_ID: bad }, NOW)).toEqual({ ok: false, reason: "unknown-user" });
+    }
+    expect(authenticateMiniApp(good(111), base, NOW)).toEqual({ ok: false, reason: "unknown-user" });
+  });
+});

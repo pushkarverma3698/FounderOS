@@ -56,14 +56,14 @@ The rule above is unchanged: the machine presses the employer's real button only
 2. **The Mini App Submit** (`POST /apply/<token>/submit` on the answer page): counts as the decision only when all of these hold:
    - the HMAC link token is valid for that row and not expired;
    - the `X-Telegram-Init-Data` header passes Telegram WebApp verification against the jobs bot token (HMAC-SHA256 with the `WebAppData` key), with `auth_date` at most one hour old;
-   - the verified Telegram user id maps through `JOBHUNT_SENDER_PROFILES` to the same profile that owns the application row;
+   - the verified Telegram user id maps to the same profile that owns the application row: an entry in `JOBHUNT_SENDER_PROFILES` wins, otherwise the id equal to `TELEGRAM_CHAT_ID` (the founder's private chat) maps to the default profile, and any other user is refused;
    - the founder pressed the MainButton **and** then confirmed in the page itself ("Send your application to X now?"), and the page's stamp equals the stored snapshot (a stale page cannot submit a changed form).
 
 Anything short of that is a plain 404 and sends nothing. The URL token alone can save answers, as before, but it can never submit: the link is not proof of who holds it.
 
 A confirmed send, from either surface, writes an `agents.action_log` row (`job_application_submitted`, idempotency key `apply-submit:<rowId>`); the key is checked first and a row already audited is refused. The "earlier click with no confirmation" guard now persists in the answer-page snapshot (`unconfirmedAt`), so it survives a gateway restart.
 
-Deploy requirement: `JOBHUNT_SENDER_PROFILES` must contain the founder's Telegram user id, or every Mini App Submit is refused.
+Deploy requirement: none beyond `TELEGRAM_CHAT_ID`; `JOBHUNT_SENDER_PROFILES` is only needed to sign in other users or to override the founder's profile.
 
 ## References
 
