@@ -16,7 +16,8 @@
  * and his own contact details.
  */
 
-import type { Context } from "grammy";
+import type { Context, InlineKeyboard } from "grammy";
+import { profileEditorKeyboard } from "./profile-editor-link.js";
 import {
   applyProfilePathFor,
   readApplyProfile,
@@ -104,6 +105,12 @@ const USAGE =
   "<code>/profile remember Expected salary = 65000 EUR</code>\n" +
   "<code>/profile set answers.work_authorization requires-sponsorship</code>";
 
+/** The "Edit answers" web_app button, or nothing (group chat, someone else's profile, no https link base). */
+function editorMarkup(ctx: Context, profileId: string): { reply_markup?: InlineKeyboard } {
+  const kb = profileEditorKeyboard(ctx.chat?.id, ctx.from?.id, profileId);
+  return kb ? { reply_markup: kb } : {};
+}
+
 /** `/profile`, `/profile doc`, `/profile remember Q = A`, `/profile set <field> <value>`. */
 export async function handleProfile(ctx: Context): Promise<void> {
   const arg = resolveProfileArg(ctx.match?.toString() ?? "", ["set", "doc", "dossier", "remember", "qa"]);
@@ -175,7 +182,7 @@ export async function handleProfile(ctx: Context): Promise<void> {
         : `No usable ${who}apply profile — ${safeHtml(current.reason)}.\n\n` +
             `Nothing can fill a form until this exists. Set the four an ATS always asks for:\n` +
             `<code>/profile set first_name …</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>.`,
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...editorMarkup(ctx, arg.profile.id) },
     );
     return;
   }

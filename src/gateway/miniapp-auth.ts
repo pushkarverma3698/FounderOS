@@ -80,6 +80,13 @@ function isFounder(userId: number, chatId: string | undefined): boolean {
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+/** The profile this Telegram user edits and applies for: the sender map first, then the founder's private chat id. Null for anyone else. */
+export function profileForUser(userId: number, env: Env): string | null {
+  const profileToken = parseSenderProfiles(env["JOBHUNT_SENDER_PROFILES"]).get(userId);
+  if (!profileToken && isFounder(userId, env["TELEGRAM_CHAT_ID"])) return getProfile().id;
+  return profileToken ? resolveProfileToken(profileToken) : null;
+}
+
 /** The jobs bot's token (the bot that sent the card, so the one that signs initData) and the user to profile map, from `env`. */
 export function authenticateMiniApp(header: string | undefined, env: Env, nowMs: number): MiniAppAuth {
   let token: string;
@@ -91,11 +98,7 @@ export function authenticateMiniApp(header: string | undefined, env: Env, nowMs:
   }
   const verified = verifyInitData(header ?? "", token, nowMs);
   if (!verified.ok) return verified;
-  const profileToken = parseSenderProfiles(env["JOBHUNT_SENDER_PROFILES"]).get(verified.userId);
-  if (!profileToken && isFounder(verified.userId, env["TELEGRAM_CHAT_ID"])) {
-    return { ok: true, userId: verified.userId, profileId: getProfile().id };
-  }
-  const profileId = profileToken ? resolveProfileToken(profileToken) : null;
+  const profileId = profileForUser(verified.userId, env);
   if (!profileId) return { ok: false, reason: "unknown-user" };
   return { ok: true, userId: verified.userId, profileId };
 }
