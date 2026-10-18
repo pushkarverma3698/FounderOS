@@ -233,4 +233,15 @@ describe("answer store", () => {
     expect(await listAnswerBackups(WIFE)).toEqual([]);
     expect((await listAnswerBackups(DEFAULT_PROFILE_ID)).length).toBeGreaterThan(0);
   });
+
+  it("concurrent saves on one profile all land (no lost update)", async () => {
+    await seed(DEFAULT_PROFILE_ID);
+    const qs = ["Alpha q", "Beta q", "Gamma q", "Delta q", "Epsilon q"];
+    const results = await Promise.all(qs.map((q, i) => upsertLearnedAnswer(DEFAULT_PROFILE_ID, q, `A${i}`)));
+    expect(results.every((r) => r.ok)).toBe(true);
+    const bank = (await readJson(DEFAULT_PROFILE_ID))["question_bank"];
+    expect(Object.keys(bank).sort()).toEqual([...qs].sort());
+    const md = await readMd(DEFAULT_PROFILE_ID);
+    for (const q of qs) expect(md).toContain(q);
+  });
 });

@@ -44,3 +44,18 @@ export async function atomicWriteMany(files: readonly AtomicFile[]): Promise<voi
 export async function atomicWrite(path: string, content: string): Promise<void> {
   await atomicWriteMany([{ path, content }]);
 }
+
+/** In-process promise-chain mutex per key: callers with the same key run one at a time, in call order. */
+const tails = new Map<string, Promise<unknown>>();
+export async function withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = tails.get(key) ?? Promise.resolve();
+  // allow-failopen: a failed earlier holder must not block the next one; its own caller sees the error.
+  const run = prev.catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined); // allow-failopen: the tail only orders holders; run carries the error to the caller.
+  tails.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (tails.get(key) === tail) tails.delete(key);
+  }
+}

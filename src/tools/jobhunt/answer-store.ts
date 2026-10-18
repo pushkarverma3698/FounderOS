@@ -13,7 +13,7 @@
 import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { syncCoreFacts } from "./answer-core-facts.js";
-import { atomicWrite, atomicWriteMany } from "./atomic-write.js";
+import { atomicWrite, atomicWriteMany, withKeyLock } from "./atomic-write.js";
 import {
   APPLY_PROFILE_PATH,
   applyProfilePathFor,
@@ -142,7 +142,7 @@ export async function backupAnswerFiles(
 }
 
 /** Put a backup pair back. The profile JSON is validated first; the current files are backed up before they are replaced. */
-export async function restoreAnswerBackup(
+async function restoreUnlocked(
   profileId: string,
   ts: string,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
@@ -211,7 +211,7 @@ function learnedLines(markdown: string): Array<{ question: string; answer: strin
  * Back up, apply mutate to the profile JSON and the dossier markdown, validate the profile, sync Core Facts,
  * and write both files atomically. Refuses (writes nothing) when the profile is unreadable or the result is invalid.
  */
-export async function saveAnswers(profileId: string, mutate: Mutation, opts: SaveOptions = {}): Promise<SaveResult> {
+async function saveAnswersUnlocked(profileId: string, mutate: Mutation, opts: SaveOptions = {}): Promise<SaveResult> {
   const profilePath = applyProfilePathFor(profileId);
   const dossierPath = candidateDossierPathFor(profileId);
   const current = await readApplyProfile(profilePath);
@@ -332,4 +332,16 @@ export async function recordLearnedAnswer(profileId: string, question: string, a
   const dossierPath = candidateDossierPathFor(profileId);
   const existing = (await readOrNull(dossierPath)) ?? `# Candidate Reference Dossier (${profileId})\n\n${LEARNED_HEADING}\n`;
   await atomicWrite(dossierPath, withLearnedLine(existing, q, a));
+}
+
+/** Serialized per profile so overlapping saves (bot reply, answer page, editor) never read the same old state. */
+export function saveAnswers(profileId: string, mutate: Mutation, opts: SaveOptions = {}): Promise<SaveResult> {
+  return withKeyLock(profileId, () => saveAnswersUnlocked(profileId, mutate, opts));
+}
+
+export function restoreAnswerBackup(
+  profileId: string,
+  ts: string,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+  return withKeyLock(profileId, () => restoreUnlocked(profileId, ts));
 }
