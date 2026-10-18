@@ -22,6 +22,7 @@ import { handleProfile } from "../gateway/profile-commands.js";
 import { handleWifeCommands } from "../gateway/wife-commands.js";
 import { handleCsv, handleFresh, handleGaps, handleJobs, handleToday, type JobsViewDeps } from "../gateway/jobhunt-view.js";
 import { withForcedProfileToken } from "../gateway/jobhunt-profile-arg.js";
+import { publishApplyMenuButton } from "../gateway/apply-menu-button.js";
 import { COMMAND_MENU, buildCommandsHelp, telegramCommandPayload } from "../gateway/command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "../gateway/telegram-poll.js";
@@ -196,6 +197,7 @@ export async function startJobsBot(): Promise<void> {
   _bot = new Bot(resolveJobsBotToken().token);
   registerJobsHandlers(_bot);
   await publishCommandMenu(_bot);
+  await publishApplyMenuButton(_bot.api);
   void pollUntilStopped(_bot, (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 }
 

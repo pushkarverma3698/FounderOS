@@ -32,6 +32,7 @@ import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE } from "./apply-api
 import { APPLY_PAGE_HEADERS, applyPageHeaders, escapeHtml, renderApplyPage, renderNoticePage } from "./apply-page.js";
 import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySender } from "./apply-session.js";
 import { runSubmit } from "./apply-submit.js";
+import { handleHomeRoutes, type JobsApiDeps } from "./apply-prepare-api.js";
 
 const log = logger.child({ module: "apply-routes" });
 
@@ -49,6 +50,8 @@ export interface ApplyRouteDeps {
   readonly senderFor: (chatId: string) => ApplySender;
   readonly submit: typeof runSubmit;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
+  /** The Mini App job list wiring (apply-prepare-api.ts); defaults to the database. */
+  readonly jobs?: JobsApiDeps;
 }
 
 export function defaultApplyRouteDeps(): ApplyRouteDeps {
@@ -188,7 +191,9 @@ export async function handleApplyRequest(
       text(res, 405, "Method not allowed", { Allow: "GET, POST" });
       return;
     }
-    const [token = "", action, ...extra] = pathParts(req.url);
+    const parts = pathParts(req.url);
+    if (await handleHomeRoutes(req, res, parts, deps, deps.jobs)) return;
+    const [token = "", action, ...extra] = parts;
     if (extra.length > 0) {
       notFound(res);
       return;

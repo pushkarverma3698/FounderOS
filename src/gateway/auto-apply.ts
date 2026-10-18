@@ -9,34 +9,30 @@
  * and the per-row lock live in apply-flow.ts / apply-session.ts.
  */
 
-import { InputFile, type Context } from "grammy";
+import { InlineKeyboard, InputFile, type Context } from "grammy";
 import { getApplicationById } from "../db/apply-queries.js";
 import type { JobApplication } from "../db/schema.js";
 import { childLogger } from "../infra/logger.js";
-import { DRAFT_SECTIONS, getApplyUrl } from "../tools/jobhunt/apply-packet.js";
-import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
+import { DRAFT_SECTIONS } from "../tools/jobhunt/apply-packet.js";
 import { recordLearnedAnswer } from "../tools/jobhunt/candidate-dossier.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
-import { coverLetterMessage } from "./apply-cover-letter.js";
 import {
   advanceAfterQuestion,
   buildQuestionKeyboard,
   fileQuestionNotice,
   isFileQuestion,
-  runFormPrepAndPrompt,
+  opensInTelegram,
 } from "./apply-flow.js";
-import { alreadyAppliedMessage, runSubmit, type SubmitIo } from "./apply-submit.js";
-import { appliedOn, artifactDirForChat, resolveCoverLetter, resolveResumePdf } from "./apply-material.js";
+import { applyHomeUrl } from "./apply-home.js";
+import { prepareRow } from "./apply-prepare.js";
+import { runSubmit, type SubmitIo } from "./apply-submit.js";
 import {
-  acquireApplyLock,
   cardTag,
   ctxSender,
   endSession,
-  forgetUnconfirmedClick,
   isStaleTap,
   markSkipped,
-  newSession,
   questionTag,
   rememberAnswer,
   sessionForChat,
@@ -61,50 +57,13 @@ function answerLateTap(ctx: Context, text: string): Promise<unknown> {
   );
 }
 
-/** Start the one-click auto-apply flow for a resolved row. */
+/** Start the one-click auto-apply flow for a resolved row. The work is prepareRow (apply-prepare.ts); this adds the chat replies. */
 export async function startAutoApplyForRow(ctx: Context, row: JobApplication, profile: JobSearchProfile): Promise<void> {
-  const on = appliedOn(row);
-  if (on) {
-    await ctx.reply(alreadyAppliedMessage(row, on), { parse_mode: "HTML" });
-    return;
-  }
-  const chatId = String(ctx.chat?.id ?? "unknown");
-  const loaded = await readApplyProfile(applyProfilePathFor(profile.id));
-  if (!loaded.ok) {
-    await ctx.reply(`⚠ No usable apply profile for ${safeHtml(profile.candidateName)} (${safeHtml(loaded.reason)}). Send <code>/profile</code> first.`, { parse_mode: "HTML" });
-    return;
-  }
-
-  const artifactDir = artifactDirForChat(chatId);
-  const pdfResolved = await resolveResumePdf(row, profile, loaded.profile, artifactDir);
-  if (!pdfResolved.ok) {
-    await ctx.reply(`⚠ Cannot start auto-apply: ${safeHtml(pdfResolved.reason)}`, { parse_mode: "HTML" });
-    return;
-  }
-
-  const targetUrl = getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
-  if (!targetUrl) {
-    await ctx.reply(`⚠ ${safeHtml(row.company)} has no application URL on file.`, { parse_mode: "HTML" });
-    return;
-  }
-
   const send = ctxSender(ctx);
-  const held = await acquireApplyLock(send, row.id);
-  if (!held) return;
-  forgetUnconfirmedClick(row.id); // reopening the form is the deliberate retry the unconfirmed reply names
-  try {
-    await ctx.reply(`🤖 Opening ${safeHtml(row.company)}'s form for ${safeHtml(profile.candidateName)} and filling from your dossier…`, { parse_mode: "HTML" });
-    const letter = await resolveCoverLetter(row, profile, artifactDir);
-    if (letter.ok) await ctx.reply(coverLetterMessage(row.company, letter), { parse_mode: "HTML" });
-    const base = {
-      rowId: row.id, chatId, profileId: profile.id, candidateName: profile.candidateName,
-      company: row.company, title: row.title, targetUrl, resumePdfPath: pdfResolved.pdfPath,
-      ...(letter.ok ? { coverLetter: letter.letter } : { coverLetterNote: letter.reason }),
-    };
-    await runFormPrepAndPrompt(send, newSession(base), held);
-  } finally {
-    held();
-  }
+  const result = await prepareRow(row, profile, String(ctx.chat?.id ?? "unknown"), send);
+  if (result.kind === "started") return;
+  if (result.reason === "lock-held") await send.text(result.html);
+  else await ctx.reply(result.html, { parse_mode: "HTML" });
 }
 
 /** `/apply <rank|id>` and `/wife_apply <rank|id>` command handler. */
@@ -112,6 +71,12 @@ export async function handleAutoApply(ctx: Context): Promise<void> {
   const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowRef(rest) !== null);
   if (isProfileArgMiss(selected)) {
     await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const chatId = String(ctx.chat?.id ?? "");
+  const home = selected.rest.trim() === "" ? applyHomeUrl() : null;
+  if (home && opensInTelegram(chatId, home)) {
+    await ctx.reply("Pick a job to apply to:", { reply_markup: new InlineKeyboard().webApp("📋 Open job list", home) });
     return;
   }
   const ref = parseRowRef(selected.rest);
