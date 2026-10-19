@@ -145,6 +145,33 @@ describe("runSubmit", () => {
     expect(io.settled).toHaveBeenCalledTimes(1);
   });
 
+  it("submits with the answers that name the company, which live only in the snapshot (no session, after a restart)", async () => {
+    let seen: { question_bank?: Record<string, string> } | undefined;
+    setAutoApplyRunnerForTests({
+      coverLetter: async () => ({ ok: false, reason: "not in this test" }),
+      submit: (async (_url: string, _company: string, profile: { question_bank?: Record<string, string> }) => {
+        seen = profile;
+        return sendResult(true);
+      }) as never,
+    } as never);
+    saveApplySnapshot({
+      ...(snapshot as object),
+      summary: {
+        filled: 2, total: 2, hasCaptcha: false, filledLabels: [], unanswered: [],
+        filledAnswers: [
+          { label: "How did you hear about us?", value: "Workwize Career Site", fieldType: "select", editable: true },
+          { label: "Cover letter", value: "cover-letter-workwize-1.pdf", fieldType: "file", editable: false },
+          { label: "Name", value: "Pushkar Verma", fieldType: "text", editable: true },
+        ],
+      },
+    } as never);
+    const { io } = recorder();
+    await runSubmit(ROW_ID, "777", "miniapp", io);
+    expect(seen?.question_bank?.["How did you hear about us?"]).toBe("Workwize Career Site");
+    expect(seen?.question_bank?.["Cover letter"]).toBeUndefined();
+    expect(seen?.question_bank?.["Name"]).toBeUndefined();
+  });
+
   it("refuses before sending when the row already has an audit row", async () => {
     runner(() => sendResult(true));
     mockHasBeenAudited.mockResolvedValue(true);
