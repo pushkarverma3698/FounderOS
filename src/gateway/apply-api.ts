@@ -116,7 +116,7 @@ export function computeStatus(rowId: string, snap: ApplySnapshot | null, nowMs: 
       return { state: "unconfirmed", detail, missingRequired: [] };
     }
     const detail =
-      "Submit was clicked but no confirmation came back, so it may have arrived. Check your email before trying again with /apply in Telegram." +
+      "Submit was clicked but no confirmation came back, so it may have arrived. Check your email first; if nothing came, submit it yourself from the job link below, then tap I submitted it." +
       (why ? ` What the bot saw: ${why}` : "");
     return { state: "unconfirmed", detail, missingRequired: [] };
   }
