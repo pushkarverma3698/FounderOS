@@ -106,7 +106,7 @@ const CODE_STEP = [
   '<div id="done" style="display:none"><h2>Thank you! Your application has been submitted.</h2></div>\';',
   "var c = document.getElementById('c'), go = document.getElementById('go');",
   "c.addEventListener('input', function () { go.disabled = c.value.length < 8; });",
-  "go.addEventListener('click', function () { document.getElementById('done').style.display = 'block'; });",
+  "go.addEventListener('click', function () { c.style.display = 'none'; go.style.display = 'none'; document.getElementById('done').style.display = 'block'; });",
 ].join("");
 const CODE_FORM_HTML = FORM_HTML.replace("document.getElementById('confirmation').style.display = 'block';", CODE_STEP);
 
