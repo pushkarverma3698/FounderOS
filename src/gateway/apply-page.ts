@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { APPLY_PAGE_SCRIPT } from "./apply-page-script.js";
 import type { ApplySnapshot, ApplySnapshotFilled, ApplySnapshotQuestion } from "../tools/jobhunt/apply-link.js";
 import { MAX_ANSWER_CHARS } from "../tools/jobhunt/form-filled.js";
+import { namesHiddenBotCheck } from "../tools/jobhunt/held-submit.js";
 
 const MAX_RADIO_OPTIONS = 4;
 const SHOWN_VALUE_CHARS = 300;
@@ -44,6 +45,7 @@ const CSS =
   ".hint,.note{color:#5b6573;font-size:.9rem;margin:6px 0 0}.warn{background:#fff4e5;border:1px solid #f0c36d;border-radius:10px;padding:10px}" +
   ".val{white-space:pre-wrap;overflow-wrap:anywhere}button.alt{background:transparent;color:inherit;border:1px solid #b9c0cb}" +
   "#mini{background:#fff;border:1px solid #dde1e7;border-radius:10px;padding:12px;margin:0 0 12px}" +
+  "button.copy{width:auto;padding:6px 14px;margin-top:6px;font-size:.9rem}a.go{display:block;text-align:center;font-weight:600;padding:14px;border-radius:10px;background:#1f6feb;color:#fff;text-decoration:none;margin:8px 0}" +
   "ul{padding-left:20px;margin:0}li{margin:2px 0}.foot{color:#5b6573;font-size:.85rem;margin-top:24px}" +
   "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}.q{background:#171c24;border-color:#2a313c}" +
   "input[type=text],select,textarea{background:#0f1319;border-color:#3a4350}#mini{background:#171c24;border-color:#2a313c}" +
@@ -246,7 +248,39 @@ const MINI_PANEL =
   `<div id="mini-code" hidden><label for="mini-code-input">Code from your email</label>` +
   `<input type="text" id="mini-code-input" maxlength="12" autocomplete="one-time-code" autocapitalize="off" spellcheck="false">` +
   `<button type="button" id="mini-code-send">Send code</button></div>` +
-  `<button type="button" id="mini-cancel" class="alt" hidden>Cancel application</button></section>`;
+  `<button type="button" id="mini-cancel" class="alt" hidden>Cancel application</button>` +
+  `<button type="button" id="mini-again" hidden>Prepare again</button>` +
+  `<div id="mini-again-confirm" hidden><p>Check your email first: if the application arrived, do not send it twice. The bot opens the form and fills it again; nothing is sent until you tap Submit.</p>` +
+  `<button type="button" id="mini-again-yes">Yes, prepare again</button><button type="button" id="mini-again-back" class="alt">Back</button></div></section>`;
+
+const isWebUrl = (url: string): boolean => /^https?:\/\//i.test(url);
+
+/**
+ * Unconfirmed because the form's hidden bot check most likely refused the bot's click: everything the founder needs
+ * to send it from his own browser. The link, then every filled value in full (a Copy button each inside Telegram),
+ * then "I submitted it", which marks the row applied after an in-page confirm.
+ */
+function renderSelfSubmit(snap: ApplySnapshot, scripted: boolean): string {
+  if (snap.unconfirmedAt === undefined || !namesHiddenBotCheck(snap.unconfirmedEvidence)) return "";
+  const link = isWebUrl(snap.targetUrl)
+    ? `<a id="self-link" href="${escapeHtml(snap.targetUrl)}" class="go" target="_blank" rel="noopener noreferrer">Open the job form</a>`
+    : `<p class="note">The job address on file is not a web link; open the job from the original listing.</p>`;
+  const rows = snap.summary.filledAnswers.map((f, i) => {
+    const head = `<div class="t">${escapeHtml(f.label)}</div>`;
+    if (READ_ONLY_FIELD_TYPES.has(f.fieldType)) return `<div class="q">${head}<p class="note val">Upload: ${escapeHtml(f.value)}</p></div>`;
+    const copy = scripted ? `<button type="button" class="copy" data-copy="self-v-${i}">Copy</button>` : "";
+    return `<div class="q">${head}<p class="val" id="self-v-${i}">${escapeHtml(f.value)}</p>${copy}</div>`;
+  });
+  const done = scripted
+    ? `<button type="button" id="self-done">I submitted it</button>` +
+      `<div id="self-confirm" hidden><p>Only tap yes once the job site showed you its thank-you page. The bot marks it applied and never sends it.</p>` +
+      `<button type="button" id="self-yes">Yes, I submitted it</button><button type="button" id="self-back" class="alt">Back</button></div>`
+    : "";
+  const intro =
+    `<p class="note">The form's bot check most likely refused the bot, so this was probably not sent. ` +
+    `Open the form, paste these answers, attach your CV and submit it. Then come back and tap I submitted it.</p>`;
+  return `<section id="self"><h2>Submit it yourself</h2>${intro}${link}${rows.join("")}${done}</section>`;
+}
 
 const MINI_FOOTER =
   `<p class="foot">Saving answers makes the bot re-fill the form. Inside Telegram, Submit appears here once the form is ready; ` +
@@ -268,9 +302,9 @@ export function renderApplyPage(snap: ApplySnapshot, opts: { readonly nonce?: st
     : sections;
   const head = `<h1>${escapeHtml(title)}</h1><p class="sub">${escapeHtml(intro)}</p>${warn}`;
   const nonce = opts.nonce;
-  if (!nonce) return shell(title, head + body + FOOTER);
-  const attrs = ` data-created="${snap.createdAt}" data-company="${escapeHtml(snap.company)}"`;
+  if (!nonce) return shell(title, head + renderSelfSubmit(snap, false) + body + FOOTER);
+  const attrs = ` data-created="${snap.createdAt}" data-company="${escapeHtml(snap.company)}" data-row="${escapeHtml(snap.rowId)}"`;
   const n = escapeHtml(nonce);
   const scripts = `<script nonce="${n}" src="${TELEGRAM_SCRIPT_HOST}/js/telegram-web-app.js"></script><script nonce="${n}">${APPLY_PAGE_SCRIPT}</script>`;
-  return shell(title, head + MINI_PANEL + body + `<p id="mini-save" role="status" class="note"></p>` + MINI_FOOTER, attrs, scripts);
+  return shell(title, head + MINI_PANEL + renderSelfSubmit(snap, true) + body + `<p id="mini-save" role="status" class="note"></p>` + MINI_FOOTER, attrs, scripts);
 }
