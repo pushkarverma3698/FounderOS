@@ -261,5 +261,13 @@ describe("saved-answers editor", () => {
       expect(PROFILE_PAGE_SCRIPT).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
       expect(PROFILE_PAGE_SCRIPT).toContain("X-Telegram-Init-Data");
     });
+
+    it("hints that the notice detail wins, on the days field only", async () => {
+      const { PROFILE_PAGE_SCRIPT } = await import("../../../src/gateway/profile-page-script.js");
+      const hint = "While the detail below is filled in, forms use the detail, not this number.";
+      expect(PROFILE_PAGE_SCRIPT.split(hint).length - 1).toBe(1);
+      const line = PROFILE_PAGE_SCRIPT.split("\n").find((l) => l.includes(hint)) ?? "";
+      expect(line).toContain("notice_period_days");
+    });
   });
 });

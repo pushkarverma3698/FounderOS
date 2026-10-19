@@ -169,7 +169,7 @@ export const PROFILE_PAGE_SCRIPT = String.raw`(function () {
       warn.appendChild(el("p", "err", "The saved answers file cannot be read: " + state.broken + ". Restore a backup below."));
       root.appendChild(warn);
     }
-    if (state.core.length) { heading("Core answers"); state.core.forEach(function (f) { root.appendChild(fieldCard(f)); }); }
+    if (state.core.length) { heading("Core answers"); state.core.forEach(function (f) { root.appendChild(fieldCard(f, f.field === "notice_period_days" ? "While the detail below is filled in, forms use the detail, not this number." : "")); }); }
     if (state.eeo.length) {
       heading("Voluntary self-identification");
       state.eeo.forEach(function (f) { root.appendChild(fieldCard({ label: f.label, field: f.field, value: f.value, kind: "text" }, "Leave empty to use the form's decline option.")); });

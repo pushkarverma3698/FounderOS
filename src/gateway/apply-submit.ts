@@ -144,7 +144,7 @@ async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: s
 
 async function settleUnconfirmed(row: JobApplication, targetUrl: string, evidence: string, io: SubmitIo): Promise<SubmitResult> {
   // The click went through, so the application may have arrived: no Submit here or on the tapped card.
-  noteUnconfirmedClick(row.id);
+  noteUnconfirmedClick(row.id, evidence);
   await io.settled();
   await io.text(
     `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(evidence)}\n` +

@@ -133,6 +133,8 @@ describe("renderApplyPage", () => {
   it("renders a nothing-left page when every question is answered", () => {
     const html = renderApplyPage(snap({ unanswered: [], filledAnswers: [] }));
     expect(html).toContain("Nothing left to answer");
+    expect(html).toContain("tap Submit application at the bottom of the screen");
+    expect(html).not.toContain("press Submit in Telegram");
     expect(html).not.toContain("button type=");
   });
 

@@ -15,6 +15,7 @@ import type { JobApplication } from "../db/schema.js";
 import { childLogger } from "../infra/logger.js";
 import { DRAFT_SECTIONS } from "../tools/jobhunt/apply-packet.js";
 import { recordLearnedAnswer } from "../tools/jobhunt/candidate-dossier.js";
+import { namesCompany } from "../tools/jobhunt/company-answer.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import {
@@ -33,6 +34,7 @@ import {
   endSession,
   isStaleTap,
   markSkipped,
+  type PendingApplySession,
   questionTag,
   rememberAnswer,
   sessionForChat,
@@ -92,6 +94,22 @@ export async function handleAutoApply(ctx: Context): Promise<void> {
   await startAutoApplyForRow(ctx, resolved.row, selected.profile);
 }
 
+/**
+ * Keep an answer for this form, and save it for every later form unless it names this form's company
+ * ("Mollie's Career Site" is not an answer for anyone else). Returns the chat line to send.
+ */
+async function keepAnswer(session: PendingApplySession, label: string, answer: string): Promise<string> {
+  rememberAnswer(session, label, answer);
+  const shown = `<b>${safeHtml(label)}</b> → <code>${safeHtml(answer)}</code>`;
+  if (namesCompany(answer, session.company)) {
+    log.info({ profileId: session.profileId, question: label }, "Learned answer names the company; used for this form only");
+    return `📝 Used for this form only, not saved (it names ${safeHtml(session.company)}): ${shown}`;
+  }
+  await recordLearnedAnswer(session.profileId, label, answer);
+  log.info({ profileId: session.profileId, question: label }, "Saved learned form answer from chat reply");
+  return `💾 Saved to ${safeHtml(session.candidateName)}'s dossier: ${shown}`;
+}
+
 /** Intercept plain-text replies when the chat has an active unanswered form question. */
 export async function tryHandlePendingApplyReply(ctx: Context, text: string): Promise<boolean> {
   const trimmed = text.trim();
@@ -107,10 +125,7 @@ export async function tryHandlePendingApplyReply(ctx: Context, text: string): Pr
     return true;
   }
 
-  await recordLearnedAnswer(session.profileId, q.label, trimmed);
-  rememberAnswer(session, q.label, trimmed);
-  log.info({ profileId: session.profileId, question: q.label }, "Saved learned form answer from chat reply");
-  await ctx.reply(`💾 Saved to ${safeHtml(session.candidateName)}'s dossier: <b>${safeHtml(q.label)}</b> → <code>${safeHtml(trimmed)}</code>`, { parse_mode: "HTML" });
+  await ctx.reply(await keepAnswer(session, q.label, trimmed), { parse_mode: "HTML" });
   await advanceAfterQuestion(ctxSender(ctx), session);
   return true;
 }
@@ -164,10 +179,9 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
       await ctx.answerCallbackQuery({ text: "Invalid option" });
       return true;
     }
-    await recordLearnedAnswer(session.profileId, q.label, chosen);
-    rememberAnswer(session, q.label, chosen);
+    const reply = await keepAnswer(session, q.label, chosen);
     await ctx.answerCallbackQuery({ text: `Saved: ${chosen.slice(0, 30)}` });
-    await ctx.reply(`💾 Saved to ${safeHtml(session.candidateName)}'s dossier: <b>${safeHtml(q.label)}</b> → <code>${safeHtml(chosen)}</code>`, { parse_mode: "HTML" });
+    await ctx.reply(reply, { parse_mode: "HTML" });
     await advanceAfterQuestion(ctxSender(ctx), session);
     return true;
   }

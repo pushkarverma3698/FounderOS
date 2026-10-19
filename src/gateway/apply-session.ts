@@ -136,6 +136,7 @@ export const clearOutcome = (rowId: string): void => void outcomes.delete(rowId)
  * arrives after the first send has finished and released the lock; this refuses it until the form is reopened.
  */
 const unconfirmedClicks = new Map<string, Date>();
+const unconfirmedEvidence = new Map<string, string>();
 
 export const sessionForChat = (chatId: string): PendingApplySession | undefined => sessionsByChat.get(chatId);
 export const sessionForRow = (rowId: string): PendingApplySession | undefined => sessionsByRow.get(rowId);
@@ -182,6 +183,7 @@ export function clearAutoApplySessionsForTests(): void {
   sessionsByRow.clear();
   locks.clear();
   unconfirmedClicks.clear();
+  unconfirmedEvidence.clear();
   outcomes.clear();
 }
 
@@ -193,26 +195,33 @@ export function unconfirmedClickAt(rowId: string): Date | undefined {
   return at === undefined ? undefined : new Date(at);
 }
 
-function persistUnconfirmed(rowId: string, at: number | undefined): void {
+/** Why the last Submit click came back unconfirmed: memory first, else the snapshot. */
+export function unconfirmedEvidenceFor(rowId: string): string | undefined {
+  return unconfirmedEvidence.get(rowId) ?? loadApplySnapshot(rowId)?.unconfirmedEvidence;
+}
+
+function persistUnconfirmed(rowId: string, at: number | undefined, evidence?: string): void {
   try {
     const snap = loadApplySnapshot(rowId);
-    if (!snap || snap.unconfirmedAt === at) return;
-    const { unconfirmedAt: _drop, ...rest } = snap;
-    saveApplySnapshot(at === undefined ? rest : { ...rest, unconfirmedAt: at });
+    if (!snap || (snap.unconfirmedAt === at && snap.unconfirmedEvidence === evidence)) return;
+    const { unconfirmedAt: _drop, unconfirmedEvidence: _dropEvidence, ...rest } = snap;
+    saveApplySnapshot(at === undefined ? rest : { ...rest, unconfirmedAt: at, ...(evidence ? { unconfirmedEvidence: evidence } : {}) });
   } catch (err) {
     // allow-failopen: the in-memory guard still holds for this process; only its survival across a restart is lost.
     log.warn({ rowId, err: (err as Error).message }, "could not persist the unconfirmed-submit guard");
   }
 }
 
-export function noteUnconfirmedClick(rowId: string): void {
+export function noteUnconfirmedClick(rowId: string, evidence?: string): void {
   const now = new Date();
   unconfirmedClicks.set(rowId, now);
-  persistUnconfirmed(rowId, now.getTime());
+  if (evidence) unconfirmedEvidence.set(rowId, evidence);
+  persistUnconfirmed(rowId, now.getTime(), evidence);
 }
 
 export function forgetUnconfirmedClick(rowId: string): void {
   unconfirmedClicks.delete(rowId);
+  unconfirmedEvidence.delete(rowId);
   persistUnconfirmed(rowId, undefined);
 }
 

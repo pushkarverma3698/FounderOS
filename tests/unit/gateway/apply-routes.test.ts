@@ -284,6 +284,21 @@ describe("apply answer page routes", () => {
       expect(record).toHaveBeenCalledTimes(1);
     });
 
+    it("uses an answer that names the company for this form only: re-filled with it, never recorded", async () => {
+      const res = await post(form({ [applyFieldName(WHERE)]: "Ireland", [applyFieldName(WHY)]: "I admire what Workwize builds." }));
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Saved 1 answer.");
+      expect(body).toContain("1 answer names Workwize, so it was used for this form only and not saved");
+      expect(record.mock.calls).toEqual([[PROFILE, WHERE, "Ireland"]]);
+      await vi.waitFor(() => expect(refill).toHaveBeenCalledTimes(1));
+      const call = refill.mock.calls[0] as unknown as [ApplySnapshot, { label: string; answer: string }[]];
+      expect(call[1]).toEqual([
+        { label: WHERE, answer: "Ireland" },
+        { label: WHY, answer: "I admire what Workwize builds." },
+      ]);
+    });
+
     it("saves a changed filled value under its label and re-fills with it", async () => {
       const res = await post(form({ [applyFieldName("Full name")]: "Pushkar Verma", [applyFieldName("Email")]: "new@example.com" }));
       expect(res.status).toBe(200);
