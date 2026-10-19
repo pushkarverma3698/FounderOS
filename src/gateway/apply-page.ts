@@ -195,7 +195,7 @@ function orderQuestions(qs: readonly ApplySnapshotQuestion[]): ApplySnapshotQues
 
 function renderQuestions(qs: readonly ApplySnapshotQuestion[]): string {
   if (qs.length === 0) {
-    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the values below, then press Submit in Telegram.</p>`;
+    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the values below, then tap Submit application at the bottom of the screen.</p>`;
   }
   return `<h2>Needs your answer (${qs.length})</h2>${qs.map(renderQuestion).join("")}`;
 }

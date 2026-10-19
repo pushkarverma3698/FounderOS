@@ -4,7 +4,7 @@
  * The Mini App job list (apply-home.ts) talks to four routes, all mounted from apply-routes.ts:
  *
  *   GET  /apply/home                      the static shell (no user data; CSP nonce per request)
- *   GET  /apply/api/jobs                  {jobs:[{id, rank, company, title, state}]} for the signed-in profile only
+ *   GET  /apply/api/jobs                  {jobs:[{id, rank, company, title, section, state}]} for the signed-in profile only
  *   POST /apply/api/prepare/<rowId>       202 and prepareRow runs in the background; 409 if one is already running
  *   GET  /apply/api/job-status/<rowId>    {state, detail, url?}; url is the signed answer page once a form is ready
  *
@@ -16,7 +16,7 @@
 
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getApplicationById, listApplyQueue } from "../db/apply-queries.js";
+import { getApplicationById, HOME_SECTIONS, listApplyQueue } from "../db/apply-queries.js";
 import type { JobApplication } from "../db/schema.js";
 import { logger } from "../infra/logger.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
@@ -39,7 +39,7 @@ export interface JobsApiDeps {
 }
 
 export const defaultJobsApiDeps: JobsApiDeps = {
-  listQueue: (profile) => listApplyQueue(profile.tenantId, profile.id),
+  listQueue: (profile) => listApplyQueue(profile.tenantId, profile.id, HOME_SECTIONS),
   getRow: (id, profile) => getApplicationById(id, profile.tenantId),
   prepare: prepareRow,
 };
@@ -90,6 +90,7 @@ async function listJobs(res: ServerResponse, who: Extract<Who, { ok: true }>, de
       rank: r.brief_rank ?? 0,
       company: r.company,
       title: r.title,
+      section: r.brief_section ?? "",
       state: computeStatus(r.id, loadApplySnapshot(r.id, deps.root), deps.now())?.state ?? "idle",
     }));
   json(res, 200, { jobs: items });
