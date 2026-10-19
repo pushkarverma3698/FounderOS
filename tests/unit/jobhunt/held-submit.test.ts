@@ -113,6 +113,17 @@ describe("held submit", () => {
       const outcome = await awaitSubmitOutcome(page, page.url(), { message: null }, { watchForCode: true });
       expect(outcome.kind).toBe("confirmed");
     }, 30_000);
+
+    it("names the invisible bot check when a click on a reCAPTCHA page changes nothing (Mollie, Ashby, 2026-10-19)", async () => {
+      const page = await open("<form><button id=b type=submit>Submit Application</button></form><div class=grecaptcha-badge></div>"
+        + "<script>document.querySelector('form').onsubmit = (e) => e.preventDefault();</script>");
+      if (!page) return;
+      await page.click("#b");
+      const outcome = await awaitSubmitOutcome(page, page.url(), { message: null }, { watchForCode: false });
+      expect(outcome.kind).toBe("unconfirmed");
+      expect(outcome.evidence).toMatch(/hidden bot check \(reCAPTCHA\)/);
+      expect(outcome.evidence).toMatch(/submit it yourself/i);
+    }, 30_000);
   });
 
   describe("enterEmailCode", () => {
