@@ -16,7 +16,8 @@ in the built-in browser at phone width.
 | #1216 | Sweep fixes: ask rows ("Needs your call"), filter, Submit copy, notice hint, company-named answers not saved globally, `menu` peer |
 | #1217 | Ashby nameless Location combobox filled, Submit blocked while a `*` field is empty, unconfirmed evidence on the page |
 | #1219 | Form-only answers (company-named) reach the submit run |
-| this PR | Unconfirmed result on a reCAPTCHA page says the bot check most likely refused it, and to submit by hand |
+| #1221 | Unconfirmed result on a reCAPTCHA page says the bot check most likely refused it, and to submit by hand |
+| #1227 | Thank-you text confirms a submit only once the Submit button is gone (Matillion false positive) |
 
 ## Live results (prod, founder profile `pushkar-nl-tech`)
 
@@ -52,6 +53,11 @@ in the built-in browser at phone width.
 
 ## Metrics
 - Real applications sent from the Mini App this session: 0. Mollie: first the Location bug, then (most likely) Ashby's invisible reCAPTCHA.
+- Verified sends ever, from any path: 0. Matillion (Lever, 2026-10-17 17:29Z) is marked `applied`, but it was a false
+  positive: the confirm check matched "Thank you for your interest in joining # Team Green", which Lever prints above the
+  form's own Submit button. The "post-submit (confirmed)" screenshot shows the form still on screen with the CV at
+  "Analyzing resume…", no thank-you page, no URL change, and no `action_log` row. Lever also loads hCaptcha. Fixed in #1227.
+  Whether Lever received it is unknown until the founder finds (or does not find) a receipt email.
 
 ## Verdict
 The Mini App works as a form: list, prepare, answer, save, submit, cancel and the answers editor all passed live. It is NOT a
