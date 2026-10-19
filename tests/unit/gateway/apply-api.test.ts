@@ -193,6 +193,8 @@ describe("apply Mini App API", () => {
       const s = await status();
       expect(s.state).toBe("unconfirmed");
       expect(s.detail).toContain("no confirmation banner or URL change within 12s");
+      expect(s.detail).toContain("submit it yourself");
+      expect(s.detail).not.toContain("/apply in Telegram");
     });
 
     it("keeps answering confirmed and cancelled after the snapshot is gone", async () => {
