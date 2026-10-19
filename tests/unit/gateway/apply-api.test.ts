@@ -32,6 +32,7 @@ vi.mock("../../../src/db/client.js", () => ({ getPgPool: () => ({ query: async (
 
 const { startJobsHealthServer } = await import("../../../src/jobs/health.js");
 const { saveApplySnapshot, loadApplySnapshot, deleteApplySnapshot, signApplyToken } = await import("../../../src/tools/jobhunt/apply-link.js");
+const { holdForEmailCode, releaseHeld, setHeldClockForTests, heldRowIdsForTests } = await import("../../../src/tools/jobhunt/held-submit.js");
 const { tryLockApply, clearAutoApplySessionsForTests, recordOutcome } = await import("../../../src/gateway/apply-session.js");
 
 const ready: ApplySnapshot = {
@@ -76,6 +77,7 @@ describe("apply Mini App API", () => {
   const sent: string[] = [];
   // Like the real runSubmit, a confirmed send ends the session and deletes the snapshot.
   const submit = vi.fn(async (..._args: unknown[]) => (deleteApplySnapshot(ROW_ID, root), { kind: "confirmed" as const, row: {} as never, detail: "Application submitted and marked applied." }));
+  const enterCode = vi.fn(async (..._args: unknown[]) => (deleteApplySnapshot(ROW_ID, root), await releaseHeld(ROW_ID), { kind: "confirmed" as const, row: {} as never, detail: "Application submitted and marked applied." }));
   const photoTo = vi.fn(async (..._args: unknown[]) => undefined);
 
   const call = (suffix: string, method: string, headers: Record<string, string | undefined>, body?: unknown) => {
@@ -105,6 +107,7 @@ describe("apply Mini App API", () => {
       root,
       senderFor: () => ({ text: async (html: string) => void sent.push(html) }),
       submit: submit as never,
+      enterCode: enterCode as never,
       photoTo: photoTo as never,
     });
     if (!server.listening) await new Promise<void>((resolve) => server.once("listening", () => resolve()));
@@ -129,8 +132,8 @@ describe("apply Mini App API", () => {
       ];
       const bodies = new Set<string>();
       for (const data of cases) {
-        for (const [suffix, method] of [["/status", "GET"], ["/submit", "POST"], ["/cancel", "POST"]] as const) {
-          const res = await call(suffix, method, { "x-telegram-init-data": data }, method === "POST" ? { createdAt: CREATED } : undefined);
+        for (const [suffix, method] of [["/status", "GET"], ["/submit", "POST"], ["/cancel", "POST"], ["/code", "POST"]] as const) {
+          const res = await call(suffix, method, { "x-telegram-init-data": data }, method === "POST" ? { createdAt: CREATED, code: "ABCD1234" } : undefined);
           expect(res.status, `${String(data).slice(0, 20)} ${suffix}`).toBe(404);
           bodies.add(await res.text());
         }
@@ -295,6 +298,82 @@ describe("apply Mini App API", () => {
       expect((await call("/cancel", "POST", asUser(), {})).status).toBe(409);
       expect(loadApplySnapshot(ROW_ID, root)).not.toBeNull();
       release?.();
+    });
+  });
+
+  describe("POST code", () => {
+    const settle = () => new Promise((r) => setTimeout(r, 30));
+    let closed = 0;
+    const hold = () => holdForEmailCode(ROW_ID, { page: {} as never, browser: { close: async () => void closed++ }, dialog: { message: null }, findSubmit: async () => null });
+
+    beforeEach(() => {
+      closed = 0;
+      enterCode.mockClear();
+      setHeldClockForTests({ now: () => NOW, setTimer: () => 0, clearTimer: () => undefined });
+    });
+    afterEach(async () => {
+      await releaseHeld(ROW_ID);
+      setHeldClockForTests();
+    });
+
+    it("rejects a malformed code with 400 before touching the page", async () => {
+      hold();
+      for (const code of ["", "abc", "has space1", "way-too-long-code-1234", 12345678, null]) {
+        expect((await call("/code", "POST", asUser(), { code })).status, String(code)).toBe(400);
+      }
+      expect((await call("/code", "POST", asUser(), {})).status).toBe(400);
+      expect(enterCode).not.toHaveBeenCalled();
+    });
+
+    it("is 409 when no form is held, and 405 for GET", async () => {
+      expect((await call("/code", "POST", asUser(), { code: "ABCD1234" })).status).toBe(409);
+      expect((await call("/code", "GET", asUser())).status).toBe(405);
+      expect(enterCode).not.toHaveBeenCalled();
+    });
+
+    it("reports code-needed with the seconds left while a page is held", async () => {
+      hold();
+      const s = await status();
+      expect(s.state).toBe("code-needed");
+      expect(s.detail).toContain("600 seconds left");
+      expect(s.detail).toContain("code");
+    });
+
+    it("answers 202 and enters the code once, then reports confirmed", async () => {
+      hold();
+      const res = await call("/code", "POST", asUser(), { code: "AB12cd34" });
+      expect(res.status).toBe(202);
+      await settle();
+      expect(enterCode).toHaveBeenCalledTimes(1);
+      expect(enterCode.mock.calls[0]?.slice(0, 3)).toEqual([ROW_ID, "miniapp", "AB12cd34"]);
+      expect((await status()).state).toBe("confirmed");
+      expect(tryLockApply(ROW_ID, NOW)).not.toBeNull();
+    });
+
+    it("keeps code-needed with the reason after a wrong code, so the founder can retry", async () => {
+      hold();
+      enterCode.mockResolvedValueOnce({ kind: "code-needed", row: {} as never, detail: "That code was not accepted." } as never);
+      expect((await call("/code", "POST", asUser(), { code: "WRONG123" })).status).toBe(202);
+      await settle();
+      const s = await status();
+      expect(s.state).toBe("code-needed");
+      expect(s.detail).toContain("That code was not accepted.");
+    });
+
+    it("is 409 while another run holds the row lock", async () => {
+      hold();
+      const release = tryLockApply(ROW_ID, NOW, "submit");
+      expect((await call("/code", "POST", asUser(), { code: "ABCD1234" })).status).toBe(409);
+      release?.();
+      expect(enterCode).not.toHaveBeenCalled();
+    });
+
+    it("cancel closes the held page", async () => {
+      hold();
+      expect((await call("/cancel", "POST", asUser(), {})).status).toBe(200);
+      await settle();
+      expect(closed).toBe(1);
+      expect(heldRowIdsForTests()).toEqual([]);
     });
   });
 });

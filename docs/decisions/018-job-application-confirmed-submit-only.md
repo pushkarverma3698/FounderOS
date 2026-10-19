@@ -63,6 +63,8 @@ Anything short of that is a plain 404 and sends nothing. The URL token alone can
 
 A confirmed send, from either surface, writes an `agents.action_log` row (`job_application_submitted`, idempotency key `apply-submit:<rowId>`); the key is checked first and a row already audited is refused. The "earlier click with no confirmation" guard now persists in the answer-page snapshot (`unconfirmedAt`), so it survives a gateway restart.
 
+Greenhouse sometimes answers the Submit click with an emailed 8-character "confirm you are a human" code instead of a confirmation. That is not a confirmation and not an unconfirmed click: the application is not recorded, and the browser page is kept open for up to 10 minutes (`src/tools/jobhunt/held-submit.ts`). The founder reads the email himself and types the code into the answer page (`POST /apply/<token>/code`, same initData auth and per-row lock as Submit); the bot never reads email, never fetches the code and never guesses one. After the code the same confirmation check runs: a confirmed page is recorded exactly like a confirmed send (applied, `apply-submit:<rowId>` audit row), a wrong code leaves the page open for another try until the 10 minutes pass, and a timeout or an unconfirmed result takes the unconfirmed path (no second send). Cancel closes the held page.
+
 Deploy requirement: none beyond `TELEGRAM_CHAT_ID`; `JOBHUNT_SENDER_PROFILES` is only needed to sign in other users or to override the founder's profile.
 
 ## References

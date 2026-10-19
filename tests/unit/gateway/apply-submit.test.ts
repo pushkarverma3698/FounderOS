@@ -37,6 +37,7 @@ vi.mock("../../../src/db/queries.js", () => ({
 
 const { runSubmit, auditKeyFor } = await import("../../../src/gateway/apply-submit.js");
 const { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests, unconfirmedClickAt } = await import("../../../src/gateway/apply-session.js");
+const { holdForEmailCode, releaseHeld, heldCodeInfo } = await import("../../../src/tools/jobhunt/held-submit.js");
 const { saveApplySnapshot, loadApplySnapshot } = await import("../../../src/tools/jobhunt/apply-link.js");
 
 const row = {
@@ -119,6 +120,7 @@ describe("runSubmit", () => {
   });
 
   afterEach(async () => {
+    await releaseHeld(ROW_ID);
     setAutoApplyRunnerForTests(undefined);
     delete process.env["FOUNDEROS_DATA_ROOT"];
     delete process.env["APPLY_PROFILE_PATH"];
@@ -193,5 +195,36 @@ describe("runSubmit", () => {
     const result = await runSubmit(ROW_ID, "777", "telegram", recorder().io);
     expect(result.kind).toBe("confirmed");
     expect(mockMarkRowApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it("code-needed: not applied, no unconfirmed click, one chat line telling him to type the code, and a second Submit is refused", async () => {
+    runner(() => {
+      holdForEmailCode(ROW_ID, { page: {} as never, browser: { close: async () => undefined }, dialog: { message: null }, findSubmit: async () => null });
+      return { ...sendResult(false), evidence: "Greenhouse asked for the emailed code", codeNeeded: true };
+    });
+    const { io, texts } = recorder();
+    const result = await runSubmit(ROW_ID, "777", "telegram", io);
+    expect(result.kind).toBe("code-needed");
+    expect(mockMarkRowApplied).not.toHaveBeenCalled();
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+    expect(unconfirmedClickAt(ROW_ID)).toBeUndefined();
+    expect(loadApplySnapshot(ROW_ID)?.unconfirmedAt).toBeUndefined();
+    expect(io.settled).not.toHaveBeenCalled();
+    const codeLines = texts.filter((t) => t.includes("code"));
+    expect(codeLines).toHaveLength(1);
+    expect(codeLines[0]).toContain("Open the form and type it");
+    expect(heldCodeInfo(ROW_ID)).not.toBeNull();
+    const again = await runSubmit(ROW_ID, "777", "telegram", recorder().io);
+    expect(again).toMatchObject({ kind: "refused", toast: "Waiting for your emailed code" });
+    expect(submitCalls).toBe(1);
+  });
+
+  it("code-needed escapes the company name in the chat line", async () => {
+    mockGetApplicationById.mockResolvedValue({ ...row, company: "A<b>&Co" });
+    runner(() => ({ ...sendResult(false), codeNeeded: true }));
+    const { io, texts } = recorder();
+    await runSubmit(ROW_ID, "777", "telegram", io);
+    expect(texts.join("\n")).toContain("A&lt;b&gt;&amp;Co");
+    expect(texts.join("\n")).not.toContain("A<b>&Co");
   });
 });

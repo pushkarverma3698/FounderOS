@@ -1,12 +1,13 @@
 /**
  * Apply answer page: the one inline script (nonce in the CSP, see apply-page.ts)
  * ==============================================================================
- * Runs inside the Telegram Mini App. Four jobs, all plain fetch() to the same origin:
+ * Runs inside the Telegram Mini App. Five jobs, all plain fetch() to the same origin:
  *   1. status: GET .../status with the X-Telegram-Init-Data header, polled every 2 s while a run is going.
  *   2. Submit: the Telegram MainButton, shown only when the state is ready, then an in-page confirm
  *      (no confirm() or alert(): the viewer blocks them), then POST .../submit.
  *   3. Cancel: POST .../cancel.
  *   4. Save answers: the form posts by fetch with in-page progress, then reloads when the re-fill ends.
+ *   5. Emailed code: when the state is code-needed, an input and Send code button; POST .../code {code}.
  * Without initData (a plain browser) Submit and Cancel stay hidden. Without script the form posts as before.
  * Server text goes in through textContent only, never innerHTML.
  */
@@ -24,6 +25,9 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
   var saveEl = document.getElementById("mini-save");
   var confirmEl = document.getElementById("mini-confirm");
   var cancelBtn = document.getElementById("mini-cancel");
+  var codeEl = document.getElementById("mini-code");
+  var codeInput = document.getElementById("mini-code-input");
+  var codeBtn = document.getElementById("mini-code-send");
   var form = document.querySelector("form");
   var state = "";
   var timer = 0;
@@ -60,12 +64,13 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
     say(statusEl, text);
     mainButton(state === "ready" && !submitted && confirmEl.hidden);
     cancelBtn.hidden = !!DONE[state] || !initData;
+    codeEl.hidden = state !== "code-needed";
     if (state === "confirmed" || state === "cancelled" || state === "unconfirmed") submitted = true;
-    if (BUSY[state]) schedule();
+    if (BUSY[state] || state === "code-needed") schedule();
   }
   function poll() {
     call("status", "GET").then(function (r) {
-      if (r.code === 404) { say(statusEl, "This form is closed. Run /apply again in Telegram for a fresh one."); mainButton(false); cancelBtn.hidden = true; return; }
+      if (r.code === 404) { say(statusEl, "This form is closed. Run /apply again in Telegram for a fresh one."); mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; return; }
       if (r.data && r.data.state) render(r.data);
     }, function () { say(statusEl, "Could not reach the server. Retrying."); schedule(); });
   }
@@ -89,12 +94,23 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
       poll();
     }, function () { submitted = false; say(statusEl, "Could not reach the server. Nothing was submitted."); });
   }
+  function doCode() {
+    var code = codeInput.value.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9]{4,12}$/.test(code)) { say(statusEl, "The code is 4 to 12 letters and digits."); return; }
+    codeBtn.disabled = true;
+    call("code", "POST", { code: code }).then(function (r) {
+      codeBtn.disabled = false;
+      if (r.code === 202) { codeInput.value = ""; codeEl.hidden = true; state = "submitting"; say(statusEl, "Entering the code and submitting."); schedule(); return; }
+      say(statusEl, (r.data && (r.data.detail || r.data.error)) || "The server refused the code.");
+      if (r.code === 409) poll();
+    }, function () { codeBtn.disabled = false; say(statusEl, "Could not reach the server. The code was not sent."); });
+  }
   function doCancel() {
     cancelBtn.disabled = true;
     call("cancel", "POST").then(function (r) {
       cancelBtn.disabled = false;
       if (r.data && r.data.detail) say(statusEl, r.data.detail);
-      if (r.code === 200) { mainButton(false); cancelBtn.hidden = true; confirmEl.hidden = true; submitted = true; clearTimeout(timer); }
+      if (r.code === 200) { mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; confirmEl.hidden = true; submitted = true; clearTimeout(timer); }
     }, function () { cancelBtn.disabled = false; say(statusEl, "Could not reach the server."); });
   }
 
@@ -131,6 +147,7 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
   document.getElementById("mini-yes").addEventListener("click", doSubmit);
   document.getElementById("mini-back").addEventListener("click", backFromConfirm);
   cancelBtn.addEventListener("click", doCancel);
+  codeBtn.addEventListener("click", doCode);
   if (tg && tg.MainButton) tg.MainButton.onClick(askConfirm);
 
   if (!initData) { say(statusEl, "Open from Telegram to submit"); cancelBtn.hidden = true; return; }

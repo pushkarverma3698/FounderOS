@@ -30,6 +30,7 @@ import {
   prepareApplicationForm,
   submitApplicationForm,
 } from "../../../src/tools/jobhunt/form-runner.js";
+import { enterEmailCode, heldCodeInfo, releaseHeld } from "../../../src/tools/jobhunt/held-submit.js";
 import { classifyFormUrl, resolveFormTargetUrl } from "../../../src/tools/jobhunt/form-scraper.js";
 
 /**
@@ -98,6 +99,17 @@ const FORM_HTML = `<!doctype html>
 </body>
 </html>`;
 
+/** Like FORM_HTML, but Submit answers with a Greenhouse-style emailed-code step (a greyed Submit and an empty code box). */
+const CODE_STEP = [
+  "document.body.innerHTML = '<p>Enter the 8-character code sent to your email to confirm you are a human.</p>",
+  '<input id="c" type="text" maxlength="8"><button id="go" type="submit" disabled>Submit</button>',
+  '<div id="done" style="display:none"><h2>Thank you! Your application has been submitted.</h2></div>\';',
+  "var c = document.getElementById('c'), go = document.getElementById('go');",
+  "c.addEventListener('input', function () { go.disabled = c.value.length < 8; });",
+  "go.addEventListener('click', function () { document.getElementById('done').style.display = 'block'; });",
+].join("");
+const CODE_FORM_HTML = FORM_HTML.replace("document.getElementById('confirmation').style.display = 'block';", CODE_STEP);
+
 describe("form-scraper & form-runner end-to-end with Playwright Chromium", () => {
   let server: http.Server;
   let baseUrl: string;
@@ -126,9 +138,9 @@ describe("form-scraper & form-runner end-to-end with Playwright Chromium", () =>
       }),
     );
 
-    server = http.createServer((_req, res) => {
+    server = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(FORM_HTML);
+      res.end((req.url ?? "").startsWith("/apply-code") ? CODE_FORM_HTML : FORM_HTML);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     const addr = server.address() as AddressInfo;
@@ -225,5 +237,28 @@ describe("form-scraper & form-runner end-to-end with Playwright Chromium", () =>
     expect(submitted.clicked).toBe(true);
     expect(submitted.confirmed).toBe(true);
     expect(submitted.afterScreenshotPng.length).toBeGreaterThan(1000);
+  }, E2E_TIMEOUT_MS);
+
+  it("holds the page when Submit leads to an emailed-code step, then confirms after the founder's code", async () => {
+    const reloaded = parseApplyProfile(await fs.readFile(process.env["APPLY_PROFILE_PATH"]!, "utf8"));
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    const dossier = (await readCandidateDossier("pushkar-nl-tech")) ?? undefined;
+    const rowId = "row-code-e2e";
+    const url = baseUrl.replace("/apply", "/apply-code");
+    try {
+      const sent = await submitApplicationForm(url, "Acme AI", reloaded.profile, { resumePath: resumePdfPath }, dossier, rowId);
+      expect(sent.ok).toBe(true);
+      if (!sent.ok) return;
+      expect(sent.confirmed).toBe(false);
+      expect(sent.codeNeeded).toBe(true);
+      expect(heldCodeInfo(rowId)?.secondsLeft).toBeGreaterThan(590);
+
+      const entered = await enterEmailCode(rowId, "AB12cd34");
+      expect(entered.kind).toBe("confirmed");
+      expect(heldCodeInfo(rowId)).toBeNull();
+    } finally {
+      await releaseHeld(rowId);
+    }
   }, E2E_TIMEOUT_MS);
 });

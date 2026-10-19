@@ -31,7 +31,7 @@ import { refillFromPage } from "./apply-flow.js";
 import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE } from "./apply-api.js";
 import { APPLY_PAGE_HEADERS, applyPageHeaders, escapeHtml, renderApplyPage, renderNoticePage } from "./apply-page.js";
 import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySender } from "./apply-session.js";
-import { runSubmit } from "./apply-submit.js";
+import { runCodeEntry, runSubmit } from "./apply-submit.js";
 import { handleHomeRoutes, type JobsApiDeps } from "./apply-prepare-api.js";
 import { handleProfileEditor, isProfileEditorPath } from "./profile-api.js";
 
@@ -50,6 +50,8 @@ export interface ApplyRouteDeps {
   readonly refill: typeof refillFromPage;
   readonly senderFor: (chatId: string) => ApplySender;
   readonly submit: typeof runSubmit;
+  /** Types the emailed code into the held form; defaults to the real one. */
+  readonly enterCode?: typeof runCodeEntry;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
   /** The Mini App job list wiring (apply-prepare-api.ts); defaults to the database. */
   readonly jobs?: JobsApiDeps;

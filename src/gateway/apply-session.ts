@@ -18,6 +18,7 @@ import { deleteApplySnapshot, loadApplySnapshot, saveApplySnapshot } from "../to
 import { normalizeQuestionKey } from "../tools/jobhunt/candidate-dossier.js";
 import type { UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import { prepareApplicationForm, submitApplicationForm } from "../tools/jobhunt/form-runner.js";
+import { releaseHeld } from "../tools/jobhunt/held-submit.js";
 import { resolveApplyCoverLetter, type ApplyCoverLetter } from "./apply-cover-letter.js";
 
 const log = childLogger({ module: "gateway:apply-session" });
@@ -149,6 +150,7 @@ export function endSession(rowId: string, root?: string): void {
   const session = sessionsByRow.get(rowId);
   if (session && sessionsByChat.get(session.chatId)?.rowId === rowId) sessionsByChat.delete(session.chatId);
   sessionsByRow.delete(rowId);
+  void releaseHeld(rowId); // a form held for the emailed code closes with the session
   try {
     deleteApplySnapshot(rowId, root);
   } catch (err) {
