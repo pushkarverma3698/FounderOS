@@ -45,7 +45,7 @@ export async function emptyStarredFields(page: Page): Promise<string[]> {
         const r = e.getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0 || clean(e.value) !== "") continue;
         const control = e.closest('[class*="control" i]');
-        if (clean(control?.querySelector('[class*="single-value" i], [class*="singleValue" i]')?.textContent) !== "") continue;
+        if (clean(control?.querySelector('[class*="single-value" i], [class*="singleValue" i], [class*="multi-value" i], [class*="multiValue" i]')?.textContent) !== "") continue;
         const label = labelFor(e);
         if (/[*✱]\s*$/.test(label)) out.push(label);
       }

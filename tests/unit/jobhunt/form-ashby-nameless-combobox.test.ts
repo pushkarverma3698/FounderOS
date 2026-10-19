@@ -149,4 +149,14 @@ describe("Ashby nameless, idless combobox (Playwright)", () => {
     expect(await emptyStarredFields(page)).toEqual([]);
     await page.close();
   }, 30_000);
+
+  it("the guard does not block a required multi-select that already shows chosen values", async () => {
+    if (!browser) return;
+    const page = await browser.newPage();
+    await page.setContent(`<div><label for="q_offices">Which offices could you work from?*</label>
+      <div class="select__control"><div class="select__multi-value"><div class="select__multi-value__label">Amsterdam</div></div>
+      <input id="q_offices" type="text" role="combobox" value="" style="width:40px;height:20px"></div></div>`);
+    expect(await emptyStarredFields(page)).toEqual([]);
+    await page.close();
+  }, 30_000);
 });
