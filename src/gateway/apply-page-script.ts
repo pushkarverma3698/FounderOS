@@ -121,7 +121,7 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
     call("cancel", "POST").then(function (r) {
       cancelBtn.disabled = false;
       if (r.data && r.data.detail) say(statusEl, r.data.detail);
-      if (r.code === 200) { mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; confirmEl.hidden = true; submitted = true; clearTimeout(timer); }
+      if (r.code === 200) { mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; confirmEl.hidden = true; submitted = true; clearTimeout(timer); state = "cancelled"; showAgain(true); }
     }, function () { cancelBtn.disabled = false; say(statusEl, "Could not reach the server."); });
   }
 
