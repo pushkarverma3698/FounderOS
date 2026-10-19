@@ -73,6 +73,7 @@ import {
   type FreeCandidate,
 } from "./free-ats-source.js";
 import { appendSkippedDead } from "./board-health.js";
+import { resolveEmployerApplyUrl } from "./aggregator-apply-url.js";
 import { getAdapter } from "./adapters/index.js";
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
@@ -209,7 +210,13 @@ export async function runFreeIngest(
   // list payload withheld. See applyDeferredMarket — a Paris vacancy reached rank
   // 2 of a Netherlands-only brief because Workday's list payload said nothing and
   // the detail payload we then fetched said "France".
-  const placed = applyDeferredMarket(deferred.kept, profile);
+  const marketed = applyDeferredMarket(deferred.kept, profile);
+  // Arbeitnow rows are stored with the employer's form, not Arbeitnow's page (see aggregator-apply-url).
+  // Only here, after every filter: a handful of requests a sweep, not one per listing.
+  const placed = {
+    ...marketed,
+    kept: await mapWithConcurrencyLimit(marketed.kept, 2, async (c) => ({ ...c, url: await resolveEmployerApplyUrl(c.url) })),
+  };
 
   const postings: RawPosting[] = [];
   // The dropped CANDIDATES, not a counter. A count cannot say which platform
