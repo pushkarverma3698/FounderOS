@@ -26,9 +26,11 @@ import {
   type FormPlatform,
 } from "./form-scraper.js";
 
+import { awaitSubmitOutcome, holdForEmailCode, SUBMIT_CONFIRM_TIMEOUT_MS } from "./held-submit.js";
+
 const log = childLogger({ module: "jobhunt:form-runner" });
 export const CONTROLLED_INPUT_SETTLE_MS = 600;
-export const SUBMIT_CONFIRM_TIMEOUT_MS = 12_000;
+export { SUBMIT_CONFIRM_TIMEOUT_MS };
 const NAV_BUTTON_EXCLUSIONS = ["header-tab-apply-button", "apply-button-nav"];
 
 interface DomElement {
@@ -271,6 +273,8 @@ export interface SubmittedFormResult {
   readonly platform: FormPlatform;
   readonly clicked: boolean;
   readonly confirmed: boolean;
+  /** The form asked for the emailed code; the page is held open (held-submit.ts) for the founder to type it. */
+  readonly codeNeeded?: boolean;
   readonly evidence: string;
   readonly afterScreenshotPng: Buffer;
 }
@@ -282,19 +286,21 @@ export async function submitApplicationForm(
   profile: ApplyProfile,
   row: RowApplicationFacts,
   dossier?: CandidateDossier,
+  rowId?: string,
 ): Promise<SubmittedFormResult | FormFailureResult> {
   const check = classifyFormUrl(url);
   if (!check.supported) return { ok: false, reason: check.reason, platform: null };
 
   const targetUrl = resolveFormTargetUrl(url, company, check.platform);
   const browser = await launchHeadlessBrowser();
+  let keepOpen = false;
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
-    let dialogMessage: string | null = null;
-    page.on("dialog", async (dialog) => {
-      dialogMessage = dialog.message();
+    const dialog: { message: string | null } = { message: null };
+    page.on("dialog", async (d) => {
+      dialog.message = d.message();
       // allow-failopen: dismissing an alert dialog must not crash the submit watcher.
-      await dialog.dismiss().catch(() => undefined);
+      await d.dismiss().catch(() => undefined);
     });
 
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -335,49 +341,24 @@ export async function submitApplicationForm(
     const urlBefore = page.url();
     await button.click({ timeout: 10_000 });
 
-    let confirmed = false;
-    let evidence = "";
-    try {
-      await Promise.race([
-        page.waitForURL((u) => u.toString() !== urlBefore, { timeout: SUBMIT_CONFIRM_TIMEOUT_MS }),
-        page
-          .getByText(/thank you|application (received|submitted)|we('| ha)ve received|successfully submitted|bedankt voor je sollicitatie/i)
-          .first()
-          .waitFor({ state: "visible", timeout: SUBMIT_CONFIRM_TIMEOUT_MS }),
-      ]);
-      confirmed = true;
-      evidence = `Confirmed: page navigated or displayed submission confirmation (from ${urlBefore} to ${page.url()})`;
-    } catch {
-      const hasError = await page
-        .locator('[aria-invalid="true"]:visible, [role="alert"]:visible, .field-error:visible, .error-message:visible')
-        .count()
-        // allow-failopen: 0 means no visible error element was detected.
-        .catch(() => 0);
-
-      if (dialogMessage) {
-        confirmed = false;
-        evidence = `Form showed an alert dialog after click: "${dialogMessage}"`;
-      } else if (hasError > 0) {
-        confirmed = false;
-        evidence = `Form displayed ${hasError} validation error element(s) after clicking submit`;
-      } else {
-        confirmed = false;
-        evidence = "Clicked submit; no error appeared, but no confirmation banner or URL change was observed within 12s — check screenshot to verify";
-      }
-    }
-
+    const outcome = await awaitSubmitOutcome(page, urlBefore, dialog, { watchForCode: rowId !== undefined });
     const afterScreenshotPng = await page.screenshot({ fullPage: true, type: "png" });
+    if (outcome.kind === "code-needed" && rowId !== undefined) {
+      holdForEmailCode(rowId, { page, browser, dialog, findSubmit: () => findSubmitControl(page) });
+      keepOpen = true;
+    }
     return {
       ok: true,
       platform: check.platform,
       clicked: true,
-      confirmed,
-      evidence,
+      confirmed: outcome.kind === "confirmed",
+      ...(outcome.kind === "code-needed" ? { codeNeeded: true } : {}),
+      evidence: outcome.evidence,
       afterScreenshotPng,
     };
   } catch (err) {
     return { ok: false, reason: (err as Error).message, platform: check.platform };
   } finally {
-    await browser.close();
+    if (!keepOpen) await browser.close();
   }
 }

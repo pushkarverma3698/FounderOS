@@ -243,6 +243,9 @@ const MINI_PANEL =
   `<section id="mini" hidden><p id="mini-status" role="status" class="note"></p>` +
   `<div id="mini-confirm" hidden><p id="mini-confirm-text"></p>` +
   `<button type="button" id="mini-yes">Yes, submit</button><button type="button" id="mini-back" class="alt">Back</button></div>` +
+  `<div id="mini-code" hidden><label for="mini-code-input">Code from your email</label>` +
+  `<input type="text" id="mini-code-input" maxlength="12" autocomplete="one-time-code" autocapitalize="off" spellcheck="false">` +
+  `<button type="button" id="mini-code-send">Send code</button></div>` +
   `<button type="button" id="mini-cancel" class="alt" hidden>Cancel application</button></section>`;
 
 const MINI_FOOTER =
