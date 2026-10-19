@@ -41,6 +41,11 @@ export function idSelector(id: string): string {
   return `[id="${cssEscapeAttr(id)}"]`;
 }
 
+/** Handle for a field with no id or name, stamped as `data-fos-field` by the scraper's in-page scan. */
+export function stampSelector(n: number): string {
+  return `[data-fos-field="${n}"]`;
+}
+
 /**
  * tsx (pnpm dev, harness and probe scripts) compiles with esbuild keepNames, which wraps named helpers inside
  * `evaluate` callbacks in `__name(fn, "x")`; the page has no `__name`, so every evaluate threw. tsc output never

@@ -17,7 +17,7 @@ import { Api, type TelegramClient } from "telegram";
 import { botUsername, connect, probePeer } from "./lib/mtproto.js";
 import type { ProbePeer } from "./lib/probe-peer.js";
 import type { TapButton } from "./lib/tap-guard.js";
-import { findWebAppButton, newestWebAppMessage, parseWebAppArgs } from "./lib/webapp-args.js";
+import { findWebAppButton, newestWebAppMessage, parseWebAppArgs, webViewPeer } from "./lib/webapp-args.js";
 
 const WINDOW = 50;
 const PLATFORM = "android";
@@ -37,7 +37,7 @@ async function requestUrl(client: TelegramClient, peer: ProbePeer, url: string, 
   const bot = await client.getInputEntity(await botUsername());
   const result = await client.invoke(
     new Api.messages.RequestWebView({
-      peer: await client.getInputEntity(peer),
+      peer: webViewPeer(fromBotMenu, await client.getInputEntity(peer), bot),
       bot,
       url,
       platform: PLATFORM,

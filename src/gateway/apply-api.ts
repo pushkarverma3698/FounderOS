@@ -22,7 +22,7 @@ import { loadApplySnapshot, parseApplyToken, readApplyLinkConfig, verifyApplyTok
 import { heldCodeInfo, CODE_PATTERN } from "../tools/jobhunt/held-submit.js";
 import { runCodeEntry, runSubmit, type SubmitIo } from "./apply-submit.js";
 import {
-  clearOutcome, endSession, lockPhase, outcomeFor, recordOutcome, tryLockApply, unconfirmedClickAt, type ApplySender,
+  clearOutcome, endSession, lockPhase, outcomeFor, recordOutcome, tryLockApply, unconfirmedClickAt, unconfirmedEvidenceFor, type ApplySender,
 } from "./apply-session.js";
 import { escapeHtml } from "./apply-page.js";
 import { authenticateMiniApp } from "./miniapp-auth.js";
@@ -107,7 +107,10 @@ export function computeStatus(rowId: string, snap: ApplySnapshot | null, nowMs: 
     return null;
   }
   if (snap.unconfirmedAt !== undefined || unconfirmedClickAt(rowId)) {
-    const detail = "Submit was clicked but no confirmation came back, so it may have arrived. Check your email before trying again with /apply in Telegram.";
+    const why = snap.unconfirmedEvidence ?? unconfirmedEvidenceFor(rowId);
+    const detail =
+      "Submit was clicked but no confirmation came back, so it may have arrived. Check your email before trying again with /apply in Telegram." +
+      (why ? ` What the bot saw: ${why}` : "");
     return { state: "unconfirmed", detail, missingRequired: [] };
   }
   const missing = snap.summary.unanswered.filter((q) => q.required).map((q) => q.label);
