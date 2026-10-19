@@ -114,6 +114,15 @@ describe("held submit", () => {
       expect(outcome.kind).toBe("confirmed");
     }, 30_000);
 
+    it("is not confirmed by thank-you text that was on the form before the click (Matillion, Lever, 2026-10-17)", async () => {
+      const page = await open("<form><p>Thank you for your interest in joining # Team Green.</p><button id=b type=submit>Submit application</button></form>"
+        + "<script>document.querySelector('form').onsubmit = (e) => e.preventDefault();</script>");
+      if (!page) return;
+      await page.click("#b");
+      const outcome = await awaitSubmitOutcome(page, page.url(), { message: null }, { watchForCode: false });
+      expect(outcome.kind).toBe("unconfirmed");
+    }, 30_000);
+
     it("names the invisible bot check when a click on a reCAPTCHA page changes nothing (Mollie, Ashby, 2026-10-19)", async () => {
       const page = await open("<form><button id=b type=submit>Submit Application</button></form><div class=grecaptcha-badge></div>"
         + "<script>document.querySelector('form').onsubmit = (e) => e.preventDefault();</script>");

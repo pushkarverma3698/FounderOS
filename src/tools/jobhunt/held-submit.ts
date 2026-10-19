@@ -118,6 +118,40 @@ function watchForCodePrompt(page: Page, stop: { done: boolean }): Promise<"code"
   });
 }
 
+/** Evaluated in the page: thank-you text is visible and no Submit control is left on screen. */
+const thankYouScript = `(() => {
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+  };
+  const text = (document.body && document.body.innerText) || "";
+  if (!${CONFIRM_TEXT}.test(text)) return false;
+  return !Array.from(document.querySelectorAll("button, input[type=submit]")).some(
+    (b) => vis(b) && (b.getAttribute("type") === "submit" || /submit|send application/i.test(b.textContent || b.value || "")),
+  );
+})()`;
+
+/**
+ * Resolves when the thank-you shows with the form gone; rejects at the deadline.
+ * Text alone is not enough: Matillion's Lever form says "Thank you for your interest…" above its Submit
+ * button, which marked an unsent application applied (2026-10-17).
+ */
+function watchForThankYou(page: Page, stop: { done: boolean }): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const deadline = clock.now() + SUBMIT_CONFIRM_TIMEOUT_MS;
+    const tick = async (): Promise<void> => {
+      if (stop.done) return;
+      if (clock.now() > deadline) return reject(new Error("no thank-you"));
+      // allow-failopen: a failed probe (page navigating or closed) counts as no thank-you yet.
+      const seen = (await page.evaluate(thankYouScript).catch(() => false)) as boolean;
+      if (seen) resolve();
+      else setTimeout(() => void tick(), CODE_POLL_MS);
+    };
+    void tick();
+  });
+}
+
 /** After a Submit click: confirmed (URL change or thank-you text), code step shown, or unconfirmed with the reason. */
 export async function awaitSubmitOutcome(
   page: Page,
@@ -128,7 +162,7 @@ export async function awaitSubmitOutcome(
   const stop = { done: false };
   const confirmed = Promise.race([
     page.waitForURL((u) => u.toString() !== urlBefore, { timeout: SUBMIT_CONFIRM_TIMEOUT_MS }),
-    page.getByText(CONFIRM_TEXT).first().waitFor({ state: "visible", timeout: SUBMIT_CONFIRM_TIMEOUT_MS }),
+    watchForThankYou(page, stop),
   ]).then(() => "confirmed" as const);
   const racers: Promise<"confirmed" | "code">[] = [confirmed];
   if (opts.watchForCode) racers.push(watchForCodePrompt(page, stop));
