@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "../infra/logger.js";
+import { namesCompany } from "../tools/jobhunt/company-answer.js";
 import { recordLearnedAnswer } from "../tools/jobhunt/candidate-dossier.js";
 import {
   loadApplySnapshot,
@@ -164,7 +165,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse, snap: Apply
   }
   clearOutcome(snap.rowId);
   try {
-    for (const a of answers) await deps.record(snap.profileId, a.label, a.answer);
+    for (const a of answers) if (!namesCompany(a.answer, snap.company)) await deps.record(snap.profileId, a.label, a.answer);
   } catch (err) {
     held();
     log.error({ rowId: snap.rowId, err: (err as Error).message }, "apply page: saving answers failed");
@@ -173,13 +174,13 @@ async function handlePost(req: IncomingMessage, res: ServerResponse, snap: Apply
   }
   log.info({ rowId: snap.rowId, answers: answers.length }, "apply page: answers saved, re-fill started");
   void runRefill(snap, answers, held, deps);
-  const n = answers.length;
-  notice(
-    res,
-    200,
-    "Saved",
-    `Saved ${n} answer${n === 1 ? "" : "s"}. Re-filling the form — the updated card arrives in Telegram in about a minute.`,
-  );
+  const formOnly = answers.filter((a) => namesCompany(a.answer, snap.company)).length;
+  const n = answers.length - formOnly;
+  const saved = n > 0 ? `Saved ${n} answer${n === 1 ? "" : "s"}. ` : "";
+  const only = formOnly > 0
+    ? `${formOnly} answer${formOnly === 1 ? " names" : "s name"} ${snap.company}, so ${formOnly === 1 ? "it was" : "they were"} used for this form only and not saved. `
+    : "";
+  notice(res, 200, "Saved", `${saved}${only}Re-filling the form — the updated card arrives in Telegram in about a minute.`);
 }
 
 /** Entry point for every `/apply/...` request. Never throws; an unexpected error is a plain 500. */

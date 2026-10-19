@@ -35,12 +35,14 @@ const { saveApplySnapshot } = await import("../../../src/tools/jobhunt/apply-lin
 const { clearAutoApplySessionsForTests, lockPhase } = await import("../../../src/gateway/apply-session.js");
 const { clearPrepareFailuresForTests } = await import("../../../src/gateway/apply-prepare-api.js");
 
-const row = (id: string, profile: string, company: string, rank: number): JobApplication =>
-  ({ id, profile_id: profile, tenant_id: "turicks", company, title: `${company} Engineer`, brief_rank: rank }) as unknown as JobApplication;
+const row = (id: string, profile: string, company: string, rank: number, section = "do_today"): JobApplication =>
+  ({ id, profile_id: profile, tenant_id: "turicks", company, title: `${company} Engineer`, brief_rank: rank, brief_section: section }) as unknown as JobApplication;
+const ASK_ROW = "11111111-2222-4333-8444-777777777777";
 const ROWS = [
   row(FOUNDER_ROW, "pushkar-nl-tech", "Workwize", 1),
   row(FOUNDER_ROW_2, "pushkar-nl-tech", "Mollie", 2),
   row(WIFE_ROW, "wife-nl-finance", "ING", 1),
+  row(ASK_ROW, "pushkar-nl-tech", "Adyen", 37, "ask"),
 ];
 
 function initData(userId: number, token = BOT): string {
@@ -171,11 +173,44 @@ describe("Mini App job list", () => {
         root,
       );
       const founder = (await (await call("/apply/api/jobs", "GET", FOUNDER())).json()) as { jobs: Array<{ id: string; rank: number; company: string; title: string; state: string }> };
-      expect(founder.jobs.map((j) => j.company)).toEqual(["Workwize", "Mollie"]);
+      expect(founder.jobs.map((j) => j.company)).toEqual(["Workwize", "Mollie", "Adyen"]);
+      expect(founder.jobs.map((j) => (j as { section?: string }).section)).toEqual(["do_today", "do_today", "ask"]);
       expect(founder.jobs[0]).toMatchObject({ id: FOUNDER_ROW, rank: 1, title: "Workwize Engineer", state: "ready" });
       expect(founder.jobs[1]?.state).toBe("idle");
       const wife = (await (await call("/apply/api/jobs", "GET", WIFE())).json()) as { jobs: Array<{ company: string }> };
       expect(wife.jobs.map((j) => j.company)).toEqual(["ING"]);
+    });
+  });
+
+  describe("ask rows", () => {
+    it("the default queue dependency asks for the ask section as well as the applyable ones", async () => {
+      const queries = await import("../../../src/db/apply-queries.js");
+      expect(queries.HOME_SECTIONS).toEqual([...queries.APPLYABLE_SECTIONS, "ask"]);
+      expect(queries.APPLYABLE_SECTIONS).not.toContain("ask");
+    });
+
+    it("prepare and job-status accept an ask row for its owner and 404 it for the other profile", async () => {
+      expect((await call(`/apply/api/job-status/${ASK_ROW}`, "GET", WIFE())).status).toBe(404);
+      expect((await call(`/apply/api/job-status/${ASK_ROW}`, "GET", FOUNDER())).status).toBe(200);
+      expect((await call(`/apply/api/prepare/${ASK_ROW}`, "POST", FOUNDER())).status).toBe(202);
+      await vi.waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe("home shell script", () => {
+    it("has a filter input, a count, a 'Needs your call' group, and writes only through textContent", async () => {
+      const html = await (await call("/apply/home")).text();
+      expect(html).toContain('id="filter"');
+      expect(html).toContain('id="count"');
+      expect(html).toContain("Needs your call");
+      expect(html).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+    });
+
+    it("the script parses and filters on company or title, case-insensitively", async () => {
+      const { APPLY_HOME_SCRIPT } = await import("../../../src/gateway/apply-home-script.js");
+      expect(() => new Function(APPLY_HOME_SCRIPT)).not.toThrow();
+      expect(APPLY_HOME_SCRIPT).toContain("toLowerCase");
+      expect(APPLY_HOME_SCRIPT).toMatch(/jobs"/);
     });
   });
 

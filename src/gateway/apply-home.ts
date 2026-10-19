@@ -21,8 +21,9 @@ const CSS =
   ".sub{color:#5b6573;margin:0 0 12px}ul{list-style:none;padding:0;margin:0}" +
   "li button{display:block;width:100%;text-align:left;font:inherit;padding:12px;margin:0 0 8px;border:1px solid #dde1e7;border-radius:10px;background:#fff;color:inherit}" +
   "li button:disabled{opacity:.6}.co{font-weight:600}.st{display:block;color:#5b6573;font-size:.85rem}" +
-  "#msg{color:#5b6573;margin:8px 0}" +
-  "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}li button{background:#171c24;border-color:#2a313c}.sub,.st,#msg{color:#9aa4b2}}";
+  "#msg{color:#5b6573;margin:8px 0}#filter{box-sizing:border-box;width:100%;font:inherit;padding:10px 12px;margin:0 0 6px;border:1px solid #dde1e7;border-radius:10px;background:#fff;color:inherit}" +
+  "#count{color:#5b6573;font-size:.85rem;margin:0 0 10px}h2.grp{font-size:1rem;margin:16px 0 8px}" +
+  "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}li button,#filter{background:#171c24;border-color:#2a313c}.sub,.st,#msg,#count{color:#9aa4b2}}";
 
 const STYLE_HASH = createHash("sha256").update(CSS).digest("base64");
 const TELEGRAM_SCRIPT_HOST = "https://telegram.org";
@@ -50,7 +51,8 @@ export function renderHomePage(nonce: string): string {
   const meta = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">`;
   const body =
     `<main><h1>Jobs to apply to</h1><p class="sub">Tap a job. The bot fills its form, then you review and submit.</p>` +
-    `<p id="msg" role="status">Loading…</p><ul id="jobs"></ul></main>` +
+    `<input id="filter" type="search" placeholder="Filter by company or title" aria-label="Filter jobs" autocomplete="off">` +
+    `<p id="count" role="status"></p><p id="msg" role="status">Loading…</p><div id="jobs"></div></main>` +
     `<script nonce="${nonce}" src="${TELEGRAM_SCRIPT_HOST}/js/telegram-web-app.js"></script><script nonce="${nonce}">${APPLY_HOME_SCRIPT}</script>`;
   return `<!doctype html><html lang="en"><head>${meta}<title>Jobs</title><style>${CSS}</style></head><body>${body}</body></html>`;
 }

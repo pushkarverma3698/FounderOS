@@ -29,6 +29,7 @@ import {
 } from "../tools/jobhunt/apply-link.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
+import { withFormOnlyAnswers } from "../tools/jobhunt/company-answer.js";
 import type { FormPlanSummary, UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import type { prepareApplicationForm } from "../tools/jobhunt/form-runner.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
@@ -290,7 +291,8 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
       return;
     }
     const dossier = (await readCandidateDossier(session.profileId)) ?? undefined;
-    const prep = await getRunnerDeps().prepare(session.targetUrl, session.company, loaded.profile, { resumePath: session.resumePdfPath, ...letterFacts(session.coverLetter) }, dossier);
+    const profile = withFormOnlyAnswers(loaded.profile, session.answered, session.company);
+    const prep = await getRunnerDeps().prepare(session.targetUrl, session.company, profile, { resumePath: session.resumePdfPath, ...letterFacts(session.coverLetter) }, dossier);
     if (!prep.ok) {
       await send.text(`⚠ Form preparation failed for ${safeHtml(session.company)}: ${safeHtml(prep.reason)}`);
       return;

@@ -35,3 +35,12 @@ export function newestWebAppMessage<T extends MessageButtons>(messages: readonly
     .filter((m) => !m.out && findWebAppButton(m.buttons) !== undefined)
     .sort((x, y) => y.id - x.id)[0];
 }
+
+/**
+ * The `peer` for messages.requestWebView. The bot's menu button lives only in the private chat with the bot, so
+ * that call names the bot as the peer; a probe chat that is a group made Telegram answer USER_BOT_REQUIRED.
+ * An inline web_app button opens in the chat that holds its message.
+ */
+export function webViewPeer<T>(fromBotMenu: boolean, chatPeer: T, botPeer: T): T {
+  return fromBotMenu ? botPeer : chatPeer;
+}
