@@ -296,7 +296,7 @@ describe("Mini App panel (nonce variant)", () => {
     expect(html).toContain(`${LT}script nonce="${NONCE}" src="https://telegram.org/js/telegram-web-app.js">`);
     expect(html.match(/<script/g)).toHaveLength(2);
     expect(html).toContain(`data-created="1234"`);
-    for (const id of ["mini-status", "mini-confirm", "mini-yes", "mini-cancel", "mini-save"]) expect(html).toContain(`id="${id}"`);
+    for (const id of ["mini-status", "mini-confirm", "mini-yes", "mini-cancel", "mini-save", "mini-code", "mini-code-input", "mini-code-send"]) expect(html).toContain(`id="${id}"`);
     expect(html).not.toContain("alert(");
     expect(html).not.toContain("confirm(");
     expect(html).not.toContain("innerHTML");
