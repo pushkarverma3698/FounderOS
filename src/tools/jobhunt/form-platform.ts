@@ -31,7 +31,8 @@ const PLATFORM_HOST_MARKERS: ReadonlyArray<readonly [Exclude<FormPlatform, "gene
 const UNSUPPORTED_HOST_REASONS: ReadonlyArray<readonly [string, string]> = [
   ["myworkdayjobs.com", "Workday requires per-company account creation and multi-step login"],
   ["jobicy.com", "Jobicy is an aggregator page without an embedded application form"],
-  ["arbeitnow.com", "Arbeitnow is an aggregator page without an embedded application form"],
+  ["arbeitnow.", "Arbeitnow is an aggregator page without an embedded application form"],
+  ["himalayas.app", "Himalayas is an aggregator page that blocks automated access; open the job link"],
   ["linkedin.com", "LinkedIn requires an authenticated browser session"],
 ];
 
@@ -45,8 +46,10 @@ export function classifyFormUrl(url: string): PlatformCheck {
   if (!lowered || !/^https?:\/\//.test(lowered)) {
     return { supported: false, reason: "no valid http(s) URL on file for this role" };
   }
+  // The HOST, not the whole URL: a resolved employer link carries `utm_source=arbeitnow.nl`.
+  const host = lowered.replace(/^https?:\/\//, "").split(/[/?#]/)[0] ?? "";
   for (const [marker, reason] of UNSUPPORTED_HOST_REASONS) {
-    if (lowered.includes(marker)) return { supported: false, reason };
+    if (host.includes(marker)) return { supported: false, reason };
   }
   for (const [platform, markers] of PLATFORM_HOST_MARKERS) {
     if (markers.some((m) => lowered.includes(m))) {
