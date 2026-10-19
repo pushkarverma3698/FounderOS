@@ -261,7 +261,7 @@ const isWebUrl = (url: string): boolean => /^https?:\/\//i.test(url);
  * then "I submitted it", which marks the row applied after an in-page confirm.
  */
 function renderSelfSubmit(snap: ApplySnapshot, scripted: boolean): string {
-  if (snap.unconfirmedAt === undefined || !namesHiddenBotCheck(snap.unconfirmedEvidence)) return "";
+  if (snap.unconfirmedAt === undefined) return "";
   const link = isWebUrl(snap.targetUrl)
     ? `<a id="self-link" href="${escapeHtml(snap.targetUrl)}" class="go" target="_blank" rel="noopener noreferrer">Open the job form</a>`
     : `<p class="note">The job address on file is not a web link; open the job from the original listing.</p>`;
@@ -276,10 +276,11 @@ function renderSelfSubmit(snap: ApplySnapshot, scripted: boolean): string {
       `<div id="self-confirm" hidden><p>Only tap yes once the job site showed you its thank-you page. The bot marks it applied and never sends it.</p>` +
       `<button type="button" id="self-yes">Yes, I submitted it</button><button type="button" id="self-back" class="alt">Back</button></div>`
     : "";
-  const intro =
-    `<p class="note">The form's bot check most likely refused the bot, so this was probably not sent. ` +
-    `Open the form, paste these answers, attach your CV and submit it. Then come back and tap I submitted it.</p>`;
-  return `<section id="self"><h2>Submit it yourself</h2>${intro}${link}${rows.join("")}${done}</section>`;
+  const steps = "the form, paste these answers, attach your CV and submit it. Then come back and tap I submitted it.";
+  const intro = namesHiddenBotCheck(snap.unconfirmedEvidence)
+    ? `The form's bot check most likely refused the bot, so this was probably not sent. Open ${steps}`
+    : `The bot clicked Submit but saw no confirmation, so it may have arrived. Check your email first; if it did, just tap I submitted it. If not, open ${steps}`;
+  return `<section id="self"><h2>Submit it yourself</h2><p class="note">${intro}</p>${link}${rows.join("")}${done}</section>`;
 }
 
 const MINI_FOOTER =
