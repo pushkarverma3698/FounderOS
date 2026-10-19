@@ -20,7 +20,9 @@ import type { JobApplication } from "../db/schema.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { getApplyUrl } from "../tools/jobhunt/apply-packet.js";
+import { loadApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
+import { withFormOnlyAnswers } from "../tools/jobhunt/company-answer.js";
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
 import { enterEmailCode, heldCodeInfo, onHeldExpired, type CodeEntryResult } from "../tools/jobhunt/held-submit.js";
 import { shortJobId } from "../tools/jobhunt/job-ref.js";
@@ -110,7 +112,12 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
   // The letter the card showed; after a restart (no session) the archived one, resolved again.
   const letter = session ? session.coverLetter : letterOf(await resolveCoverLetter(row, profile, artifactDir));
   const facts = { resumePath: pdfResolved.pdfPath, ...letterFacts(letter) };
-  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, facts, dossier, rowId);
+  // Answers that name the company are never saved to the profile (company-answer.ts); lay them back on from this
+  // session and from the snapshot's filled values, so the submit run fills them too, also after a restart.
+  const filled = (loadApplySnapshot(rowId)?.summary.filledAnswers ?? []).filter((f) => f.fieldType !== "file");
+  const formOnly = [...filled.map((f) => ({ label: f.label, answer: f.value })), ...(session?.answered ?? [])];
+  const submitProfile = withFormOnlyAnswers(loaded.profile, formOnly, row.company);
+  const result = await getRunnerDeps().submit(targetUrl, row.company, submitProfile, facts, dossier, rowId);
 
   if (!result.ok) {
     await io.text(
