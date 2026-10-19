@@ -8,6 +8,10 @@
  *   3. Cancel: POST .../cancel.
  *   4. Save answers: the form posts by fetch with in-page progress, then reloads when the re-fill ends.
  *   5. Emailed code: when the state is code-needed, an input and Send code button; POST .../code {code}.
+ *   6. Submit it yourself (unconfirmed on a bot check): the job link opens through tg.openLink, each Copy button
+ *      copies one answer, and I submitted it (after an in-page confirm) POSTs .../submitted {createdAt}.
+ *   7. Prepare again (unconfirmed, cancelled, closed or out of date): POST /apply/api/prepare/<row>, poll
+ *      /apply/api/job-status/<row>, and open the fresh answer page when it is ready.
  * Without initData (a plain browser) Submit and Cancel stay hidden. Without script the form posts as before.
  * Server text goes in through textContent only, never innerHTML.
  */
@@ -29,6 +33,11 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
   var codeInput = document.getElementById("mini-code-input");
   var codeBtn = document.getElementById("mini-code-send");
   var form = document.querySelector("form");
+  var rowId = main.getAttribute("data-row") || "";
+  var againBtn = document.getElementById("mini-again");
+  var againConfirm = document.getElementById("mini-again-confirm");
+  var selfDone = document.getElementById("self-done");
+  var selfConfirm = document.getElementById("self-confirm");
   var state = "";
   var timer = 0;
   var submitted = false;
@@ -66,11 +75,13 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
     cancelBtn.hidden = !!DONE[state] || !initData;
     codeEl.hidden = state !== "code-needed";
     if (state === "confirmed" || state === "cancelled" || state === "unconfirmed") submitted = true;
+    showAgain(state === "unconfirmed" || state === "cancelled");
+    if (selfDone && state !== "unconfirmed") { selfDone.hidden = true; selfConfirm.hidden = true; }
     if (BUSY[state] || state === "code-needed") schedule();
   }
   function poll() {
     call("status", "GET").then(function (r) {
-      if (r.code === 404) { say(statusEl, "This form is closed. Run /apply again in Telegram for a fresh one."); mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; return; }
+      if (r.code === 404) { say(statusEl, "This form is closed. Tap Prepare again for a fresh one."); mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; showAgain(true); return; }
       if (r.data && r.data.state) render(r.data);
     }, function () { say(statusEl, "Could not reach the server. Retrying."); schedule(); });
   }
@@ -90,7 +101,7 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
       if (r.code === 202) { state = "submitting"; schedule(); return; }
       submitted = false;
       say(statusEl, (r.data && r.data.detail) || "The server refused the submit.");
-      if (r.data && r.data.stale) return;
+      if (r.data && r.data.stale) { showAgain(true); return; }
       poll();
     }, function () { submitted = false; say(statusEl, "Could not reach the server. Nothing was submitted."); });
   }
@@ -113,6 +124,92 @@ export const APPLY_PAGE_SCRIPT = String.raw`(function () {
       if (r.code === 200) { mainButton(false); cancelBtn.hidden = true; codeEl.hidden = true; confirmEl.hidden = true; submitted = true; clearTimeout(timer); }
     }, function () { cancelBtn.disabled = false; say(statusEl, "Could not reach the server."); });
   }
+
+  function showAgain(on) {
+    againBtn.hidden = !on || !initData || !rowId;
+    if (!on) againConfirm.hidden = true;
+  }
+  function home(method, rest) {
+    return fetch("/apply/api/" + rest, { method: method, headers: headers({}) }).then(function (r) {
+      return r.json().then(function (j) { return { code: r.status, data: j }; }, function () { return { code: r.status, data: {} }; });
+    });
+  }
+  function watchPrepare(n) {
+    if (n > 300) { say(statusEl, "Still working. Check the Telegram chat."); return; }
+    home("GET", "job-status/" + rowId).then(function (r) {
+      if (r.code !== 200) { say(statusEl, "Could not read the status. Check the Telegram chat."); return; }
+      if (r.data.url) { say(statusEl, "Ready. Opening the fresh form."); location.href = r.data.url; return; }
+      if (r.data.state === "failed") { say(statusEl, r.data.detail || "The form could not be prepared."); againBtn.hidden = false; return; }
+      say(statusEl, r.data.detail || "Opening the form and filling it.");
+      setTimeout(function () { watchPrepare(n + 1); }, 2000);
+    }, function () { setTimeout(function () { watchPrepare(n + 1); }, 3000); });
+  }
+  function doAgain() {
+    againConfirm.hidden = true;
+    againBtn.hidden = true;
+    clearTimeout(timer);
+    say(statusEl, "Opening the form and filling it. This takes about a minute.");
+    home("POST", "prepare/" + rowId).then(function (r) {
+      if (r.code === 202 || r.code === 409) { setTimeout(function () { watchPrepare(0); }, 2000); return; }
+      againBtn.hidden = false;
+      say(statusEl, (r.data && r.data.detail) || "Could not start. Run /apply again in Telegram.");
+    }, function () { againBtn.hidden = false; say(statusEl, "Could not reach the server. Nothing was started."); });
+  }
+  function askAgain() {
+    if (state === "unconfirmed") { againBtn.hidden = true; againConfirm.hidden = false; return; }
+    doAgain();
+  }
+
+  function copyText(text, btn) {
+    function done() { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); }
+    function fallback() {
+      var t = document.createElement("textarea");
+      t.value = text;
+      t.setAttribute("readonly", "");
+      t.style.position = "fixed";
+      t.style.opacity = "0";
+      document.body.appendChild(t);
+      t.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(t);
+      if (ok) done(); else btn.textContent = "Select and copy by hand";
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
+  }
+  var copies = document.querySelectorAll("button.copy");
+  for (var i = 0; i < copies.length; i++) {
+    copies[i].addEventListener("click", function (e) {
+      var btn = e.currentTarget;
+      var src = document.getElementById(btn.getAttribute("data-copy"));
+      if (src) copyText(src.textContent, btn);
+    });
+  }
+  var selfLink = document.getElementById("self-link");
+  if (selfLink && tg && tg.openLink) {
+    selfLink.addEventListener("click", function (e) { e.preventDefault(); tg.openLink(selfLink.href); });
+  }
+  function doSelfDone() {
+    selfConfirm.hidden = true;
+    selfDone.disabled = true;
+    call("submitted", "POST", { createdAt: created }).then(function (r) {
+      selfDone.disabled = false;
+      if (r.code === 200) { render(r.data); selfDone.hidden = true; return; }
+      selfDone.hidden = false;
+      say(statusEl, (r.data && (r.data.detail || r.data.error)) || "The server refused it. Nothing was marked.");
+      if (r.data && r.data.stale) showAgain(true);
+    }, function () { selfDone.disabled = false; selfDone.hidden = false; say(statusEl, "Could not reach the server. Nothing was marked."); });
+  }
+  if (selfDone) {
+    selfDone.addEventListener("click", function () { selfDone.hidden = true; selfConfirm.hidden = false; });
+    document.getElementById("self-back").addEventListener("click", function () { selfConfirm.hidden = true; selfDone.hidden = false; });
+    document.getElementById("self-yes").addEventListener("click", doSelfDone);
+    if (!initData) selfDone.hidden = true;
+  }
+  againBtn.addEventListener("click", askAgain);
+  document.getElementById("mini-again-yes").addEventListener("click", doAgain);
+  document.getElementById("mini-again-back").addEventListener("click", function () { againConfirm.hidden = true; againBtn.hidden = false; });
 
   function reloadWhenIdle() {
     call("status", "GET").then(function (r) {

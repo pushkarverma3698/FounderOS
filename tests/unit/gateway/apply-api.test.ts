@@ -79,6 +79,8 @@ describe("apply Mini App API", () => {
   const submit = vi.fn(async (..._args: unknown[]) => (deleteApplySnapshot(ROW_ID, root), { kind: "confirmed" as const, row: {} as never, detail: "Application submitted and marked applied." }));
   const enterCode = vi.fn(async (..._args: unknown[]) => (deleteApplySnapshot(ROW_ID, root), await releaseHeld(ROW_ID), { kind: "confirmed" as const, row: {} as never, detail: "Application submitted and marked applied." }));
   const photoTo = vi.fn(async (..._args: unknown[]) => undefined);
+  // Like the real settleSubmittedByHand, marking applied ends the session and deletes the snapshot.
+  const markByHand = vi.fn(async (..._args: unknown[]) => (deleteApplySnapshot(ROW_ID, root), { kind: "confirmed" as const, row: {} as never, detail: "Marked applied." }));
 
   const call = (suffix: string, method: string, headers: Record<string, string | undefined>, body?: unknown) => {
     const h: Record<string, string> = {};
@@ -100,6 +102,7 @@ describe("apply Mini App API", () => {
     sent.length = 0;
     submit.mockClear();
     photoTo.mockClear();
+    markByHand.mockClear();
     clearAutoApplySessionsForTests();
     server = startJobsHealthServer(0, {
       now: () => NOW,
@@ -109,6 +112,7 @@ describe("apply Mini App API", () => {
       submit: submit as never,
       enterCode: enterCode as never,
       photoTo: photoTo as never,
+      markByHand: markByHand as never,
     });
     if (!server.listening) await new Promise<void>((resolve) => server.once("listening", () => resolve()));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -305,6 +309,44 @@ describe("apply Mini App API", () => {
       expect((await call("/cancel", "POST", asUser(), {})).status).toBe(409);
       expect(loadApplySnapshot(ROW_ID, root)).not.toBeNull();
       release?.();
+    });
+  });
+
+  describe("POST submitted (the founder sent it himself)", () => {
+    const unconfirmed = { ...ready, unconfirmedAt: NOW - 1000, unconfirmedEvidence: "hidden bot check (reCAPTCHA)" };
+
+    it("marks the row applied once, then status says confirmed", async () => {
+      saveApplySnapshot(unconfirmed, root);
+      const res = await call("/submitted", "POST", asUser(), { createdAt: CREATED });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ state: "confirmed" });
+      expect(markByHand).toHaveBeenCalledTimes(1);
+      expect(markByHand.mock.calls[0]?.[0]).toBe(ROW_ID);
+      expect((await status()).state).toBe("confirmed");
+    });
+
+    it("is a 404 without initData, so nothing is marked", async () => {
+      saveApplySnapshot(unconfirmed, root);
+      expect((await call("/submitted", "POST", {}, { createdAt: CREATED })).status).toBe(404);
+      expect((await call("/submitted", "POST", { "x-telegram-init-data": initData(222) }, { createdAt: CREATED })).status).toBe(404);
+      expect(markByHand).not.toHaveBeenCalled();
+    });
+
+    it("is 409 unless the row is unconfirmed, and 409 for a page older than the snapshot", async () => {
+      expect((await call("/submitted", "POST", asUser(), { createdAt: CREATED })).status).toBe(409);
+      saveApplySnapshot(unconfirmed, root);
+      expect((await call("/submitted", "POST", asUser(), { createdAt: CREATED - 1 })).status).toBe(409);
+      expect((await call("/submitted", "POST", asUser(), {})).status).toBe(400);
+      expect(markByHand).not.toHaveBeenCalled();
+    });
+
+    it("is 409 while another run holds the row lock, and 405 for GET", async () => {
+      saveApplySnapshot(unconfirmed, root);
+      const release = tryLockApply(ROW_ID, NOW, "prepare");
+      expect((await call("/submitted", "POST", asUser(), { createdAt: CREATED })).status).toBe(409);
+      release?.();
+      expect((await call("/submitted", "GET", asUser())).status).toBe(405);
+      expect(markByHand).not.toHaveBeenCalled();
     });
   });
 
