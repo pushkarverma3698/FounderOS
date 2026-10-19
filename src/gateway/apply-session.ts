@@ -235,10 +235,12 @@ export function lockPhase(rowId: string, nowMs: number = Date.now()): LockPhase 
   return held && nowMs - held.at < LOCK_STALE_MS ? held.phase : null;
 }
 
+export const LOCK_HELD_MESSAGE = "⏳ This form is already re-filling. The updated card arrives in about a minute; answer after it lands.";
+
 /** `tryLockApply`, telling the founder when the form is already being re-filled. */
 export async function acquireApplyLock(send: ApplySender, rowId: string): Promise<(() => void) | null> {
   const held = tryLockApply(rowId);
-  if (!held) await send.text("⏳ This form is already re-filling. The updated card arrives in about a minute; answer after it lands.");
+  if (!held) await send.text(LOCK_HELD_MESSAGE);
   return held;
 }
 
