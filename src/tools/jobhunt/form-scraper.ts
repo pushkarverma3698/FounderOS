@@ -8,21 +8,12 @@
  */
 
 import type { Page } from "playwright";
-import { getApplyUrl } from "./apply-packet.js";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
-import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions } from "./form-combobox.js";
+import { classifyFormUrl, resolveFormTargetUrl, type FormPlatform } from "./form-platform.js";
+import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions, stampSelector } from "./form-combobox.js";
 
-export type FormPlatform =
-  | "greenhouse"
-  | "lever"
-  | "ashby"
-  | "workable"
-  | "recruitee"
-  | "smartrecruiters"
-  | "personio"
-  | "teamtailor"
-  | "bamboohr"
-  | "generic";
+
+export { classifyFormUrl, resolveFormTargetUrl, type FormPlatform, type PlatformCheck } from "./form-platform.js";
 
 /** Minimal structural DOM types for browser `evaluate` callbacks (Node tsconfig omits `lib: ["dom"]`). */
 interface DomElement {
@@ -39,6 +30,7 @@ interface DomElement {
   readonly parentElement: DomElement | null;
   readonly options?: ArrayLike<{ readonly textContent: string | null }>;
   getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
   getBoundingClientRect(): { readonly width: number; readonly height: number };
   closest(selector: string): DomElement | null;
   querySelector(selector: string): DomElement | null;
@@ -54,63 +46,6 @@ interface DomGlobal {
   readonly CSS: { escape(ident: string): string };
 }
 
-const PLATFORM_HOST_MARKERS: ReadonlyArray<readonly [Exclude<FormPlatform, "generic">, readonly string[]]> = [
-  ["greenhouse", ["greenhouse.io", "boards.greenhouse.io", "job-boards.greenhouse.io", "job-boards.eu.greenhouse.io"]],
-  ["lever", ["lever.co", "jobs.lever.co", "jobs.eu.lever.co"]],
-  ["ashby", ["ashbyhq.com", "jobs.ashbyhq.com"]],
-  ["workable", ["workable.com", "apply.workable.com"]],
-  ["recruitee", ["recruitee.com"]],
-  ["smartrecruiters", ["smartrecruiters.com", "jobs.smartrecruiters.com"]],
-  ["personio", ["personio.com", "personio.de"]],
-  ["teamtailor", ["teamtailor.com"]],
-  ["bamboohr", ["bamboohr.com"]],
-];
-
-const UNSUPPORTED_HOST_REASONS: ReadonlyArray<readonly [string, string]> = [
-  ["myworkdayjobs.com", "Workday requires per-company account creation and multi-step login"],
-  ["jobicy.com", "Jobicy is an aggregator page without an embedded application form"],
-  ["arbeitnow.com", "Arbeitnow is an aggregator page without an embedded application form"],
-  ["linkedin.com", "LinkedIn requires an authenticated browser session"],
-];
-
-export type PlatformCheck =
-  | { readonly supported: true; readonly platform: FormPlatform }
-  | { readonly supported: false; readonly reason: string };
-
-/** Classify a job URL into a supported ATS platform or an explicit unsupported reason. */
-export function classifyFormUrl(url: string): PlatformCheck {
-  const lowered = (url || "").trim().toLowerCase();
-  if (!lowered || !/^https?:\/\//.test(lowered)) {
-    return { supported: false, reason: "no valid http(s) URL on file for this role" };
-  }
-  for (const [marker, reason] of UNSUPPORTED_HOST_REASONS) {
-    if (lowered.includes(marker)) return { supported: false, reason };
-  }
-  for (const [platform, markers] of PLATFORM_HOST_MARKERS) {
-    if (markers.some((m) => lowered.includes(m))) {
-      return { supported: true, platform };
-    }
-  }
-  return { supported: true, platform: "generic" };
-}
-
-/** Resolve the direct URL where the application form is rendered. */
-export function resolveFormTargetUrl(url: string, company: string, platform: FormPlatform): string {
-  const mapped = getApplyUrl(url, company);
-  if (mapped) return mapped;
-  if (platform === "ashby") {
-    try {
-      const u = new URL(url);
-      if (!u.pathname.endsWith("/application")) {
-        u.pathname = `${u.pathname.replace(/\/$/, "")}/application`;
-      }
-      return u.toString();
-    } catch {
-      return url;
-    }
-  }
-  return url;
-}
 
 function isConsentByHeuristic(name: string, id: string, label: string): boolean {
   return /gdpr|consent|privacy|terms|agree|acknowledge|gegevens|toestemming/i.test(`${name} ${id} ${label}`);
@@ -200,7 +135,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       const aria = clean(e.getAttribute("aria-label"));
       if (aria) return aria;
       const placeholder = clean(e.getAttribute("placeholder"));
-      if (placeholder && !/^(select|type here|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
+      if (placeholder && !/^(select|type here|start typing|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
       for (let n = e.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
         for (const c of Array.from(n.querySelectorAll("legend, label, strong, [class*='label' i]"))) {
           const t = clean(textOf(c));
@@ -234,16 +169,21 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     };
 
     const els = Array.from(dom.document.querySelectorAll("input, select, textarea"));
+    let stamped = 0;
     const rows = els.map((e) => {
       const rect = e.getBoundingClientRect();
       const rawType = (e.getAttribute("type") ?? (e.tagName === "TEXTAREA" ? "textarea" : e.tagName === "SELECT" ? "select" : "text")).toLowerCase();
       const isChoice = rawType === "checkbox" || rawType === "radio";
+      // Ashby's Location is a bare <input role=combobox placeholder="Start typing..."> with no name or id: stamp a handle the runner can find again.
+      const bare = !isChoice && rawType !== "hidden" && !e.name && !e.id && rect.width > 0 && rect.height > 0 && labelOf(e) !== "";
+      if (bare) e.setAttribute("data-fos-field", String(stamped));
       return {
         tag: e.tagName,
         type: rawType,
         role: (e.getAttribute("role") ?? "").toLowerCase(),
         name: e.name || e.getAttribute("name") || "",
         id: e.id || "",
+        stamp: bare ? stamped++ : -1,
         label: labelOf(e),
         required: Boolean(e.required) || e.getAttribute("aria-required") === "true",
         value: isChoice ? optionTextOf(e) : "",
@@ -278,7 +218,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     if (platform !== "ashby" && !r.hasFormAttr) continue;
     if (r.type === "hidden" || r.type === "submit" || r.type === "button" || r.type === "reset" || r.type === "search") continue;
     if (!r.isVisible && r.type !== "file" && r.type !== "checkbox" && r.type !== "radio") continue;
-    if (r.type !== "radio" && r.type !== "checkbox" && !r.name && !r.id) continue;
+    if (r.type !== "radio" && r.type !== "checkbox" && !r.name && !r.id && r.stamp < 0) continue;
     if (/^react-select-\d+-input$/i.test(r.id) && !r.name) continue;
 
     const label = r.label;
@@ -382,7 +322,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
 
     const requiredFromLabel = /[*✱]\s*$/.test(effectiveLabel);
     fields.push({
-      selector: r.id ? idSelector(r.id) : `${r.tag.toLowerCase()}[name="${cssEscapeAttr(r.name)}"]`,
+      selector: r.id ? idSelector(r.id) : r.stamp >= 0 ? stampSelector(r.stamp) : `${r.tag.toLowerCase()}[name="${cssEscapeAttr(r.name)}"]`,
       type: kind,
       label: effectiveLabel,
       required: r.required || requiredFromLabel,

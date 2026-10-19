@@ -184,6 +184,13 @@ describe("apply Mini App API", () => {
       expect(await status()).toMatchObject({ state: "unconfirmed" });
     });
 
+    it("carries the evidence of the unconfirmed click into the status detail", async () => {
+      saveApplySnapshot({ ...ready, unconfirmedAt: NOW - 1000, unconfirmedEvidence: "no confirmation banner or URL change within 12s" }, root);
+      const s = await status();
+      expect(s.state).toBe("unconfirmed");
+      expect(s.detail).toContain("no confirmation banner or URL change within 12s");
+    });
+
     it("keeps answering confirmed and cancelled after the snapshot is gone", async () => {
       deleteApplySnapshot(ROW_ID, root);
       expect((await call("/status", "GET", asUser())).status).toBe(404);

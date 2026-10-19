@@ -36,7 +36,7 @@ vi.mock("../../../src/db/queries.js", () => ({
 }));
 
 const { runSubmit, auditKeyFor } = await import("../../../src/gateway/apply-submit.js");
-const { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests, unconfirmedClickAt } = await import("../../../src/gateway/apply-session.js");
+const { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests, unconfirmedClickAt, unconfirmedEvidenceFor } = await import("../../../src/gateway/apply-session.js");
 const { holdForEmailCode, releaseHeld, heldCodeInfo } = await import("../../../src/tools/jobhunt/held-submit.js");
 const { saveApplySnapshot, loadApplySnapshot } = await import("../../../src/tools/jobhunt/apply-link.js");
 
@@ -176,6 +176,8 @@ describe("runSubmit", () => {
     clearAutoApplySessionsForTests(); // a restart: memory is gone, the snapshot file is not
     expect(unconfirmedClickAt(ROW_ID)).toBeInstanceOf(Date);
     expect(loadApplySnapshot(ROW_ID)?.unconfirmedAt).toBeTypeOf("number");
+    expect(unconfirmedEvidenceFor(ROW_ID)).toBe("No confirmation text"); // the answer page shows the same evidence the chat got
+    expect(loadApplySnapshot(ROW_ID)?.unconfirmedEvidence).toBe("No confirmation text");
     const second = await runSubmit(ROW_ID, "777", "telegram", recorder().io);
     expect(second).toMatchObject({ kind: "refused", toast: "Already sent once" });
     expect(submitCalls).toBe(1);

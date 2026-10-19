@@ -17,6 +17,7 @@ import {
   type FormPlanSummary,
   type RowApplicationFacts,
 } from "./form-brain.js";
+import { emptyStarredFields } from "./form-required-guard.js";
 import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormUrl,
@@ -329,6 +330,15 @@ export async function submitApplicationForm(
       return {
         ok: false,
         reason: `form native validation failed on "${validity.invalidField}" — refusing to click submit (ADR-018)`,
+        platform: check.platform,
+      };
+    }
+
+    const emptyStarred = await emptyStarredFields(page);
+    if (emptyStarred.length > 0) {
+      return {
+        ok: false,
+        reason: `refusing to click submit while required fields are empty: ${emptyStarred.join("; ")}`,
         platform: check.platform,
       };
     }
