@@ -39,6 +39,11 @@ vi.mock("../../../src/gateway/jobhunt-buttons.js", async (importOriginal) => {
   return { ...actual, markRowApplied: (row: unknown) => mockMarkRowApplied(row) };
 });
 
+vi.mock("../../../src/db/queries.js", () => ({
+  hasBeenAudited: async () => false,
+  writeAuditEntry: async () => ({ written: true }),
+}));
+
 vi.mock("../../../src/db/apply-queries.js", () => ({
   getApplicationById: (...args: unknown[]) => mockGetApplicationById(...args),
 }));

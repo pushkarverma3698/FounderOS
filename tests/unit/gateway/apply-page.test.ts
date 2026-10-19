@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ApplySnapshot } from "../../../src/tools/jobhunt/apply-link.js";
 import {
   APPLY_PAGE_HEADERS,
+  applyPageHeaders,
   applyFieldName,
   renderApplyPage,
   renderNoticePage,
@@ -282,5 +283,34 @@ describe("page headers", () => {
     expect(html).toContain("Saved");
     expect(html).toContain("Saved 2 answers &lt;b&gt;");
     expect(html.toLowerCase()).not.toContain(`${LT}script`);
+  });
+});
+
+describe("Mini App panel (nonce variant)", () => {
+  const LT = String.fromCharCode(60);
+  const NONCE = "abc123nonce==";
+  const SCRIPT_SRC = `script-src 'nonce-${NONCE}' https://telegram.org; connect-src 'self'; `;
+
+  it("adds the Telegram script, one inline script with the nonce, the status panel and the page stamp", () => {
+    const html = renderApplyPage(snap({}, { createdAt: 1234 }), { nonce: NONCE });
+    expect(html).toContain(`${LT}script nonce="${NONCE}" src="https://telegram.org/js/telegram-web-app.js">`);
+    expect(html.match(/<script/g)).toHaveLength(2);
+    expect(html).toContain(`data-created="1234"`);
+    for (const id of ["mini-status", "mini-confirm", "mini-yes", "mini-cancel", "mini-save"]) expect(html).toContain(`id="${id}"`);
+    expect(html).not.toContain("alert(");
+    expect(html).not.toContain("confirm(");
+    expect(html).not.toContain("innerHTML");
+  });
+
+  it("the CSP adds only script-src with the nonce and telegram.org, and connect-src self", () => {
+    const base = applyPageHeaders()["Content-Security-Policy"]!;
+    const withNonce = applyPageHeaders(NONCE)["Content-Security-Policy"]!;
+    expect(withNonce).toContain(SCRIPT_SRC);
+    expect(withNonce.replace(SCRIPT_SRC, "")).toBe(base);
+    expect(base).not.toContain("script-src");
+  });
+
+  it("keeps the no-nonce page free of script", () => {
+    expect(renderApplyPage(snap()).toLowerCase()).not.toContain(`${LT}script`);
   });
 });

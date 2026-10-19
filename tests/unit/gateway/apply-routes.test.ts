@@ -149,7 +149,20 @@ describe("apply answer page routes", () => {
       expect(html).toContain(WHERE);
       expect(html).toContain(`name="${applyFieldName(WHY)}"`);
       expect(html).not.toContain(token);
-      expect(html).not.toContain("<script");
+      const csp = res.headers.get("content-security-policy") ?? "";
+      const nonce = /script-src 'nonce-([^']+)' https:\/\/telegram\.org/.exec(csp)?.[1];
+      expect(nonce).toBeTruthy();
+      expect(csp).toContain("connect-src 'self'");
+      expect(html).toContain(`<script nonce="${nonce}" src="https://telegram.org/js/telegram-web-app.js">`);
+      expect(html.match(/<script/g)).toHaveLength(2);
+      expect(html.match(/<script(?![^>]*nonce=)/g)).toBeNull();
+    });
+
+    it("uses a fresh nonce for every page load", async () => {
+      const token = tokenFor();
+      const a = (await fetch(`${base}/apply/${token}`)).headers.get("content-security-policy");
+      const b = (await fetch(`${base}/apply/${token}`)).headers.get("content-security-policy");
+      expect(a).not.toBe(b);
     });
 
     it("prefills what the bot filled, so the form is not blank", async () => {

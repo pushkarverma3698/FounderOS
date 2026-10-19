@@ -34,6 +34,7 @@ import { z } from "zod";
 import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataRoot } from "../../core/data-root.js";
+import { atomicWrite } from "./atomic-write.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 
 /**
@@ -279,5 +280,5 @@ export async function writeApplyProfile(
   raw: Record<string, unknown>,
   path: string = APPLY_PROFILE_PATH,
 ): Promise<void> {
-  await fs.writeFile(path, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
+  await atomicWrite(path, `${JSON.stringify(raw, null, 2)}\n`);
 }
