@@ -16,14 +16,13 @@
  * and his own contact details.
  */
 
-import type { Context } from "grammy";
+import type { Context, InlineKeyboard } from "grammy";
+import { profileEditorKeyboard } from "./profile-editor-link.js";
 import {
   applyProfilePathFor,
-  parseApplyProfile,
   readApplyProfile,
   renderApplyProfile,
   setProfileField,
-  writeApplyProfile,
 } from "../tools/jobhunt/apply-profile.js";
 import {
   buildDefaultDossierMarkdown,
@@ -32,6 +31,7 @@ import {
   recordLearnedAnswer,
   writeCandidateDossier,
 } from "../tools/jobhunt/candidate-dossier.js";
+import { setProfilePath } from "../tools/jobhunt/answer-store.js";
 import { childLogger } from "./../infra/logger.js";
 import { safeHtml } from "./safe-html.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
@@ -105,6 +105,12 @@ const USAGE =
   "<code>/profile remember Expected salary = 65000 EUR</code>\n" +
   "<code>/profile set answers.work_authorization requires-sponsorship</code>";
 
+/** The "Edit answers" web_app button, or nothing (group chat, someone else's profile, no https link base). */
+function editorMarkup(ctx: Context, profileId: string): { reply_markup?: InlineKeyboard } {
+  const kb = profileEditorKeyboard(ctx.chat?.id, ctx.from?.id, profileId);
+  return kb ? { reply_markup: kb } : {};
+}
+
 /** `/profile`, `/profile doc`, `/profile remember Q = A`, `/profile set <field> <value>`. */
 export async function handleProfile(ctx: Context): Promise<void> {
   const arg = resolveProfileArg(ctx.match?.toString() ?? "", ["set", "doc", "dossier", "remember", "qa"]);
@@ -176,7 +182,7 @@ export async function handleProfile(ctx: Context): Promise<void> {
         : `No usable ${who}apply profile — ${safeHtml(current.reason)}.\n\n` +
             `Nothing can fill a form until this exists. Set the four an ATS always asks for:\n` +
             `<code>/profile set first_name …</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>.`,
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...editorMarkup(ctx, arg.profile.id) },
     );
     return;
   }
@@ -201,22 +207,18 @@ export async function handleProfile(ctx: Context): Promise<void> {
     });
     return;
   }
-
-  // RE-VALIDATED BEFORE IT IS WRITTEN. `/profile set email nonsense` must fail
-  // in Telegram, where he can retype it, rather than on a form three days later.
-  const revalidated = parseApplyProfile(JSON.stringify(edited.next));
-  if (!revalidated.ok) {
-    await ctx.reply(
-      `That would break the profile — ${safeHtml(revalidated.reason)}. Nothing was changed.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-
+  // Saved through the answer store: validated, backed up, written atomically with the dossier Core Facts
+  // in step (a profile-only edit of salary or notice period changed nothing a form would read).
+  // `/profile set email nonsense` must fail here, where he can retype it, rather than on a form three days later.
+  let saved: Awaited<ReturnType<typeof setProfilePath>>;
   try {
-    await writeApplyProfile(edited.next, path);
+    saved = await setProfilePath(arg.profile.id, command.path, command.value);
   } catch (err) {
     await ctx.reply(`Couldn't save the profile: ${safeHtml((err as Error).message)}. Nothing changed.`);
+    return;
+  }
+  if (!saved.ok) {
+    await ctx.reply(`That would break the profile — ${safeHtml(saved.reason)}. Nothing was changed.`, { parse_mode: "HTML" });
     return;
   }
 

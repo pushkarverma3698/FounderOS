@@ -39,6 +39,13 @@ vi.mock("../../../src/gateway/jobhunt-buttons.js", async (importOriginal) => {
   };
 });
 
+const mockHasBeenAudited = vi.fn(async (_key: string) => false);
+const mockWriteAuditEntry = vi.fn(async (_data: unknown) => ({ written: true }));
+vi.mock("../../../src/db/queries.js", () => ({
+  hasBeenAudited: (key: string) => mockHasBeenAudited(key),
+  writeAuditEntry: (data: unknown) => mockWriteAuditEntry(data),
+}));
+
 vi.mock("../../../src/db/apply-queries.js", () => ({
   getApplicationById: (...args: unknown[]) => mockGetApplicationById(...args),
 }));

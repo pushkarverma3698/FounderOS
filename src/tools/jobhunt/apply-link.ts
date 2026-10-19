@@ -150,6 +150,8 @@ export const applySnapshotSchema = z.object({
   }),
   /** Epoch ms of the prepare run that produced this snapshot. */
   createdAt: z.number(),
+  /** Epoch ms of a Submit click that came back unconfirmed: survives a restart, so the double-submit guard does too. */
+  unconfirmedAt: z.number().optional(),
 });
 
 export type ApplySnapshot = z.infer<typeof applySnapshotSchema>;
