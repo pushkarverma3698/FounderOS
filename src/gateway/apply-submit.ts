@@ -66,7 +66,7 @@ export const codeNeededMessage = (row: JobApplication): string =>
 const refuse = (toast: string, html?: string): SubmitResult => ({ kind: "refused", toast, ...(html ? { html } : {}) });
 
 /** Writes the audit row for a confirmed send. The application is already out, so a failure is logged loudly, not thrown. */
-async function auditConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string): Promise<void> {
+async function auditConfirmed(row: JobApplication, via: SubmitVia | "by-hand", targetUrl: string): Promise<void> {
   try {
     const audit = await writeAuditEntry({
       action: "job_application_submitted",
@@ -185,4 +185,23 @@ export async function runCodeEntry(rowId: string, via: SubmitVia, code: string, 
   if (entered.kind === "code-needed") return { kind: "code-needed", row, detail: entered.evidence };
   await settleUnconfirmed(row, targetUrl, entered.evidence, io);
   return { kind: "unconfirmed", row, detail: entered.evidence };
+}
+
+/**
+ * The founder sent the application from his own browser (the bot's click was refused by a bot check) and tapped
+ * "I submitted it". Same end as a confirmed send: applied, the same audit key (so the bot never sends it again),
+ * session ended. The caller holds the row's lock and has checked initData for the profile that owns the row.
+ */
+export async function settleSubmittedByHand(rowId: string, io: SubmitIo): Promise<SubmitResult> {
+  const row = await getApplicationById(rowId, getProfile().tenantId);
+  if (!row) return refuse("That role is no longer on file.");
+  const on = appliedOn(row);
+  if (on) return refuse("Already applied", alreadyAppliedMessage(row, on));
+  const marked = await markRowApplied(row);
+  if (!marked.ok) return { kind: "failed", row, detail: "The row could not be marked applied. Try again in a minute." };
+  const targetUrl = sessionForRow(rowId)?.targetUrl ?? getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
+  await auditConfirmed(row, "by-hand", targetUrl);
+  endSession(row.id);
+  await io.text(`✅ <b>${safeHtml(row.company)}</b> (${safeHtml(row.title)}) marked applied: you submitted it yourself. It's off today's queue.`);
+  return { kind: "confirmed", row, detail: "Marked applied. You submitted it yourself." };
 }

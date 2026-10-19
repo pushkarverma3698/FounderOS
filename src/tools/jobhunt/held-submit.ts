@@ -19,6 +19,15 @@ export const CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
 const CODE_POLL_MS = 400;
 const CONFIRM_TEXT = /thank you|application (received|submitted)|we('| ha)ve received|successfully submitted|bedankt voor je sollicitatie/i;
 
+/** Appended to unconfirmed evidence when the page runs a hidden bot check; the answer page keys its hand-off on it. */
+export const BOT_CHECK_EVIDENCE =
+  "This form runs a hidden bot check (reCAPTCHA) that can silently refuse an automated browser, so it most likely was not sent: submit it yourself from the job link.";
+
+/** True when unconfirmed evidence says a hidden bot check most likely refused the bot's click. */
+export function namesHiddenBotCheck(evidence: string | undefined): boolean {
+  return evidence !== undefined && /hidden bot check/i.test(evidence);
+}
+
 export interface HeldClock {
   readonly now: () => number;
   readonly setTimer: (fn: () => void, ms: number) => unknown;
@@ -151,10 +160,7 @@ export async function awaitSubmitOutcome(
       .catch(() => 0);
     if (botCheck === 0) return { kind: "unconfirmed", evidence };
     // The bot must not try to get past the check; the founder submits from his own browser instead.
-    return {
-      kind: "unconfirmed",
-      evidence: `${evidence}. This form runs a hidden bot check (reCAPTCHA) that can silently refuse an automated browser, so it most likely was not sent: submit it yourself from the job link.`,
-    };
+    return { kind: "unconfirmed", evidence: `${evidence}. ${BOT_CHECK_EVIDENCE}` };
   } finally {
     stop.done = true;
   }

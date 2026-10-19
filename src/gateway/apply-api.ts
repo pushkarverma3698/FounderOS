@@ -7,6 +7,7 @@
  *   POST /apply/<token>/submit   202, then the shared Submit (apply-submit.ts) runs in the background
  *   POST /apply/<token>/cancel   the same end as the Telegram Cancel button
  *   POST /apply/<token>/code     {code}: the founder types the emailed confirmation code into the held form
+ *   POST /apply/<token>/submitted {createdAt}: an unconfirmed row the founder sent from his own browser is marked applied
  *
  * Two proofs on every call: the HMAC link (the page exists for this row) and Telegram WebApp initData in
  * the X-Telegram-Init-Data header (the signed-in Telegram user is the profile that owns the row, ADR-018).
@@ -19,8 +20,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "../infra/logger.js";
 import { sendPhoto } from "../infra/telegram-send.js";
 import { loadApplySnapshot, parseApplyToken, readApplyLinkConfig, verifyApplyToken, type ApplySnapshot } from "../tools/jobhunt/apply-link.js";
-import { heldCodeInfo, CODE_PATTERN } from "../tools/jobhunt/held-submit.js";
-import { runCodeEntry, runSubmit, type SubmitIo } from "./apply-submit.js";
+import { heldCodeInfo, CODE_PATTERN, namesHiddenBotCheck } from "../tools/jobhunt/held-submit.js";
+import { runCodeEntry, runSubmit, settleSubmittedByHand, type SubmitIo } from "./apply-submit.js";
 import {
   clearOutcome, endSession, lockPhase, outcomeFor, recordOutcome, tryLockApply, unconfirmedClickAt, unconfirmedEvidenceFor, type ApplySender,
 } from "./apply-session.js";
@@ -47,6 +48,8 @@ export interface ApiDeps {
   readonly senderFor: (chatId: string) => ApplySender;
   readonly submit: typeof runSubmit;
   readonly enterCode?: typeof runCodeEntry;
+  /** Marks an unconfirmed row applied after the founder sent it himself; defaults to the real one. */
+  readonly markByHand?: typeof settleSubmittedByHand;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
 }
 
@@ -108,6 +111,10 @@ export function computeStatus(rowId: string, snap: ApplySnapshot | null, nowMs: 
   }
   if (snap.unconfirmedAt !== undefined || unconfirmedClickAt(rowId)) {
     const why = snap.unconfirmedEvidence ?? unconfirmedEvidenceFor(rowId);
+    if (namesHiddenBotCheck(why)) {
+      const detail = "The form's bot check most likely refused the bot's click, so it was probably not sent. Submit it yourself from the job link below, then tap I submitted it.";
+      return { state: "unconfirmed", detail, missingRequired: [] };
+    }
     const detail =
       "Submit was clicked but no confirmation came back, so it may have arrived. Check your email before trying again with /apply in Telegram." +
       (why ? ` What the bot saw: ${why}` : "");
@@ -186,9 +193,13 @@ async function runApiSubmit(snap: ApplySnapshot, held: () => void, deps: ApiDeps
   }
 }
 
-async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
+/** The page's snapshot stamp from the body; a 413 or 400 is already sent when this returns null. */
+async function readCreatedAt(req: IncomingMessage, res: ServerResponse): Promise<number | null> {
   const raw = await readBody(req);
-  if (raw === TOO_LARGE) return json(res, 413, { error: "request too large" });
+  if (raw === TOO_LARGE) {
+    json(res, 413, { error: "request too large" });
+    return null;
+  }
   let createdAt: unknown;
   try {
     createdAt = (JSON.parse(raw) as { createdAt?: unknown }).createdAt;
@@ -196,14 +207,22 @@ async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAu
     // allow-failopen: an unreadable body is the same 400 as a body without the stamp.
     createdAt = undefined;
   }
-  if (typeof createdAt !== "number") return json(res, 400, { error: "createdAt is required" });
+  if (typeof createdAt === "number") return createdAt;
+  json(res, 400, { error: "createdAt is required" });
+  return null;
+}
+
+const STALE_DETAIL = "This page is out of date. Reload it to see the latest form.";
+
+async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
+  const createdAt = await readCreatedAt(req, res);
+  if (createdAt === null) return;
   const snap = a.snap;
   const now = deps.now();
   const status = computeStatus(a.rowId, snap, now);
   if (!snap || !status) return json(res, 409, { state: "cancelled", detail: "This form is closed.", missingRequired: [] });
   if (snap.createdAt !== createdAt) {
-    const detail = "This page is out of date. Reload it to see the latest form.";
-    return json(res, 409, { state: status.state, detail, missingRequired: status.missingRequired, stale: true });
+    return json(res, 409, { state: status.state, detail: STALE_DETAIL, missingRequired: status.missingRequired, stale: true });
   }
   if (status.state !== "ready") return json(res, 409, status);
   const held = tryLockApply(a.rowId, now, "submit");
@@ -212,6 +231,34 @@ async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAu
   log.info({ rowId: a.rowId }, "apply api: submit accepted");
   json(res, 202, { state: "submitting", detail: "Submitting the application. This takes about a minute.", missingRequired: [] });
   void runApiSubmit(snap, held, deps);
+}
+
+/** "I submitted it": the founder sent an unconfirmed application from his own browser. Marks it applied, nothing is sent. */
+async function submittedEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
+  const createdAt = await readCreatedAt(req, res);
+  if (createdAt === null) return;
+  const snap = a.snap;
+  const now = deps.now();
+  const status = computeStatus(a.rowId, snap, now);
+  if (!snap || !status) return json(res, 409, { state: "cancelled", detail: "This form is closed.", missingRequired: [] });
+  if (snap.createdAt !== createdAt) {
+    return json(res, 409, { state: status.state, detail: STALE_DETAIL, missingRequired: status.missingRequired, stale: true });
+  }
+  if (status.state !== "unconfirmed") return json(res, 409, status);
+  const held = tryLockApply(a.rowId, now, "submit");
+  if (!held) return json(res, 409, { state: "submitting", detail: "Another run is on this application.", missingRequired: [] });
+  try {
+    const result = await (deps.markByHand ?? settleSubmittedByHand)(a.rowId, safeIo(snap, deps));
+    if (result.kind === "confirmed") {
+      recordOutcome(a.rowId, a.profileId, "confirmed", result.detail);
+      log.info({ rowId: a.rowId }, "apply api: marked applied by hand");
+      return json(res, 200, { state: "confirmed", detail: result.detail, missingRequired: [] });
+    }
+    const detail = result.kind === "refused" ? result.toast : result.detail;
+    return json(res, result.kind === "failed" ? 500 : 409, { state: status.state, detail, missingRequired: [] });
+  } finally {
+    held();
+  }
 }
 
 async function runApiCode(snap: ApplySnapshot, code: string, held: () => void, deps: ApiDeps): Promise<void> {
@@ -271,10 +318,10 @@ async function cancelEndpoint(res: ServerResponse, a: OkAuth, deps: ApiDeps): Pr
   json(res, 200, done);
 }
 
-/** The path after the token: status, submit or cancel. A bad link, bad initData or wrong profile is a 404. */
+/** The path after the token: status, submit, cancel, code or submitted. A bad link, bad initData or wrong profile is a 404. */
 export async function handleApplyApi(req: IncomingMessage, res: ServerResponse, token: string, action: string, deps: ApiDeps): Promise<void> {
   const method = req.method ?? "";
-  const want = action === "status" ? "GET" : action === "submit" || action === "cancel" || action === "code" ? "POST" : null;
+  const want = action === "status" ? "GET" : ["submit", "cancel", "code", "submitted"].includes(action) ? "POST" : null;
   if (!want) return notFound(res);
   if (method !== want) {
     res.setHeader("Allow", want);
@@ -288,5 +335,6 @@ export async function handleApplyApi(req: IncomingMessage, res: ServerResponse, 
   }
   if (action === "submit") return submitEndpoint(req, res, a, deps);
   if (action === "code") return codeEndpoint(req, res, a, deps);
+  if (action === "submitted") return submittedEndpoint(req, res, a, deps);
   return cancelEndpoint(res, a, deps);
 }
