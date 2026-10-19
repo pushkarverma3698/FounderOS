@@ -143,9 +143,17 @@ export async function awaitSubmitOutcome(
       // allow-failopen: 0 means no visible error element was detected.
       .catch(() => 0);
     if (errors > 0) return { kind: "unconfirmed", evidence: `Form displayed ${errors} validation error element(s) after clicking submit` };
+    const evidence = "Clicked submit; no error appeared, but no confirmation banner or URL change was observed within 12s - check screenshot to verify";
+    const botCheck = await page
+      .locator(".grecaptcha-badge, iframe[src*='recaptcha'], script[src*='recaptcha']")
+      .count()
+      // allow-failopen: a failed probe only drops the hint; the outcome stays unconfirmed.
+      .catch(() => 0);
+    if (botCheck === 0) return { kind: "unconfirmed", evidence };
+    // The bot must not try to get past the check; the founder submits from his own browser instead.
     return {
       kind: "unconfirmed",
-      evidence: "Clicked submit; no error appeared, but no confirmation banner or URL change was observed within 12s - check screenshot to verify",
+      evidence: `${evidence}. This form runs a hidden bot check (reCAPTCHA) that can silently refuse an automated browser, so it most likely was not sent: submit it yourself from the job link.`,
     };
   } finally {
     stop.done = true;
