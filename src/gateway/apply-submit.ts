@@ -22,6 +22,7 @@ import { childLogger } from "../infra/logger.js";
 import { getApplyUrl } from "../tools/jobhunt/apply-packet.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
+import { enterEmailCode, heldCodeInfo, onHeldExpired, type CodeEntryResult } from "../tools/jobhunt/held-submit.js";
 import { shortJobId } from "../tools/jobhunt/job-ref.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
 import { letterFacts, letterOf } from "./apply-cover-letter.js";
@@ -46,7 +47,7 @@ export interface SubmitIo {
 
 export type SubmitResult =
   | { readonly kind: "refused"; readonly toast: string; readonly html?: string }
-  | { readonly kind: "failed" | "confirmed" | "unconfirmed"; readonly row: JobApplication; readonly detail: string };
+  | { readonly kind: "failed" | "confirmed" | "unconfirmed" | "code-needed"; readonly row: JobApplication; readonly detail: string };
 
 export const auditKeyFor = (rowId: string): string => `apply-submit:${rowId}`;
 
@@ -56,6 +57,9 @@ export const alreadyAppliedMessage = (row: JobApplication, on: string): string =
 export const alreadyClickedMessage = (row: JobApplication, at: Date): string =>
   `⚠ Submit for <b>${safeHtml(row.company)}</b> was already clicked at ${at.toISOString().slice(11, 16)} UTC with no confirmation. ` +
   `Nothing was sent again. Check your email first; to retry, send <code>/apply ${shortJobId(row.id)}</code>.`;
+
+export const codeNeededMessage = (row: JobApplication): string =>
+  `📧 <b>${safeHtml(row.company)}</b> emailed you a confirmation code. Open the form and type it within 10 minutes; nothing is applied until it is accepted.`;
 
 const refuse = (toast: string, html?: string): SubmitResult => ({ kind: "refused", toast, ...(html ? { html } : {}) });
 
@@ -81,6 +85,7 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
   if (!row) return refuse("That role is no longer on file.");
   const on = appliedOn(row);
   if (on) return refuse("Already applied", alreadyAppliedMessage(row, on));
+  if (heldCodeInfo(rowId)) return refuse("Waiting for your emailed code", codeNeededMessage(row));
   const clickedAt = unconfirmedClickAt(rowId);
   if (clickedAt) return refuse("Already sent once", alreadyClickedMessage(row, clickedAt));
   try {
@@ -105,7 +110,7 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
   // The letter the card showed; after a restart (no session) the archived one, resolved again.
   const letter = session ? session.coverLetter : letterOf(await resolveCoverLetter(row, profile, artifactDir));
   const facts = { resumePath: pdfResolved.pdfPath, ...letterFacts(letter) };
-  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, facts, dossier);
+  const result = await getRunnerDeps().submit(targetUrl, row.company, loaded.profile, facts, dossier, rowId);
 
   if (!result.ok) {
     await io.text(
@@ -118,22 +123,59 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
     const verdict = result.confirmed ? "confirmed" : "needs attention";
     await io.photo(result.afterScreenshotPng, `${row.company} — post-submit (${verdict})`, `apply-submit-${row.id.slice(0, 8)}.png`);
   }
-  if (result.confirmed) {
-    await markRowApplied(row);
-    await auditConfirmed(row, via, targetUrl);
-    endSession(rowId);
-    await io.settled();
-    await io.text(`✅ <b>Application submitted and marked applied</b> — ${safeHtml(row.company)} (${safeHtml(row.title)}). It's off today's queue.`);
-    return { kind: "confirmed", row, detail: "Application submitted and marked applied." };
+  if (result.confirmed) return settleConfirmed(row, via, targetUrl, io);
+  if (result.codeNeeded) {
+    // Not applied, not an unconfirmed click: the page is held and the founder types the emailed code.
+    onHeldExpired(rowId, () => void settleUnconfirmed(row, targetUrl, "No code was typed within 10 minutes, so the form was closed.", io));
+    await io.text(codeNeededMessage(row), buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))));
+    return { kind: "code-needed", row, detail: result.evidence };
   }
+  return settleUnconfirmed(row, targetUrl, result.evidence, io);
+}
+
+async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
+  await markRowApplied(row);
+  await auditConfirmed(row, via, targetUrl);
+  endSession(row.id);
+  await io.settled();
+  await io.text(`✅ <b>Application submitted and marked applied</b> — ${safeHtml(row.company)} (${safeHtml(row.title)}). It's off today's queue.`);
+  return { kind: "confirmed", row, detail: "Application submitted and marked applied." };
+}
+
+async function settleUnconfirmed(row: JobApplication, targetUrl: string, evidence: string, io: SubmitIo): Promise<SubmitResult> {
   // The click went through, so the application may have arrived: no Submit here or on the tapped card.
   noteUnconfirmedClick(row.id);
   await io.settled();
   await io.text(
-    `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(result.evidence)}\n` +
+    `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(evidence)}\n` +
       `Submit was clicked, so it may have arrived. Check your email and the screenshot above before trying again; ` +
       `to retry, send <code>/apply ${shortJobId(row.id)}</code>.`,
     buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))),
   );
-  return { kind: "unconfirmed", row, detail: result.evidence };
+  return { kind: "unconfirmed", row, detail: evidence };
+}
+
+export type CodeResult =
+  | { readonly kind: "none" | "invalid"; readonly detail: string }
+  | { readonly kind: "code-needed" | "confirmed" | "unconfirmed"; readonly row: JobApplication; readonly detail: string };
+
+/** The founder typed the emailed code. The caller holds the row's lock and has authenticated him. */
+export async function runCodeEntry(rowId: string, via: SubmitVia, code: string, io: SubmitIo): Promise<CodeResult> {
+  const row = await getApplicationById(rowId, getProfile().tenantId);
+  if (!row) return { kind: "none", detail: "That role is no longer on file." };
+  const entered: CodeEntryResult = await enterEmailCode(rowId, code);
+  if (entered.kind === "none") return { kind: "none", detail: "There is no form waiting for a code." };
+  if (entered.kind === "invalid") return { kind: "invalid", detail: entered.reason };
+  const session = sessionForRow(rowId);
+  const targetUrl = session?.targetUrl ?? getApplyUrl(row.url ?? "", row.company) ?? row.url ?? "";
+  if (entered.screenshotPng.length > 0) {
+    await io.photo(entered.screenshotPng, `${row.company} — post-code (${entered.kind})`, `apply-code-${row.id.slice(0, 8)}.png`);
+  }
+  if (entered.kind === "confirmed") {
+    const done = await settleConfirmed(row, via, targetUrl, io);
+    return { kind: "confirmed", row, detail: done.kind === "confirmed" ? done.detail : "" };
+  }
+  if (entered.kind === "code-needed") return { kind: "code-needed", row, detail: entered.evidence };
+  await settleUnconfirmed(row, targetUrl, entered.evidence, io);
+  return { kind: "unconfirmed", row, detail: entered.evidence };
 }

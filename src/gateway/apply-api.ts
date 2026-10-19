@@ -1,11 +1,12 @@
 /**
  * Apply answer page: Mini App API
  * ===============================
- * Three JSON endpoints under the answer-page link, for the page running inside Telegram:
+ * Four JSON endpoints under the answer-page link, for the page running inside Telegram:
  *
  *   GET  /apply/<token>/status   {state, detail, missingRequired[]}
  *   POST /apply/<token>/submit   202, then the shared Submit (apply-submit.ts) runs in the background
  *   POST /apply/<token>/cancel   the same end as the Telegram Cancel button
+ *   POST /apply/<token>/code     {code}: the founder types the emailed confirmation code into the held form
  *
  * Two proofs on every call: the HMAC link (the page exists for this row) and Telegram WebApp initData in
  * the X-Telegram-Init-Data header (the signed-in Telegram user is the profile that owns the row, ADR-018).
@@ -18,7 +19,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "../infra/logger.js";
 import { sendPhoto } from "../infra/telegram-send.js";
 import { loadApplySnapshot, parseApplyToken, readApplyLinkConfig, verifyApplyToken, type ApplySnapshot } from "../tools/jobhunt/apply-link.js";
-import { runSubmit, type SubmitIo } from "./apply-submit.js";
+import { heldCodeInfo, CODE_PATTERN } from "../tools/jobhunt/held-submit.js";
+import { runCodeEntry, runSubmit, type SubmitIo } from "./apply-submit.js";
 import {
   clearOutcome, endSession, lockPhase, outcomeFor, recordOutcome, tryLockApply, unconfirmedClickAt, type ApplySender,
 } from "./apply-session.js";
@@ -30,7 +32,7 @@ const log = logger.child({ module: "apply-api" });
 export const MAX_BODY_BYTES = 64 * 1024;
 export const TOO_LARGE = Symbol("too-large");
 
-export type ApplyState = "preparing" | "ready" | "blocked" | "submitting" | "confirmed" | "unconfirmed" | "cancelled" | "refilling";
+export type ApplyState = "preparing" | "ready" | "blocked" | "submitting" | "confirmed" | "unconfirmed" | "cancelled" | "refilling" | "code-needed";
 export interface ApplyStatus {
   readonly state: ApplyState;
   readonly detail: string;
@@ -44,6 +46,7 @@ export interface ApiDeps {
   readonly root?: string;
   readonly senderFor: (chatId: string) => ApplySender;
   readonly submit: typeof runSubmit;
+  readonly enterCode?: typeof runCodeEntry;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
 }
 
@@ -93,6 +96,12 @@ export function computeStatus(rowId: string, snap: ApplySnapshot | null, nowMs: 
   if (phase === "refill") return { state: "refilling", detail: "Saving your answers and re-filling the form.", missingRequired: [] };
   if (phase === "prepare") return { state: "preparing", detail: "Opening the form and filling it.", missingRequired: [] };
   const outcome = outcomeFor(rowId);
+  const codeHeld = heldCodeInfo(rowId, nowMs);
+  if (codeHeld) {
+    const retry = outcome?.state === "failed" ? outcome.detail + " " : "";
+    const detail = `${retry}Type the code that was emailed to you. ${codeHeld.secondsLeft} seconds left.`;
+    return { state: "code-needed", detail, missingRequired: [] };
+  }
   if (!snap) {
     if (outcome?.state === "confirmed" || outcome?.state === "cancelled") return { state: outcome.state, detail: outcome.detail, missingRequired: [] };
     return null;
@@ -202,6 +211,46 @@ async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAu
   void runApiSubmit(snap, held, deps);
 }
 
+async function runApiCode(snap: ApplySnapshot, code: string, held: () => void, deps: ApiDeps): Promise<void> {
+  const io = safeIo(snap, deps);
+  try {
+    const result = await (deps.enterCode ?? runCodeEntry)(snap.rowId, "miniapp", code, io);
+    if (result.kind === "confirmed") recordOutcome(snap.rowId, snap.profileId, "confirmed", result.detail);
+    else if (result.kind === "code-needed" || result.kind === "invalid") recordOutcome(snap.rowId, snap.profileId, "failed", result.detail);
+    else clearOutcome(snap.rowId); // unconfirmed or none: the snapshot carries the guard, and the status reads it from there
+  } catch (err) {
+    const reason = (err as Error).message;
+    log.error({ rowId: snap.rowId, err: reason }, "apply api: code entry crashed");
+    recordOutcome(snap.rowId, snap.profileId, "failed", "Entering the code crashed: " + reason);
+  } finally {
+    held();
+  }
+}
+
+async function codeEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
+  const raw = await readBody(req);
+  if (raw === TOO_LARGE) return json(res, 413, { error: "request too large" });
+  let code: unknown;
+  try {
+    code = (JSON.parse(raw) as { code?: unknown }).code;
+  } catch {
+    // allow-failopen: an unreadable body is the same 400 as a body without a code.
+    code = undefined;
+  }
+  if (typeof code !== "string" || !CODE_PATTERN.test(code)) {
+    return json(res, 400, { error: "The code is 4 to 12 letters and digits." });
+  }
+  const now = deps.now();
+  if (!a.snap || !heldCodeInfo(a.rowId, now)) {
+    return json(res, 409, { state: "cancelled", detail: "No form is waiting for a code.", missingRequired: [] });
+  }
+  const held = tryLockApply(a.rowId, now, "submit");
+  if (!held) return json(res, 409, { state: "submitting", detail: "Another run is on this application.", missingRequired: [] });
+  log.info({ rowId: a.rowId }, "apply api: code accepted");
+  json(res, 202, { state: "submitting", detail: "Entering the code and submitting.", missingRequired: [] });
+  void runApiCode(a.snap, code, held, deps);
+}
+
 async function cancelEndpoint(res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
   const done = { state: "cancelled", detail: "Cancelled. Run /apply again in Telegram for a fresh form.", missingRequired: [] };
   if (!a.snap) return json(res, 200, done);
@@ -222,7 +271,7 @@ async function cancelEndpoint(res: ServerResponse, a: OkAuth, deps: ApiDeps): Pr
 /** The path after the token: status, submit or cancel. A bad link, bad initData or wrong profile is a 404. */
 export async function handleApplyApi(req: IncomingMessage, res: ServerResponse, token: string, action: string, deps: ApiDeps): Promise<void> {
   const method = req.method ?? "";
-  const want = action === "status" ? "GET" : action === "submit" || action === "cancel" ? "POST" : null;
+  const want = action === "status" ? "GET" : action === "submit" || action === "cancel" || action === "code" ? "POST" : null;
   if (!want) return notFound(res);
   if (method !== want) {
     res.setHeader("Allow", want);
@@ -235,5 +284,6 @@ export async function handleApplyApi(req: IncomingMessage, res: ServerResponse, 
     return status ? json(res, 200, status) : notFound(res);
   }
   if (action === "submit") return submitEndpoint(req, res, a, deps);
+  if (action === "code") return codeEndpoint(req, res, a, deps);
   return cancelEndpoint(res, a, deps);
 }
