@@ -302,7 +302,7 @@ async function codeEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth
 }
 
 async function cancelEndpoint(res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
-  const done = { state: "cancelled", detail: "Cancelled. Run /apply again in Telegram for a fresh form.", missingRequired: [] };
+  const done = { state: "cancelled", detail: "Cancelled. Tap Prepare again for a fresh form.", missingRequired: [] };
   if (!a.snap) return json(res, 200, done);
   if (lockPhase(a.rowId, deps.now()) === "submit") {
     return json(res, 409, { state: "submitting", detail: "A submit is running, so it cannot be cancelled now.", missingRequired: [] });
