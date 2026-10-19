@@ -347,8 +347,15 @@ describe("Submit it yourself (unconfirmed on a hidden bot check)", () => {
     expect(html).toContain(`data-row="${ROW}"`);
   });
 
-  it("is absent when the unconfirmed evidence names no bot check, and when the row is not unconfirmed", () => {
-    expect(renderApplyPage(unconfirmed("No confirmation text"), { nonce: NONCE })).not.toContain("Submit it yourself");
+  it("shows for any unconfirmed row, telling the founder to check email first when no bot check is named", () => {
+    const html = renderApplyPage(unconfirmed("No confirmation text"), { nonce: NONCE });
+    expect(html).toContain("Submit it yourself");
+    expect(html).toContain("Check your email first");
+    expect(html).not.toContain("bot check most likely refused");
+    expect(renderApplyPage(unconfirmed(), { nonce: NONCE })).toContain("bot check most likely refused");
+  });
+
+  it("is absent when the row is not unconfirmed", () => {
     expect(renderApplyPage(snap({}, { unconfirmedEvidence: BOT_CHECK }), { nonce: NONCE })).not.toContain("Submit it yourself");
   });
 
