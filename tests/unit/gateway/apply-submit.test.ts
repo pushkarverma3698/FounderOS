@@ -35,7 +35,7 @@ vi.mock("../../../src/db/queries.js", () => ({
   writeAuditEntry: (data: unknown) => mockWriteAuditEntry(data),
 }));
 
-const { runSubmit, auditKeyFor } = await import("../../../src/gateway/apply-submit.js");
+const { runSubmit, auditKeyFor, settleSubmittedByHand } = await import("../../../src/gateway/apply-submit.js");
 const { clearAutoApplySessionsForTests, setAutoApplyRunnerForTests, unconfirmedClickAt, unconfirmedEvidenceFor } = await import("../../../src/gateway/apply-session.js");
 const { holdForEmailCode, releaseHeld, heldCodeInfo } = await import("../../../src/tools/jobhunt/held-submit.js");
 const { saveApplySnapshot, loadApplySnapshot } = await import("../../../src/tools/jobhunt/apply-link.js");
@@ -255,5 +255,41 @@ describe("runSubmit", () => {
     await runSubmit(ROW_ID, "777", "telegram", io);
     expect(texts.join("\n")).toContain("A&lt;b&gt;&amp;Co");
     expect(texts.join("\n")).not.toContain("A<b>&Co");
+  });
+});
+
+describe("settleSubmittedByHand", () => {
+  beforeEach(() => {
+    clearAutoApplySessionsForTests();
+    mockMarkRowApplied.mockClear();
+    mockGetApplicationById.mockReset().mockResolvedValue(row);
+    mockWriteAuditEntry.mockReset().mockResolvedValue({ written: true });
+  });
+
+  it("marks the row applied, writes the apply-submit audit row with via by-hand, and tells the chat", async () => {
+    const { io, texts } = recorder();
+    const result = await settleSubmittedByHand(ROW_ID, io);
+    expect(result.kind).toBe("confirmed");
+    expect(mockMarkRowApplied).toHaveBeenCalledTimes(1);
+    const audit = mockWriteAuditEntry.mock.calls[0]?.[0] as { action: string; idempotency_key: string; payload: { via: string } };
+    expect(audit.idempotency_key).toBe(auditKeyFor(ROW_ID));
+    expect(audit.payload.via).toBe("by-hand");
+    expect(texts.join("\n")).toContain("Workwize");
+    expect(texts.join("\n")).toContain("marked applied");
+  });
+
+  it("refuses an already-applied row without writing anything", async () => {
+    mockGetApplicationById.mockResolvedValue({ ...row, stage: "applied", applied_at: new Date("2026-10-18T10:00:00Z") });
+    const { io } = recorder();
+    expect((await settleSubmittedByHand(ROW_ID, io)).kind).toBe("refused");
+    expect(mockMarkRowApplied).not.toHaveBeenCalled();
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed write as failed, with no audit row", async () => {
+    mockMarkRowApplied.mockResolvedValueOnce({ ok: false } as never);
+    const { io } = recorder();
+    expect((await settleSubmittedByHand(ROW_ID, io)).kind).toBe("failed");
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
   });
 });
