@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findWebAppButton, newestWebAppMessage, parseWebAppArgs } from "../../../scripts/lib/webapp-args.js";
+import { findWebAppButton, newestWebAppMessage, parseWebAppArgs, webViewPeer } from "../../../scripts/lib/webapp-args.js";
 import type { TapButton } from "../../../scripts/lib/tap-guard.js";
 
 const BTNS: TapButton[] = [
@@ -48,5 +48,14 @@ describe("telegram-webapp: newestWebAppMessage", () => {
   });
   it("returns undefined when no bot message has one", () => {
     expect(newestWebAppMessage([{ id: 1, out: false, buttons: [] }])).toBeUndefined();
+  });
+});
+
+describe("telegram-webapp: webViewPeer", () => {
+  it("opens the bot menu button in the bot's own chat, never in the probe chat (a group gave USER_BOT_REQUIRED)", () => {
+    expect(webViewPeer(true, "probe-chat", "bot-chat")).toBe("bot-chat");
+  });
+  it("opens an inline web_app button in the chat that holds the message", () => {
+    expect(webViewPeer(false, "probe-chat", "bot-chat")).toBe("probe-chat");
   });
 });
