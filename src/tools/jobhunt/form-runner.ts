@@ -288,6 +288,8 @@ export async function submitApplicationForm(
   row: RowApplicationFacts,
   dossier?: CandidateDossier,
   rowId?: string,
+  /** Fill and run every pre-submit check, then stop before the click (readiness checks; never sends). */
+  dryRun = false,
 ): Promise<SubmittedFormResult | FormFailureResult> {
   const check = classifyFormUrl(url);
   if (!check.supported) return { ok: false, reason: check.reason, platform: null };
@@ -348,6 +350,10 @@ export async function submitApplicationForm(
       return { ok: false, reason: "could not locate the submit button on this form", platform: check.platform };
     }
 
+    if (dryRun) {
+      const png = await page.screenshot({ fullPage: true, type: "png" });
+      return { ok: true, platform: check.platform, clicked: false, confirmed: false, evidence: "dry run: every check passed, Submit not clicked", afterScreenshotPng: png };
+    }
     const urlBefore = page.url();
     await button.click({ timeout: 10_000 });
 
