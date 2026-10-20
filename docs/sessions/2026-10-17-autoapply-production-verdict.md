@@ -1,7 +1,8 @@
 # /apply production verdict: 2026-10-17/18
 
-**Ready for regular phone use: NO.** 2 of 5 real Submits reached the employer. Two more stopped at a CAPTCHA,
-and one stopped at Greenhouse's emailed code. The bot's own record is right for only 1 of the 2 sends.
+**Ready for regular phone use: NO.** 1 of 5 real Submits is proven sent (Bureau, by its success banner). Matillion's
+"confirmed" was false (thank-you text above the form's own Submit; fixed in #1227). Two stopped at a CAPTCHA, one at
+Greenhouse's emailed code.
 
 Prod during the run: 4f8c6c66, then 9f444059 (#1204: #1200–#1203), then d95d8a8a (#1206: #1205 permit-sentence fix).
 Driven as the founder from `scripts/telegram-tap.ts` on the VPS (`/opt/review/founderos-applyprod`), with every Submit
@@ -11,7 +12,7 @@ authorised by the founder in chat.
 
 | Job (ATS) | Outcome | Proof |
 |---|---|---|
-| Matillion (Lever) | **Sent, confirmed** | bot "✅ Application submitted"; DB `stage=applied`, `applied_at 2026-10-17 17:29:27Z` |
+| Matillion (Lever) | **False confirm, not sent** | bot said "✅ Application submitted", but the form was still on screen; #1227 fixed the check; row reset to `screened` 10-19 |
 | Bureau (Ashby) | **Sent, but the bot says unconfirmed** | post-submit screenshot shows Ashby's green "Success" banner; DB still `screened` |
 | EMA (Ashby) | Not sent: hCaptcha | post-submit screenshot shows an image challenge over the form; DB `screened` |
 | AppZen (Lever) | Not sent: hCaptcha | post-submit screenshot shows an image challenge; 7 essay answers were filled; DB `screened` |
@@ -45,6 +46,10 @@ Everbridge (Lever, 12 unanswered), Keywords Studios (Workable, 9 required fields
 
 ## NOT VERIFIED
 
-- Confirmation emails for Matillion and Bureau: the Gmail tokens are revoked (`gmail_search` returned re-authorization errors).
 - Bureau's DB row was left as `screened`; I did not hand-edit prod data.
 - No Workable or Greenhouse send.
+
+## Status on 2026-10-20
+
+Fixed on beta since: #3 (audit row on Submit), #5 (#1203), #6 and #7 (#1200, #1205), #10 (tap guard reads the row id
+before the nonce). #1 and #2 are fixed in the follow-up PR on `fix/ashby-success-hcaptcha-check`.
