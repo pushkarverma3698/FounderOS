@@ -14,10 +14,11 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { childLogger } from "../infra/logger.js";
 import { sendMessageTo } from "../infra/telegram-send.js";
-import { deleteApplySnapshot } from "../tools/jobhunt/apply-link.js";
+import { deleteApplySnapshot, loadApplySnapshot, saveApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { normalizeQuestionKey } from "../tools/jobhunt/candidate-dossier.js";
 import type { UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import { prepareApplicationForm, submitApplicationForm } from "../tools/jobhunt/form-runner.js";
+import { releaseHeld } from "../tools/jobhunt/held-submit.js";
 import { resolveApplyCoverLetter, type ApplyCoverLetter } from "./apply-cover-letter.js";
 
 const log = childLogger({ module: "gateway:apply-session" });
@@ -111,12 +112,31 @@ export function botSender(chatId: string): ApplySender {
 
 const sessionsByChat = new Map<string, PendingApplySession>();
 const sessionsByRow = new Map<string, PendingApplySession>();
-const locks = new Map<string, { readonly at: number }>();
+/** What holds a row's lock: the Telegram prepare/fill, a re-fill from the page, or a Submit (either surface). */
+export type LockPhase = "prepare" | "refill" | "submit";
+const locks = new Map<string, { readonly at: number; readonly phase: LockPhase }>();
+/**
+ * How the last Submit or Cancel on a row ended, kept in memory for the status route. Confirmed and cancelled
+ * delete the snapshot, so the status route would 404 on the very answer the page is polling for; "failed" keeps
+ * the reason of a send that did not go out. The profile id is what lets the route authorize after the snapshot is gone.
+ */
+export type OutcomeState = "submitting" | "confirmed" | "cancelled" | "failed";
+export interface ApplyOutcome {
+  readonly state: OutcomeState;
+  readonly profileId: string;
+  readonly detail: string;
+}
+const outcomes = new Map<string, ApplyOutcome>();
+export const outcomeFor = (rowId: string): ApplyOutcome | undefined => outcomes.get(rowId);
+export const recordOutcome = (rowId: string, profileId: string, state: OutcomeState, detail: string): void =>
+  void outcomes.set(rowId, { state, profileId, detail });
+export const clearOutcome = (rowId: string): void => void outcomes.delete(rowId);
 /**
  * Rows whose Submit was clicked with no confirmation back. grammY runs updates one at a time, so a double tap
  * arrives after the first send has finished and released the lock; this refuses it until the form is reopened.
  */
 const unconfirmedClicks = new Map<string, Date>();
+const unconfirmedEvidence = new Map<string, string>();
 
 export const sessionForChat = (chatId: string): PendingApplySession | undefined => sessionsByChat.get(chatId);
 export const sessionForRow = (rowId: string): PendingApplySession | undefined => sessionsByRow.get(rowId);
@@ -127,12 +147,13 @@ export function setSession(session: PendingApplySession): void {
 }
 
 /** Ends the session for a row and deletes its snapshot, so the answer link dies with the session. */
-export function endSession(rowId: string): void {
+export function endSession(rowId: string, root?: string): void {
   const session = sessionsByRow.get(rowId);
   if (session && sessionsByChat.get(session.chatId)?.rowId === rowId) sessionsByChat.delete(session.chatId);
   sessionsByRow.delete(rowId);
+  void releaseHeld(rowId); // a form held for the emailed code closes with the session
   try {
-    deleteApplySnapshot(rowId);
+    deleteApplySnapshot(rowId, root);
   } catch (err) {
     log.warn({ rowId, err: (err as Error).message }, "apply snapshot delete failed");
   }
@@ -162,31 +183,75 @@ export function clearAutoApplySessionsForTests(): void {
   sessionsByRow.clear();
   locks.clear();
   unconfirmedClicks.clear();
+  unconfirmedEvidence.clear();
+  outcomes.clear();
 }
 
-export const unconfirmedClickAt = (rowId: string): Date | undefined => unconfirmedClicks.get(rowId);
-export const noteUnconfirmedClick = (rowId: string): void => void unconfirmedClicks.set(rowId, new Date());
-export const forgetUnconfirmedClick = (rowId: string): void => void unconfirmedClicks.delete(rowId);
+/** When Submit was last clicked with no confirmation: memory first, else the snapshot (it survives a restart). */
+export function unconfirmedClickAt(rowId: string): Date | undefined {
+  const mem = unconfirmedClicks.get(rowId);
+  if (mem) return mem;
+  const at = loadApplySnapshot(rowId)?.unconfirmedAt;
+  return at === undefined ? undefined : new Date(at);
+}
+
+/** Why the last Submit click came back unconfirmed: memory first, else the snapshot. */
+export function unconfirmedEvidenceFor(rowId: string): string | undefined {
+  return unconfirmedEvidence.get(rowId) ?? loadApplySnapshot(rowId)?.unconfirmedEvidence;
+}
+
+function persistUnconfirmed(rowId: string, at: number | undefined, evidence?: string): void {
+  try {
+    const snap = loadApplySnapshot(rowId);
+    if (!snap || (snap.unconfirmedAt === at && snap.unconfirmedEvidence === evidence)) return;
+    const { unconfirmedAt: _drop, unconfirmedEvidence: _dropEvidence, ...rest } = snap;
+    saveApplySnapshot(at === undefined ? rest : { ...rest, unconfirmedAt: at, ...(evidence ? { unconfirmedEvidence: evidence } : {}) });
+  } catch (err) {
+    // allow-failopen: the in-memory guard still holds for this process; only its survival across a restart is lost.
+    log.warn({ rowId, err: (err as Error).message }, "could not persist the unconfirmed-submit guard");
+  }
+}
+
+export function noteUnconfirmedClick(rowId: string, evidence?: string): void {
+  const now = new Date();
+  unconfirmedClicks.set(rowId, now);
+  if (evidence) unconfirmedEvidence.set(rowId, evidence);
+  persistUnconfirmed(rowId, now.getTime(), evidence);
+}
+
+export function forgetUnconfirmedClick(rowId: string): void {
+  unconfirmedClicks.delete(rowId);
+  unconfirmedEvidence.delete(rowId);
+  persistUnconfirmed(rowId, undefined);
+}
 
 /**
  * One re-fill per application row at a time, across the Telegram path and the answer page. Returns a
  * release function (safe to call twice, and a no-op once the lock was taken over), or null while another
  * run holds it. A lock older than ten minutes belongs to a crashed run and is taken over.
  */
-export function tryLockApply(rowId: string, nowMs: number = Date.now()): (() => void) | null {
+export function tryLockApply(rowId: string, nowMs: number = Date.now(), phase: LockPhase = "prepare"): (() => void) | null {
   const held = locks.get(rowId);
   if (held && nowMs - held.at < LOCK_STALE_MS) return null;
-  const mine = { at: nowMs };
+  const mine = { at: nowMs, phase };
   locks.set(rowId, mine);
   return () => {
     if (locks.get(rowId) === mine) locks.delete(rowId);
   };
 }
 
+/** What is running on a row right now, or null. */
+export function lockPhase(rowId: string, nowMs: number = Date.now()): LockPhase | null {
+  const held = locks.get(rowId);
+  return held && nowMs - held.at < LOCK_STALE_MS ? held.phase : null;
+}
+
+export const LOCK_HELD_MESSAGE = "⏳ This form is already re-filling. The updated card arrives in about a minute; answer after it lands.";
+
 /** `tryLockApply`, telling the founder when the form is already being re-filled. */
 export async function acquireApplyLock(send: ApplySender, rowId: string): Promise<(() => void) | null> {
   const held = tryLockApply(rowId);
-  if (!held) await send.text("⏳ This form is already re-filling. The updated card arrives in about a minute; answer after it lands.");
+  if (!held) await send.text(LOCK_HELD_MESSAGE);
   return held;
 }
 

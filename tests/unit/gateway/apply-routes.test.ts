@@ -149,7 +149,20 @@ describe("apply answer page routes", () => {
       expect(html).toContain(WHERE);
       expect(html).toContain(`name="${applyFieldName(WHY)}"`);
       expect(html).not.toContain(token);
-      expect(html).not.toContain("<script");
+      const csp = res.headers.get("content-security-policy") ?? "";
+      const nonce = /script-src 'nonce-([^']+)' https:\/\/telegram\.org/.exec(csp)?.[1];
+      expect(nonce).toBeTruthy();
+      expect(csp).toContain("connect-src 'self'");
+      expect(html).toContain(`<script nonce="${nonce}" src="https://telegram.org/js/telegram-web-app.js">`);
+      expect(html.match(/<script/g)).toHaveLength(2);
+      expect(html.match(/<script(?![^>]*nonce=)/g)).toBeNull();
+    });
+
+    it("uses a fresh nonce for every page load", async () => {
+      const token = tokenFor();
+      const a = (await fetch(`${base}/apply/${token}`)).headers.get("content-security-policy");
+      const b = (await fetch(`${base}/apply/${token}`)).headers.get("content-security-policy");
+      expect(a).not.toBe(b);
     });
 
     it("prefills what the bot filled, so the form is not blank", async () => {
@@ -269,6 +282,21 @@ describe("apply answer page routes", () => {
       const res = await post(form({ [applyFieldName(WHERE)]: "Ireland", [applyFieldName(WHY)]: "   " }));
       expect(await res.text()).toContain("Saved 1 answer.");
       expect(record).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses an answer that names the company for this form only: re-filled with it, never recorded", async () => {
+      const res = await post(form({ [applyFieldName(WHERE)]: "Ireland", [applyFieldName(WHY)]: "I admire what Workwize builds." }));
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Saved 1 answer.");
+      expect(body).toContain("1 answer names Workwize, so it was used for this form only and not saved");
+      expect(record.mock.calls).toEqual([[PROFILE, WHERE, "Ireland"]]);
+      await vi.waitFor(() => expect(refill).toHaveBeenCalledTimes(1));
+      const call = refill.mock.calls[0] as unknown as [ApplySnapshot, { label: string; answer: string }[]];
+      expect(call[1]).toEqual([
+        { label: WHERE, answer: "Ireland" },
+        { label: WHY, answer: "I admire what Workwize builds." },
+      ]);
     });
 
     it("saves a changed filled value under its label and re-fills with it", async () => {

@@ -1,11 +1,12 @@
 /**
  * Apply answer page: HTML renderer
  * ================================
- * Pure functions: a snapshot goes in, a mobile-first HTML string comes out. No script, no external
- * resource, one inline style block whose hash is pinned in the Content-Security-Policy. Every string
- * from the snapshot (labels, values, options, company names) came from a third-party site or the
- * candidate's profile, so every one is escaped. The page never submits an application; it saves
- * answers and asks the bot to re-fill.
+ * Pure functions: a snapshot goes in, a mobile-first HTML string comes out. One inline style block whose
+ * hash is pinned in the Content-Security-Policy. Without a nonce the page has no script and no external
+ * resource. With one (the route passes it for the page itself) it adds Telegram's WebApp script and the one
+ * nonce'd inline script (apply-page-script.ts) that drives Submit, Cancel and status inside Telegram.
+ * Every string from the snapshot (labels, values, options, company names) came from a third-party site or
+ * the candidate's profile, so every one is escaped. Saving answers asks the bot to re-fill.
  *
  * One form holds both sections: the questions the bot could not answer, and every field it did fill,
  * each with its value in an editable input. Files, consent boxes and anything the stored one-line
@@ -13,8 +14,10 @@
  */
 
 import { createHash } from "node:crypto";
+import { APPLY_PAGE_SCRIPT } from "./apply-page-script.js";
 import type { ApplySnapshot, ApplySnapshotFilled, ApplySnapshotQuestion } from "../tools/jobhunt/apply-link.js";
 import { MAX_ANSWER_CHARS } from "../tools/jobhunt/form-filled.js";
+import { namesHiddenBotCheck } from "../tools/jobhunt/held-submit.js";
 
 const MAX_RADIO_OPTIONS = 4;
 const SHOWN_VALUE_CHARS = 300;
@@ -40,27 +43,37 @@ const CSS =
   ".choice{display:block;padding:8px 0}.choice input{margin-right:8px}" +
   "button{width:100%;font:inherit;font-weight:600;padding:14px;border:0;border-radius:10px;background:#1f6feb;color:#fff;margin-top:8px}" +
   ".hint,.note{color:#5b6573;font-size:.9rem;margin:6px 0 0}.warn{background:#fff4e5;border:1px solid #f0c36d;border-radius:10px;padding:10px}" +
-  ".val{white-space:pre-wrap;overflow-wrap:anywhere}" +
+  ".val{white-space:pre-wrap;overflow-wrap:anywhere}button.alt{background:transparent;color:inherit;border:1px solid #b9c0cb}" +
+  "#mini{background:#fff;border:1px solid #dde1e7;border-radius:10px;padding:12px;margin:0 0 12px}" +
+  "button.copy{width:auto;padding:6px 14px;margin-top:6px;font-size:.9rem}a.go{display:block;text-align:center;font-weight:600;padding:14px;border-radius:10px;background:#1f6feb;color:#fff;text-decoration:none;margin:8px 0}" +
   "ul{padding-left:20px;margin:0}li{margin:2px 0}.foot{color:#5b6573;font-size:.85rem;margin-top:24px}" +
   "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}.q{background:#171c24;border-color:#2a313c}" +
-  "input[type=text],select,textarea{background:#0f1319;border-color:#3a4350}" +
+  "input[type=text],select,textarea{background:#0f1319;border-color:#3a4350}#mini{background:#171c24;border-color:#2a313c}" +
   ".sub,.hint,.note,.foot,.opt{color:#9aa4b2}.warn{background:#2b2211;border-color:#6b5320}}";
 
 const STYLE_HASH = createHash("sha256").update(CSS).digest("base64");
 
+const TELEGRAM_SCRIPT_HOST = "https://telegram.org";
+
 /**
- * Sent with every page. The style hash is the only allowance; nothing can load or run anything else.
+ * Sent with every page. The style hash is the only style allowance. With a nonce the page may also run its one
+ * inline script and load Telegram's WebApp script, and fetch its own origin; nothing else can load or run.
  * Only Telegram Web may frame the page: it opens the card's Mini App button in an iframe (native apps use a WebView).
  */
-export const APPLY_PAGE_HEADERS: Readonly<Record<string, string>> = {
-  "Content-Type": "text/html; charset=utf-8",
-  "Cache-Control": "no-store",
-  "Referrer-Policy": "no-referrer",
-  "X-Robots-Tag": "noindex, nofollow",
-  "X-Content-Type-Options": "nosniff",
-  "Content-Security-Policy":
-    `default-src 'none'; style-src 'sha256-${STYLE_HASH}'; form-action 'self'; frame-ancestors https://web.telegram.org; base-uri 'none'`,
-};
+export function applyPageHeaders(nonce?: string): Readonly<Record<string, string>> {
+  const script = nonce ? `script-src 'nonce-${nonce}' ${TELEGRAM_SCRIPT_HOST}; connect-src 'self'; ` : "";
+  return {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy":
+      `default-src 'none'; style-src 'sha256-${STYLE_HASH}'; ${script}form-action 'self'; frame-ancestors https://web.telegram.org; base-uri 'none'`,
+  };
+}
+
+export const APPLY_PAGE_HEADERS: Readonly<Record<string, string>> = applyPageHeaders();
 
 /**
  * Form field name for a question. Hashed, not positional: a page left open while the form changes
@@ -93,9 +106,9 @@ export function renderNoticePage(title: string, message: string): string {
 const DOCTYPE = `<!doctype html>`;
 const HEAD_META = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">`;
 
-function shell(title: string, inner: string): string {
+function shell(title: string, inner: string, mainAttrs = "", scripts = ""): string {
   const head = HEAD_META + `<title>${escapeHtml(title)}</title><style>${CSS}</style>`;
-  return DOCTYPE + `<html lang="en"><head>${head}</head><body><main>${inner}</main></body></html>`;
+  return DOCTYPE + `<html lang="en"><head>${head}</head><body><main${mainAttrs}>${inner}</main>${scripts}</body></html>`;
 }
 
 /** A question the page offers an input for (a file or CAPTCHA cannot be answered here). */
@@ -184,7 +197,7 @@ function orderQuestions(qs: readonly ApplySnapshotQuestion[]): ApplySnapshotQues
 
 function renderQuestions(qs: readonly ApplySnapshotQuestion[]): string {
   if (qs.length === 0) {
-    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the values below, then press Submit in Telegram.</p>`;
+    return `<h2>Nothing left to answer</h2><p class="note">Every question has an answer. Review the values below, then tap Submit application at the bottom of the screen.</p>`;
   }
   return `<h2>Needs your answer (${qs.length})</h2>${qs.map(renderQuestion).join("")}`;
 }
@@ -228,8 +241,54 @@ const FOOTER =
   `<p class="foot">This page never submits the application. After you save, the bot re-fills the form ` +
   `and sends the updated card to Telegram, where you press Submit.</p>`;
 
-/** The answer page for one snapshot. */
-export function renderApplyPage(snap: ApplySnapshot): string {
+const MINI_PANEL =
+  `<section id="mini" hidden><p id="mini-status" role="status" class="note"></p>` +
+  `<div id="mini-confirm" hidden><p id="mini-confirm-text"></p>` +
+  `<button type="button" id="mini-yes">Yes, submit</button><button type="button" id="mini-back" class="alt">Back</button></div>` +
+  `<div id="mini-code" hidden><label for="mini-code-input">Code from your email</label>` +
+  `<input type="text" id="mini-code-input" maxlength="12" autocomplete="one-time-code" autocapitalize="off" spellcheck="false">` +
+  `<button type="button" id="mini-code-send">Send code</button></div>` +
+  `<button type="button" id="mini-cancel" class="alt" hidden>Cancel application</button>` +
+  `<button type="button" id="mini-again" hidden>Prepare again</button>` +
+  `<div id="mini-again-confirm" hidden><p>Check your email first: if the application arrived, do not send it twice. The bot opens the form and fills it again; nothing is sent until you tap Submit.</p>` +
+  `<button type="button" id="mini-again-yes">Yes, prepare again</button><button type="button" id="mini-again-back" class="alt">Back</button></div></section>`;
+
+const isWebUrl = (url: string): boolean => /^https?:\/\//i.test(url);
+
+/**
+ * Unconfirmed because the form's hidden bot check most likely refused the bot's click: everything the founder needs
+ * to send it from his own browser. The link, then every filled value in full (a Copy button each inside Telegram),
+ * then "I submitted it", which marks the row applied after an in-page confirm.
+ */
+function renderSelfSubmit(snap: ApplySnapshot, scripted: boolean): string {
+  if (snap.unconfirmedAt === undefined) return "";
+  const link = isWebUrl(snap.targetUrl)
+    ? `<a id="self-link" href="${escapeHtml(snap.targetUrl)}" class="go" target="_blank" rel="noopener noreferrer">Open the job form</a>`
+    : `<p class="note">The job address on file is not a web link; open the job from the original listing.</p>`;
+  const rows = snap.summary.filledAnswers.map((f, i) => {
+    const head = `<div class="t">${escapeHtml(f.label)}</div>`;
+    if (READ_ONLY_FIELD_TYPES.has(f.fieldType)) return `<div class="q">${head}<p class="note val">Upload: ${escapeHtml(f.value)}</p></div>`;
+    const copy = scripted ? `<button type="button" class="copy" data-copy="self-v-${i}">Copy</button>` : "";
+    return `<div class="q">${head}<p class="val" id="self-v-${i}">${escapeHtml(f.value)}</p>${copy}</div>`;
+  });
+  const done = scripted
+    ? `<button type="button" id="self-done">I submitted it</button>` +
+      `<div id="self-confirm" hidden><p>Only tap yes once the job site showed you its thank-you page. The bot marks it applied and never sends it.</p>` +
+      `<button type="button" id="self-yes">Yes, I submitted it</button><button type="button" id="self-back" class="alt">Back</button></div>`
+    : "";
+  const steps = "the form, paste these answers, attach your CV and submit it. Then come back and tap I submitted it.";
+  const intro = namesHiddenBotCheck(snap.unconfirmedEvidence)
+    ? `The form's bot check most likely refused the bot, so this was probably not sent. Open ${steps}`
+    : `The bot clicked Submit but saw no confirmation, so it may have arrived. Check your email first; if it did, just tap I submitted it. If not, open ${steps}`;
+  return `<section id="self"><h2>Submit it yourself</h2><p class="note">${intro}</p>${link}${rows.join("")}${done}</section>`;
+}
+
+const MINI_FOOTER =
+  `<p class="foot">Saving answers makes the bot re-fill the form. Inside Telegram, Submit appears here once the form is ready; ` +
+  `it asks you to confirm before anything is sent.</p>`;
+
+/** The answer page for one snapshot. A nonce adds the Telegram script panel (the route sends the matching CSP). */
+export function renderApplyPage(snap: ApplySnapshot, opts: { readonly nonce?: string } = {}): string {
   const s = snap.summary;
   const title = `${snap.company}: ${snap.title}`;
   const intro = `${snap.platform} application for ${snap.candidateName}. ${s.filled} of ${s.total} fields filled.`;
@@ -243,5 +302,10 @@ export function renderApplyPage(snap: ApplySnapshot): string {
     ? `<form method="post">${sections}<button type="submit">Save answers and re-fill</button></form>`
     : sections;
   const head = `<h1>${escapeHtml(title)}</h1><p class="sub">${escapeHtml(intro)}</p>${warn}`;
-  return shell(title, head + body + FOOTER);
+  const nonce = opts.nonce;
+  if (!nonce) return shell(title, head + renderSelfSubmit(snap, false) + body + FOOTER);
+  const attrs = ` data-created="${snap.createdAt}" data-company="${escapeHtml(snap.company)}" data-row="${escapeHtml(snap.rowId)}"`;
+  const n = escapeHtml(nonce);
+  const scripts = `<script nonce="${n}" src="${TELEGRAM_SCRIPT_HOST}/js/telegram-web-app.js"></script><script nonce="${n}">${APPLY_PAGE_SCRIPT}</script>`;
+  return shell(title, head + MINI_PANEL + renderSelfSubmit(snap, true) + body + `<p id="mini-save" role="status" class="note"></p>` + MINI_FOOTER, attrs, scripts);
 }

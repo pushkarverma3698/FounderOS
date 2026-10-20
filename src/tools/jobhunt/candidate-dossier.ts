@@ -13,14 +13,11 @@ import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   APPLY_PROFILE_PATH,
-  applyProfilePathFor,
-  readApplyProfile,
-  writeApplyProfile,
   type ApplyProfile,
 } from "./apply-profile.js";
+import { atomicWrite } from "./atomic-write.js";
 import { buildDefaultDossierMarkdown } from "./dossier-template.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
-import { selfIdCategoryOf } from "./self-identification.js";
 
 export { buildDefaultDossierMarkdown };
 
@@ -103,7 +100,7 @@ export function matchChoiceOption(desiredAnswer: string, options: readonly strin
 }
 
 /** `- **Label**: answer`, where the label may itself hold `*`, `?` or `:` ("Are you based in …?*"). */
-const BOLD_KV = /^[-*•]?\s*\*\*(.+?)\*\*\s*[:=]\s*(.+)$/;
+export const BOLD_KV = /^[-*•]?\s*\*\*(.+?)\*\*\s*[:=]\s*(.+)$/;
 
 /** Parse a candidate reference dossier Markdown document; a later line for the same key beats an earlier one. */
 export function parseDossierMarkdown(markdown: string): CandidateDossier {
@@ -340,55 +337,9 @@ export async function readCandidateDossier(profileId: string = DEFAULT_PROFILE_I
 
 export async function writeCandidateDossier(profileId: string, markdown: string): Promise<string> {
   const path = candidateDossierPathFor(profileId);
-  await fs.mkdir(dirname(path), { recursive: true });
-  await fs.writeFile(path, markdown.endsWith("\n") ? markdown : `${markdown}\n`, { mode: 0o600 });
+  await atomicWrite(path, markdown.endsWith("\n") ? markdown : `${markdown}\n`);
   return path;
 }
 
-const LEARNED_HEADING = "## Learned Form Answers";
-
-/** `markdown` with `- **question**: answer` as its last line and no older learned line for that question. */
-function withLearnedLine(markdown: string, question: string, answer: string): string {
-  const line = `- **${question}**: ${answer}`;
-  const lines = markdown.trimEnd().split("\n");
-  const start = lines.findIndex((l) => l.trim() === LEARNED_HEADING);
-  if (start === -1) return `${markdown.trimEnd()}\n\n${LEARNED_HEADING}\n${line}\n`;
-  const normQ = normalizeQuestionKey(question);
-  const kept = lines.filter((l, i) => {
-    const m = i > start && normQ ? BOLD_KV.exec(l.trim()) : null;
-    return !m || normalizeQuestionKey(m[1]!) !== normQ;
-  });
-  return `${kept.join("\n")}\n${line}\n`;
-}
-
-const asRecord = (v: unknown): Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-
-export async function recordLearnedAnswer(profileId: string, question: string, answer: string): Promise<void> {
-  const cleanQ = question.trim();
-  const cleanA = answer.trim();
-  if (!cleanQ || !cleanA) return;
-  const normQ = normalizeQuestionKey(cleanQ);
-
-  const profilePath = applyProfilePathFor(profileId);
-  const current = await readApplyProfile(profilePath);
-  if (current.ok) {
-    // One entry per question, the newest last: older spellings ("Location (City)" for "Location (City)*") go.
-    const bank = Object.fromEntries(
-      Object.entries(asRecord(current.raw["question_bank"])).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
-    );
-    // The candidate's own answer to a self-identification question is their setting for that category.
-    const category = selfIdCategoryOf(cleanQ);
-    const a = asRecord(current.raw["answers"]);
-    const selfId = category ? { answers: { ...a, self_identification: { ...asRecord(a["self_identification"]), [category]: cleanA } } } : {};
-    await writeApplyProfile({ ...current.raw, ...selfId, question_bank: { ...bank, [cleanQ]: cleanA } }, profilePath);
-  }
-
-  const existingMd = await fs
-    .readFile(candidateDossierPathFor(profileId), "utf8")
-    // allow-failopen: when no dossier file exists yet on disk, initialize it from the profile or header.
-    .catch(() => (current.ok ? buildDefaultDossierMarkdown(current.profile) : `# Candidate Reference Dossier (${profileId})\n\n${LEARNED_HEADING}\n`));
-
-  const updated = withLearnedLine(existingMd, cleanQ, cleanA);
-  if (updated !== existingMd) await writeCandidateDossier(profileId, updated);
-}
+/** Learned answers are written through the answer store: atomic, backed up, both files together. */
+export { recordLearnedAnswer } from "./answer-store.js";

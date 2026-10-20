@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ApplySnapshot } from "../../../src/tools/jobhunt/apply-link.js";
 import {
   APPLY_PAGE_HEADERS,
+  applyPageHeaders,
   applyFieldName,
   renderApplyPage,
   renderNoticePage,
@@ -132,6 +133,8 @@ describe("renderApplyPage", () => {
   it("renders a nothing-left page when every question is answered", () => {
     const html = renderApplyPage(snap({ unanswered: [], filledAnswers: [] }));
     expect(html).toContain("Nothing left to answer");
+    expect(html).toContain("tap Submit application at the bottom of the screen");
+    expect(html).not.toContain("press Submit in Telegram");
     expect(html).not.toContain("button type=");
   });
 
@@ -282,5 +285,97 @@ describe("page headers", () => {
     expect(html).toContain("Saved");
     expect(html).toContain("Saved 2 answers &lt;b&gt;");
     expect(html.toLowerCase()).not.toContain(`${LT}script`);
+  });
+});
+
+describe("Mini App panel (nonce variant)", () => {
+  const LT = String.fromCharCode(60);
+  const NONCE = "abc123nonce==";
+  const SCRIPT_SRC = `script-src 'nonce-${NONCE}' https://telegram.org; connect-src 'self'; `;
+
+  it("adds the Telegram script, one inline script with the nonce, the status panel and the page stamp", () => {
+    const html = renderApplyPage(snap({}, { createdAt: 1234 }), { nonce: NONCE });
+    expect(html).toContain(`${LT}script nonce="${NONCE}" src="https://telegram.org/js/telegram-web-app.js">`);
+    expect(html.match(/<script/g)).toHaveLength(2);
+    expect(html).toContain(`data-created="1234"`);
+    for (const id of ["mini-status", "mini-confirm", "mini-yes", "mini-cancel", "mini-save", "mini-code", "mini-code-input", "mini-code-send"]) expect(html).toContain(`id="${id}"`);
+    expect(html).not.toContain("alert(");
+    expect(html).not.toContain("confirm(");
+    expect(html).not.toContain("innerHTML");
+  });
+
+  it("the CSP adds only script-src with the nonce and telegram.org, and connect-src self", () => {
+    const base = applyPageHeaders()["Content-Security-Policy"]!;
+    const withNonce = applyPageHeaders(NONCE)["Content-Security-Policy"]!;
+    expect(withNonce).toContain(SCRIPT_SRC);
+    expect(withNonce.replace(SCRIPT_SRC, "")).toBe(base);
+    expect(base).not.toContain("script-src");
+  });
+
+  it("keeps the no-nonce page free of script", () => {
+    expect(renderApplyPage(snap()).toLowerCase()).not.toContain(`${LT}script`);
+  });
+});
+
+describe("Submit it yourself (unconfirmed on a hidden bot check)", () => {
+  const NONCE = "abc123nonce==";
+  const BOT_CHECK =
+    "Clicked submit; no error appeared. This form runs a hidden bot check (reCAPTCHA) that can silently refuse an automated browser, so it most likely was not sent: submit it yourself from the job link.";
+  const unconfirmed = (evidence = BOT_CHECK, top: Partial<ApplySnapshot> = {}) =>
+    snap(
+      {
+        filledAnswers: [
+          { label: "Full name", value: "Fixture Person", fieldType: "text", editable: true },
+          { label: "Why us?", value: `Because <b>"you"</b> & me`, fieldType: "textarea", editable: true },
+          { label: "Resume", value: "cv.pdf", fieldType: "file", editable: false },
+        ],
+        unanswered: [],
+      },
+      { unconfirmedAt: 99, unconfirmedEvidence: evidence, ...top },
+    );
+
+  it("shows the job link, every filled answer with a copy button, and the I submitted it button", () => {
+    const html = renderApplyPage(unconfirmed(), { nonce: NONCE });
+    expect(html).toContain("Submit it yourself");
+    expect(html).toContain(`id="self-link" href="https://jobs.example.com/acme/123"`);
+    expect(html).toContain("Fixture Person");
+    expect(html).toContain("Because &lt;b&gt;&quot;you&quot;&lt;/b&gt; &amp; me");
+    expect(html.match(/class="copy"/g)).toHaveLength(2); // the two text answers; the file is named, not copied
+    expect(html).toContain("cv.pdf");
+    expect(html).toContain(`id="self-done"`);
+    expect(html).toContain(`id="self-confirm"`);
+    expect(html).toContain(`data-row="${ROW}"`);
+  });
+
+  it("shows for any unconfirmed row, telling the founder to check email first when no bot check is named", () => {
+    const html = renderApplyPage(unconfirmed("No confirmation text"), { nonce: NONCE });
+    expect(html).toContain("Submit it yourself");
+    expect(html).toContain("Check your email first");
+    expect(html).not.toContain("bot check most likely refused");
+    expect(renderApplyPage(unconfirmed(), { nonce: NONCE })).toContain("bot check most likely refused");
+  });
+
+  it("is absent when the row is not unconfirmed", () => {
+    expect(renderApplyPage(snap({}, { unconfirmedEvidence: BOT_CHECK }), { nonce: NONCE })).not.toContain("Submit it yourself");
+  });
+
+  it("never links a non-http job address", () => {
+    const html = renderApplyPage(unconfirmed(BOT_CHECK, { targetUrl: "javascript:alert(1)" }), { nonce: NONCE });
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("Submit it yourself");
+  });
+
+  it("leaves the buttons out of the no-script page, but keeps the link and the answers", () => {
+    const html = renderApplyPage(unconfirmed());
+    expect(html).toContain(`href="https://jobs.example.com/acme/123"`);
+    expect(html).toContain("Fixture Person");
+    expect(html).not.toContain(`class="copy"`);
+    expect(html).not.toContain(`id="self-done"`);
+  });
+
+  it("the Mini App panel carries a hidden Prepare again button", () => {
+    const html = renderApplyPage(snap(), { nonce: NONCE });
+    expect(html).toContain(`id="mini-again"`);
+    expect(html).toContain(`id="mini-again-confirm"`);
   });
 });

@@ -39,6 +39,13 @@ vi.mock("../../../src/gateway/jobhunt-buttons.js", async (importOriginal) => {
   };
 });
 
+const mockHasBeenAudited = vi.fn(async (_key: string) => false);
+const mockWriteAuditEntry = vi.fn(async (_data: unknown) => ({ written: true }));
+vi.mock("../../../src/db/queries.js", () => ({
+  hasBeenAudited: (key: string) => mockHasBeenAudited(key),
+  writeAuditEntry: (data: unknown) => mockWriteAuditEntry(data),
+}));
+
 vi.mock("../../../src/db/apply-queries.js", () => ({
   getApplicationById: (...args: unknown[]) => mockGetApplicationById(...args),
 }));
@@ -263,7 +270,7 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
     // Step 2: User replies in Telegram with their answer
     const handled = await tryHandlePendingApplyReply(
       ctx as never,
-      "Built distributed automation systems for 3.5 years and love Workwize's mission.",
+      "Built distributed automation systems for 3.5 years and love the mission.",
     );
     expect(handled).toBe(true);
     expect(prepCallCount).toBe(2);
@@ -286,6 +293,47 @@ describe("Telegram Auto-Apply & Candidate Dossier Loop", () => {
     expect(submitPhotos).toHaveLength(1);
     expect(mockMarkRowApplied).toHaveBeenCalledTimes(1);
     expect(submitReplies.some((r) => r.text.includes("Application submitted and marked applied"))).toBe(true);
+  });
+
+  it("uses an answer that names the company for this form only: not saved, but the re-fill still sees it", async () => {
+    const fakeRow = {
+      id: ROW_ID, company: "Mollie", title: "Engineer", url: "https://jobs.example.test/mollie/1",
+      profile_id: "pushkar-nl-tech", track: "fullstack", stage: "screened",
+    };
+    mockResolveRowRef.mockResolvedValue({ ok: true, row: fakeRow });
+    mockGetApplicationById.mockResolvedValue(fakeRow);
+    const Q = "How did you hear about us?";
+    const seen: Array<string | undefined> = [];
+    setAutoApplyRunnerForTests({
+      coverLetter: async () => ({ ok: false, reason: "not in this test" }),
+      prepare: async (_url, _company, profile) => {
+        const got = Object.entries(profile.question_bank ?? {}).find(([k]) => k === Q)?.[1];
+        seen.push(got);
+        const unanswered = got
+          ? []
+          : [{ selector: "#hear", label: Q, kind: "ask" as const, question: Q, required: true, fieldType: "text" as const, why: "not yet in dossier" }];
+        return {
+          ok: true, platform: "greenhouse", targetUrl: fakeRow.url, screenshotPng: Buffer.from("x"),
+          summary: {
+            filled: got ? 2 : 1, total: 2, filledLabels: [], filledAnswers: [], unanswered, requiredUnanswered: unanswered,
+            hasCaptcha: false, readyToSubmit: Boolean(got),
+          },
+        };
+      },
+      submit: async () => ({ ok: true, platform: "greenhouse", clicked: true, confirmed: true, evidence: "x", afterScreenshotPng: Buffer.from("y") }),
+    });
+    const { ctx, replies } = makeFakeCtx("1", 777);
+    await handleAutoApply(ctx as never);
+    expect(await tryHandlePendingApplyReply(ctx as never, "Mollie's Career Site")).toBe(true);
+
+    const profile = await readApplyProfile(applyProfilePathFor("pushkar-nl-tech"));
+    expect(profile.ok && profile.profile.question_bank?.[Q]).toBeFalsy();
+    const dossier = await readCandidateDossier("pushkar-nl-tech");
+    expect(dossier?.qaPairs["how did you hear about us"]).toBeUndefined();
+    expect(seen).toEqual([undefined, "Mollie's Career Site"]);
+    expect(replies.some((r) => r.text.includes("this form only") && r.text.includes("Mollie"))).toBe(true);
+    expect(replies.some((r) => r.text.includes("Saved to"))).toBe(false);
+    expect(replies.some((r) => r.text.includes("Form ready for Mollie"))).toBe(true);
   });
 
   it("handles one-tap option button answers (jh:q:<rowId>:<optIdx>) for Tashi's profile", async () => {
