@@ -181,3 +181,27 @@ describe("apply URLs shared with the Mac client (mac-client/tests/fixtures/apply
     expect(unlabelled.map((c) => c.name)).toEqual([]);
   });
 });
+
+describe("applyUrlFor on a resolved aggregator link (query string kept)", () => {
+  // A resolved Arbeitnow link carries `?utm_source=arbeitnow.nl&source=Arbeitnow`. The form path goes on the
+  // PATH; appended to the end of the string it lands inside the query and the browser opens the job page.
+  it("puts Recruitee's /c/new before the query", () => {
+    expect(applyUrlFor("https://learned.recruitee.com/o/medior-dev?utm_source=arbeitnow.nl&source=Arbeitnow", "Learned")).toBe(
+      "https://learned.recruitee.com/o/medior-dev/c/new?utm_source=arbeitnow.nl&source=Arbeitnow",
+    );
+  });
+  it("puts Lever's /apply before the query", () => {
+    expect(applyUrlFor("https://jobs.lever.co/acme/1234-abcd?lever-source=arbeitnow", "Acme")).toBe(
+      "https://jobs.lever.co/acme/1234-abcd/apply?lever-source=arbeitnow",
+    );
+  });
+  it("puts Ashby's /application before the query", () => {
+    expect(applyUrlFor("https://jobs.ashbyhq.com/acme/0d1e-uuid?utm_source=arbeitnow", "Acme")).toBe(
+      "https://jobs.ashbyhq.com/acme/0d1e-uuid/application?utm_source=arbeitnow",
+    );
+  });
+  it("does not add the suffix twice when the path already has it", () => {
+    const url = "https://learned.recruitee.com/o/medior-dev/c/new?utm_source=arbeitnow.nl";
+    expect(applyUrlFor(url, "Learned")).toBe(url);
+  });
+});

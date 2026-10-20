@@ -1,4 +1,4 @@
-import { AtsAdapter, NormalizedJob, parsePostedAt, decodeJobBody } from "./types.js";
+import { AtsAdapter, NormalizedJob, parsePostedAt, decodeJobBody, withPathSuffix } from "./types.js";
 import { FreeBoard } from "../free-boards.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -72,7 +72,6 @@ export const recruiteeAdapter: AtsAdapter = {
 
   applyUrlFor(postingUrl: string, _board: FreeBoard): string | null {
     if (typeof postingUrl !== "string" || postingUrl.trim().length === 0) return null;
-    const url = postingUrl.replace(/\/+$/, "");
-    return url.endsWith("/c/new") ? url : `${url}/c/new`;
+    return withPathSuffix(postingUrl, "/c/new");
   },
 };
