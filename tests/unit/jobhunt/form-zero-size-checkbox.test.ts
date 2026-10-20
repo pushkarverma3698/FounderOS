@@ -59,7 +59,7 @@ describe("zero-size styled checkboxes (Playwright)", () => {
   beforeAll(async () => {
     server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      const path = (_req.url ?? "").split("?")[0];
+      const path = (_req.url ?? "").split("?")[0] ?? "";
       const pages: Record<string, string> = { "/ready": READY, "/unnamed": UNNAMED, "/o/engineer": HIDDEN_RECRUITEE, "/o/engineer/c/new": RECRUITEE_NEW };
       res.end(pages[path] ?? FIXTURE);
     });
