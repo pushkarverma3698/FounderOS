@@ -178,3 +178,20 @@ export function parsePostedAt(value: unknown): Date | null {
   }
   return null;
 }
+
+/**
+ * `postingUrl` with `suffix` (e.g. "/apply") on its PATH, query and fragment kept. A resolved aggregator link
+ * carries `?utm_source=…`; appending to the raw string put the suffix inside the query.
+ */
+export function withPathSuffix(postingUrl: string, suffix: string): string {
+  let u: URL;
+  try {
+    u = new URL(postingUrl);
+  } catch {
+    const url = postingUrl.replace(/\/+$/, "");
+    return url.endsWith(suffix) ? url : `${url}${suffix}`;
+  }
+  const path = u.pathname.replace(/\/+$/, "");
+  u.pathname = path.endsWith(suffix) ? path : `${path}${suffix}`;
+  return u.toString();
+}
