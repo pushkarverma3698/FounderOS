@@ -192,16 +192,19 @@ async function findSubmitControl(page: Page): Promise<Locator | null> {
   return null;
 }
 
-async function checkFormValidity(page: Page): Promise<{ valid: boolean; invalidField?: string }> {
+export async function checkFormValidity(page: Page): Promise<{ valid: boolean; invalidField?: string }> {
   return page
     .evaluate(() => {
       const dom = globalThis as unknown as DomGlobal;
       const forms = Array.from(dom.document.querySelectorAll("form"));
       for (const form of forms) {
         if (form.checkValidity && !form.checkValidity()) {
-          const invalid = form.querySelector(":invalid");
+          // ":invalid" alone matches the enclosing <fieldset> first, which has no name (Recruitee, 2026-10-20).
+          const invalid = form.querySelector("input:invalid, select:invalid, textarea:invalid");
+          const labelledBy = (invalid?.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean)[0];
           const label =
             (invalid?.id ? dom.document.querySelector(`label[for="${dom.CSS.escape(invalid.id)}"]`)?.textContent : null) ||
+            (labelledBy ? dom.document.querySelector(`#${dom.CSS.escape(labelledBy)}`)?.textContent : null) ||
             invalid?.getAttribute("aria-label") ||
             invalid?.getAttribute("name") ||
             invalid?.id ||

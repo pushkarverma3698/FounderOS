@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyProfile } from "../../../src/tools/jobhunt/apply-profile.js";
-import { executeFormPlan, submitApplicationForm } from "../../../src/tools/jobhunt/form-runner.js";
+import { checkFormValidity, executeFormPlan, submitApplicationForm } from "../../../src/tools/jobhunt/form-runner.js";
 
 const box = (name: string, i: number, value: string) => `
   <div class="row">
@@ -34,6 +34,14 @@ const READY = `<!doctype html><html><head><meta charset="utf-8"></head><body><fo
   <button type="submit">Submit application</button>
 </form></body></html>`;
 
+// Recruitee (Salland, TSG; 2026-10-20): the first :invalid match is the <fieldset>, and the box itself has no id or
+// name label, only aria-labelledby. The refusal must still name the field the founder has to fix.
+const UNNAMED = `<!doctype html><html><head><meta charset="utf-8"></head><body><form novalidate>
+  <fieldset><legend>My information</legend>
+    <input type="checkbox" required aria-labelledby="c0"><div id="c0">I agree to the privacy statement</div>
+  </fieldset>
+</form></body></html>`;
+
 describe("zero-size styled checkboxes (Playwright)", () => {
   let server: http.Server;
   let url: string;
@@ -42,7 +50,7 @@ describe("zero-size styled checkboxes (Playwright)", () => {
   beforeAll(async () => {
     server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(_req.url === "/ready" ? READY : FIXTURE);
+      res.end(_req.url === "/ready" ? READY : _req.url === "/unnamed" ? UNNAMED : FIXTURE);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/apply`;
@@ -89,4 +97,12 @@ describe("zero-size styled checkboxes (Playwright)", () => {
     const r = await submitApplicationForm(url.replace("/apply", "/ready"), "Acme", profile, {}, undefined, undefined, true);
     expect(r).toMatchObject({ ok: true, clicked: false, confirmed: false });
   }, 60_000);
+
+  it("names the invalid input, not its fieldset, through aria-labelledby", async () => {
+    if (!browser) return;
+    const page = await browser.newPage();
+    await page.goto(url.replace("/apply", "/unnamed"));
+    expect(await checkFormValidity(page)).toEqual({ valid: false, invalidField: "I agree to the privacy statement" });
+    await page.close();
+  }, 30_000);
 });
