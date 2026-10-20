@@ -11,6 +11,7 @@ import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyProfile } from "../../../src/tools/jobhunt/apply-profile.js";
 import { checkFormValidity, executeFormPlan, submitApplicationForm } from "../../../src/tools/jobhunt/form-runner.js";
+import { revealPlatformForm } from "../../../src/tools/jobhunt/form-scraper.js";
 
 const box = (name: string, i: number, value: string) => `
   <div class="row">
@@ -42,6 +43,14 @@ const UNNAMED = `<!doctype html><html><head><meta charset="utf-8"></head><body><
   </fieldset>
 </form></body></html>`;
 
+// Recruitee on the employer's own domain (tsg.careers, Salland; 2026-10-20): the job page /o/<slug> carries the
+// application form hidden behind a tab, so nothing typed into it lands. The real form lives at /o/<slug>/c/new.
+const HIDDEN_RECRUITEE = `<!doctype html><html><head><meta charset="utf-8"></head><body><h1>Engineer</h1>
+  <div style="display:none"><form id="offer-application-form"><input name="candidate.name" required></form></div>
+</body></html>`;
+const RECRUITEE_NEW = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+  <form id="offer-application-form"><input name="candidate.name" required></form></body></html>`;
+
 describe("zero-size styled checkboxes (Playwright)", () => {
   let server: http.Server;
   let url: string;
@@ -50,7 +59,9 @@ describe("zero-size styled checkboxes (Playwright)", () => {
   beforeAll(async () => {
     server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(_req.url === "/ready" ? READY : _req.url === "/unnamed" ? UNNAMED : FIXTURE);
+      const path = (_req.url ?? "").split("?")[0];
+      const pages: Record<string, string> = { "/ready": READY, "/unnamed": UNNAMED, "/o/engineer": HIDDEN_RECRUITEE, "/o/engineer/c/new": RECRUITEE_NEW };
+      res.end(pages[path] ?? FIXTURE);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/apply`;
@@ -103,6 +114,17 @@ describe("zero-size styled checkboxes (Playwright)", () => {
     const page = await browser.newPage();
     await page.goto(url.replace("/apply", "/unnamed"));
     expect(await checkFormValidity(page)).toEqual({ valid: false, invalidField: "I agree to the privacy statement" });
+    await page.close();
+  }, 30_000);
+
+  it("moves from a Recruitee job page with a hidden form to its /c/new apply page, keeping the query", async () => {
+    if (!browser) return;
+    const page = await browser.newPage();
+    await page.goto(url.replace("/apply", "/o/engineer?utm_source=x"));
+    await revealPlatformForm(page, "generic");
+    expect(new URL(page.url()).pathname).toBe("/o/engineer/c/new");
+    expect(new URL(page.url()).search).toBe("?utm_source=x");
+    expect(await page.locator('input[name="candidate.name"]').isVisible()).toBe(true);
     await page.close();
   }, 30_000);
 });
