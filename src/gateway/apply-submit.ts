@@ -24,7 +24,7 @@ import { loadApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { withFormOnlyAnswers } from "../tools/jobhunt/company-answer.js";
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
-import { enterEmailCode, heldCodeInfo, onHeldExpired, type CodeEntryResult } from "../tools/jobhunt/held-submit.js";
+import { enterEmailCode, heldCodeInfo, namesHiddenBotCheck, onHeldExpired, type CodeEntryResult } from "../tools/jobhunt/held-submit.js";
 import { shortJobId } from "../tools/jobhunt/job-ref.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
 import { letterFacts, letterOf } from "./apply-cover-letter.js";
@@ -153,10 +153,12 @@ async function settleUnconfirmed(row: JobApplication, targetUrl: string, evidenc
   // The click went through, so the application may have arrived: no Submit here or on the tapped card.
   noteUnconfirmedClick(row.id, evidence);
   await io.settled();
+  const next = namesHiddenBotCheck(evidence)
+    ? `Open the answer page and use Submit it yourself, then tap I submitted it.`
+    : `Submit was clicked, so it may have arrived. Check your email and the screenshot above before trying again; ` +
+      `to retry, send <code>/apply ${shortJobId(row.id)}</code>.`;
   await io.text(
-    `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(evidence)}\n` +
-      `Submit was clicked, so it may have arrived. Check your email and the screenshot above before trying again; ` +
-      `to retry, send <code>/apply ${shortJobId(row.id)}</code>.`,
+    `⚠ <b>Could not confirm submission for ${safeHtml(row.company)}</b>: ${safeHtml(evidence)}\n${next}`,
     buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))),
   );
   return { kind: "unconfirmed", row, detail: evidence };

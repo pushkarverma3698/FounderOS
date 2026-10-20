@@ -18,7 +18,7 @@ vi.mock("../../../src/infra/logger.js", () => ({
 
 const {
   CODE_HOLD_MS, awaitSubmitOutcome, detectEmailCodePrompt, enterEmailCode, heldCodeInfo, heldRowIdsForTests, holdForEmailCode,
-  onHeldExpired, releaseHeld, setHeldClockForTests,
+  namesHiddenBotCheck, onHeldExpired, releaseHeld, setHeldClockForTests,
 } = await import("../../../src/tools/jobhunt/held-submit.js");
 
 const PROMPT = "We sent a verification code to you@example.com. Enter the 8-character code to submit your application.";
@@ -132,6 +132,29 @@ describe("held submit", () => {
       expect(outcome.kind).toBe("unconfirmed");
       expect(outcome.evidence).toMatch(/hidden bot check \(reCAPTCHA\)/);
       expect(outcome.evidence).toMatch(/submit it yourself/i);
+    }, 30_000);
+
+    it("reports confirmed on Ashby's success banner, which says Thanks, not Thank you (Bureau, Ashby, 2026-10-17)", async () => {
+      const page = await open("<form><button id=b type=submit>Submit Application</button></form><script>"
+        + "document.querySelector('form').onsubmit = (e) => { e.preventDefault(); e.target.outerHTML ="
+        + " '<div role=alert><h2>Success</h2><p>Thanks for throwing your hat in the ring! We will review your application.</p></div>'; };</script>");
+      if (!page) return;
+      await page.click("#b");
+      const outcome = await awaitSubmitOutcome(page, page.url(), { message: null }, { watchForCode: false });
+      expect(outcome.kind).toBe("confirmed");
+    }, 30_000);
+
+    it("names the visible CAPTCHA when the click opens an hCaptcha challenge (EMA Ashby, AppZen Lever, 2026-10-17)", async () => {
+      const page = await open("<form><button id=b type=submit>Submit Application</button></form><script>"
+        + "document.querySelector('form').onsubmit = (e) => { e.preventDefault(); document.body.insertAdjacentHTML('beforeend',"
+        + " '<iframe title=\"Main content of the hCaptcha challenge\" src=\"about:blank\" width=400 height=600></iframe>'); };</script>");
+      if (!page) return;
+      await page.click("#b");
+      const outcome = await awaitSubmitOutcome(page, page.url(), { message: null }, { watchForCode: false });
+      expect(outcome.kind).toBe("unconfirmed");
+      expect(outcome.evidence).toMatch(/CAPTCHA challenge \(hCaptcha\)/);
+      expect(outcome.evidence).toMatch(/submit it yourself/i);
+      expect(namesHiddenBotCheck(outcome.evidence)).toBe(true);
     }, 30_000);
   });
 
