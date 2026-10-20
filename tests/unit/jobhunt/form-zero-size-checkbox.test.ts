@@ -9,6 +9,7 @@ import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ApplyProfile } from "../../../src/tools/jobhunt/apply-profile.js";
 import { executeFormPlan, submitApplicationForm } from "../../../src/tools/jobhunt/form-runner.js";
 
 const box = (name: string, i: number, value: string) => `
@@ -84,7 +85,7 @@ describe("zero-size styled checkboxes (Playwright)", () => {
 
   it("dryRun fills and checks a complete form but never presses Submit", async () => {
     if (!browser) return;
-    const profile = { first_name: "Pushkar", last_name: "Verma", email: "pushkar@example.test", answers: {} };
+    const profile: ApplyProfile = { first_name: "Pushkar", last_name: "Verma", email: "pushkar@example.test", phone: "+31 600000000", answers: {} };
     const r = await submitApplicationForm(url.replace("/apply", "/ready"), "Acme", profile, {}, undefined, undefined, true);
     expect(r).toMatchObject({ ok: true, clicked: false, confirmed: false });
   }, 60_000);
