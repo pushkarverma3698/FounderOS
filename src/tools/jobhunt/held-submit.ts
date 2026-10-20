@@ -17,15 +17,20 @@ export const SUBMIT_CONFIRM_TIMEOUT_MS = 12_000;
 export const CODE_HOLD_MS = 10 * 60_000;
 export const CODE_PATTERN = /^[A-Za-z0-9]{4,12}$/;
 const CODE_POLL_MS = 400;
-const CONFIRM_TEXT = /thank you|application (received|submitted)|we('| ha)ve received|successfully submitted|bedankt voor je sollicitatie/i;
+// Ashby's banner says "Thanks for throwing your hat in the ring" (Bureau, 2026-10-17), so "thanks for" counts too.
+const CONFIRM_TEXT = /thank you|thanks for (applying|your application|throwing your hat|submitting)|application (received|submitted)|we('| ha)ve received|successfully submitted|bedankt voor je sollicitatie/i;
 
 /** Appended to unconfirmed evidence when the page runs a hidden bot check; the answer page keys its hand-off on it. */
 export const BOT_CHECK_EVIDENCE =
   "This form runs a hidden bot check (reCAPTCHA) that can silently refuse an automated browser, so it most likely was not sent: submit it yourself from the job link.";
 
-/** True when unconfirmed evidence says a hidden bot check most likely refused the bot's click. */
+/** Unconfirmed evidence when the click opened a visible CAPTCHA (EMA and AppZen, 2026-10-17); the bot never solves one. */
+export const VISIBLE_CAPTCHA_EVIDENCE =
+  "The click opened a visible bot check, a CAPTCHA challenge (hCaptcha), that the bot does not solve, so it was not sent: submit it yourself from the job link.";
+
+/** True when unconfirmed evidence says a bot check (hidden or visible) most likely refused the bot's click. */
 export function namesHiddenBotCheck(evidence: string | undefined): boolean {
-  return evidence !== undefined && /hidden bot check/i.test(evidence);
+  return evidence !== undefined && /(hidden|visible) bot check/i.test(evidence);
 }
 
 export interface HeldClock {
@@ -180,6 +185,12 @@ export async function awaitSubmitOutcome(
       return { kind: "code-needed", evidence: why ? `The form still asks for the code: ${why}` : "The form still asks for the code." };
     }
     if (dialog.message) return { kind: "unconfirmed", evidence: `Form showed an alert dialog after click: "${dialog.message}"` };
+    const challenge = await page
+      .locator("iframe[src*='hcaptcha']:visible, iframe[title*='hCaptcha' i]:visible")
+      .count()
+      // allow-failopen: a failed probe only drops the CAPTCHA reason; the outcome stays unconfirmed.
+      .catch(() => 0);
+    if (challenge > 0) return { kind: "unconfirmed", evidence: VISIBLE_CAPTCHA_EVIDENCE };
     const errors = await page
       .locator("[aria-invalid=true]:visible, [role=alert]:visible, .field-error:visible, .error-message:visible")
       .count()
