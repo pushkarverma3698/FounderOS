@@ -1,5 +1,8 @@
 # Release Process — The Weekly Train
 
+**Status:** Superseded by [BRANCH-MODEL.md](./BRANCH-MODEL.md) and [CLAUDE-RULES-RATIONALE.md](../rules/CLAUDE-RULES-RATIONALE.md) § "Git: why Claude may merge to `main`" (founder directive, 2026-08-01).
+There is no Friday train: a promotion goes out when CI is green, and Claude may merge it.
+
 This sits on top of [BRANCH-MODEL.md](./BRANCH-MODEL.md) (`feat/* → beta → main`).
 The branch model says *how code flows*; this doc says *when it ships and what bar it must
 clear*. One sentence: **features are built and integrated Mon–Thu, frozen Thursday, and
