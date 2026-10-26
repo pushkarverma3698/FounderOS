@@ -1,6 +1,6 @@
 # Second brain for the coding agents (2026-10-27)
 
-**Status:** Proposed. Needs a founder yes before step 3.
+**Status:** In progress. Steps 1, 2 and 5 done 2026-10-27 (step 2: #1240/#1241; step 5: AGENTS.md, synced to the VPS). Steps 3–4 (AG-066) need a founder yes.
 **Brief:** [AG-066](../antigravity/AG-066-brain-recall-check-and-session-brief.md)
 
 ## Outcome
