@@ -1,5 +1,7 @@
 # 2026-08-25 — RAG pipeline upgrade: closing out the remaining 3 commits
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 Finished the 5-commit plan in `docs/plans/2026-07-27-rag-pipeline-upgrade-design.md`.

@@ -1,5 +1,7 @@
 # 2026-09-28 — RAG retrieval cleanup: one reader per table, CV questions to jobhunt
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 - Executed [`docs/plans/2026-09-28-rag-retrieval-cleanup.md`](../plans/2026-09-28-rag-retrieval-cleanup.md)

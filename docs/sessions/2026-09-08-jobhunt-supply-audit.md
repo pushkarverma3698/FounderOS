@@ -1,5 +1,7 @@
 # 2026-09-08 — why Tashi's lane produces so few roles in 24 hours, measured
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Founder's question: *"audit hard why are we not getting enough job roles for tashi in 24 hours
 (Measure)?"*
 
