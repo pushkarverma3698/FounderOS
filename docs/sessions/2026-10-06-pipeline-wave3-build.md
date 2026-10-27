@@ -1,5 +1,7 @@
 # 2026-10-06 — coding pipeline wave 3 build (all behind AGENT_PIPELINE_V2=1)
 
+**Status:** Archived (2026-10-27). Log of the Telegram coding pipeline, retired 2026-10-10 in fd58a2f5 (tag `archive/founderos-v3`); see [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md).
+
 ## What we did
 Built wave 3 of the thin slice as six stacked draft PRs, one slice each, plus one chain test. Nothing is merged; every PR carries `Moves: A`.
 

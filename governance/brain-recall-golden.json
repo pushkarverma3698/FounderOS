@@ -1,5 +1,5 @@
 {
-  "baseline": 7,
+  "baseline": 10,
   "cases": [
     { "q": "coding pipeline", "project": "founderos", "expect": "opendots-migration", "forbid": "coding-pipeline-v2" },
     { "q": "how do we promote beta to main", "project": "founderos", "expect": "chore/promote-", "forbid": "039-weekly-release-train" },

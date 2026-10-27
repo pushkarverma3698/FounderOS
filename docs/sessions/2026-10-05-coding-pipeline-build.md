@@ -1,5 +1,7 @@
 # 2026-10-05 — coding pipeline thin slice, waves 1 and 2
 
+**Status:** Archived (2026-10-27). Log of the Telegram coding pipeline, retired 2026-10-10 in fd58a2f5 (tag `archive/founderos-v3`); see [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md).
+
 Plan: `docs/plans/2026-10-05-coding-pipeline-thin-slice.md`. Mode: Sonnet builders in their own worktrees, Claude
 (Opus) as the only reviewer. Every PR was re-run by the reviewer (RED, GREEN, lint, arch, doc-claims) before it opened.
 
