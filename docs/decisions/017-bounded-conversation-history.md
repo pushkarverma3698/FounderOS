@@ -1,6 +1,8 @@
 # ADR-017 — Bounded Conversation History (the permanent loop fix)
 
 **Status:** Archived — conversation history belonged to deleted kernel; see tag archive/founderos-v3 (2026-10-27).
+
+> Update 2026-10-27: `scripts/probe-real-task.ts` was removed 2026-10-10; `scripts/telegram-probe.ts` is the real-path check now.
 **Date:** 2026-06-04
 **Related:** ADR-010 (v2 ReAct rebuild), checkpointer.ts:70-78
 

@@ -92,7 +92,7 @@ Cheap to set up; they do the sourcing. Set up once, then passive.
 
 ## 3. The machine
 
-`jobhunt` worker already exists (`src/agents/capabilities.ts:96`) with `read_cv`,
+`jobhunt` worker existed in the kernel (`src/agents/capabilities.ts:96`, removed 2026-10-10; the jobs pipeline under `src/tools/jobhunt/` replaces it) with `read_cv`,
 `search_jobs`, `send_email` (HITL-gated), `search_personal_rag`. `search_jobs`
 (`src/tools/career.ts:145`) is currently a thin web-search wrapper.
 
