@@ -1,5 +1,7 @@
 # 2026-10-04 — Claude login: which account did I sign in?
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 Read the prod logs for a `/login claude` run where the founder pasted a code from a different account and the reply named pushkarai3698@gmail.com. Reproduced the identity lookup on the VPS from a /tmp copy of the new code.
 

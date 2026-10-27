@@ -1,5 +1,7 @@
 # 2026-09-08 — board expansion gate, prod-QA merge, and what Tashi's lane actually sends
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 1. **Merged PR #641** (`fix(prod-qa): close seven defects from the 5-day production audit`) into `main`

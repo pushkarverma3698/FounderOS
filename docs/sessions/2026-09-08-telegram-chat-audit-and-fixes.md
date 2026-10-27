@@ -1,5 +1,7 @@
 # 2026-09-08 — Production Telegram Chat Deep Audit & Link/Alert Resilience Fixes
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 Conducted an exhaustive, empirical audit of the complete production Telegram chat history between the founder (Pushkar Verma) and FounderOS (`@Raggae3698_bot`). The entire message history across MTProto (**7,389 total messages**: 5,722 bot messages and 1,667 user messages, from message #1429 through #9834) was dumped to disk and audited using custom-built deterministic analysis tools.
