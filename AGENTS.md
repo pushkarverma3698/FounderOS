@@ -1,171 +1,81 @@
-# AGENTS.md
+# FounderOS — agent instructions
 
-> **Writing code in this repo?** `docs/antigravity/STANDARDS.md` is binding: purity and I/O
-> placement, resolved-specifier reachability, named constants, loud-over-silent failure handling,
-> test discipline, and the CI hard gates. This file covers git policy and environment; that one
-> covers how the code is written. Read it before the first edit, not after a review.
+Generic rules (roles, Lite/Full, evidence, git, brain, writing style) live in `~/.agents/AGENTS.md`. This file is what is true of this repo.
+Canonical copy: `CLAUDE.md` imports it, `GEMINI.md` points here. Repo precedence: founder in chat > CI (`scripts/verify-architecture.ts`) >
+`docs/antigravity/STANDARDS.md` (binding: how code is written; read it before the first edit) > this file > reference. A rule CI does not enforce is a convention.
 
-## Precedence
+Brain project tag: `founderos`.
 
-```text
-1. Founder instruction in chat                  ← always wins
-2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
-3. docs/antigravity/STANDARDS.md                ← how code is written
-4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
-5. Everything else                              ← reference
-```
+## What runs and where
+Since 2026-10-10 (tag `archive/founderos-v3`) FounderOS is jobs-only. The kernel, planner and JARVIS UI are gone. Node 22, TypeScript strict, grammy, drizzle/Postgres.
+- `src/jobs/main.ts` → `founderos.service`: single-instance lock, health server, jobs bot (commands, `jh:` buttons, Mini App apply), jobs crons.
+- `src/mcp/hub.ts` → `founderos-hub-http.service`: the `turicks-brain` MCP hub (brain search/writes, Gmail and Calendar reads).
+- `scripts/sync-turicks-brain.ts` → nightly `brain-sync.yml`: re-indexes `docs/` into `brain.brain_memories`. Run `gh workflow run brain-sync.yml` after a `docs/` change merges. `pnpm brain:sync` refuses to run off the VPS (`--local` for tests).
+- Prod VPS: `ssh founderos-vps '<cmd>'`, passwordless `sudo -n`. Detail: `.claude/rules/prod-vps.md`.
 
-A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
-
-Layer 5 reference material lives in [`docs/rules/`](docs/rules/) — notably the 8-point new-tool
-checklist in `TOOL-STANDARDS.md`, plus `PROGRAMMING-RULES.md`, `TESTING-RULES.md` and
-`TEST-PYRAMID.md`. `.cursorrules` used to be the only pointer to them; it is now a pointer file,
-so this is.
-
-## Engineering principle — reason before code
-
-Every change must answer **why** before **what**:
-
-1. **Name the problem** — What fails today? What breaks if we don't act?
-2. **Name the stable boundary** — What should NOT change when a vendor/SDK drifts? (Usually: tool names, HITL gates, idempotency, department wiring.)
-3. **Minimize blast radius** — Prefer an adapter/env flag over rewriting tools, prompts, or graph structure.
-4. **Grounding & Memory-First Reasoning** — Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code. Never use ungrounded world assumptions to overcomplicate tasks.
-5. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
-
-**Integration rule (ADR-029):** Tools call `src/infra/providers/` — never gws or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
-
----
-
-## Git / PR policy (non-negotiable — prevents "not mergeable")
-
-**Open your PRs against `beta`, not `main`.** `beta` is the integration branch: it
-is where a change is proven before production sees it. This is a working
-convention, no longer a CI gate — `.github/workflows/branch-policy.yml` was
-deleted on 2026-08-01 (founder directive) because the ladder was blocking
-finished work behind a human click while prod ran stale code.
-
-### Correct flow
-
-```
-cursor/* or feat/*  →  beta  →  main (CD deploys)
-```
-
-| Action | Rule |
-|--------|------|
-| Cut branch from | **fresh `origin/main`** — not `beta`. `beta` may hold someone else's unmerged work, and cutting from it drags that into your PR. `sync-beta.yml` keeps `beta` level with `main`, so this costs you nothing. |
-| Naming + one-branch-per-task | `docs/antigravity/BRANCHING-STRATEGY.md` § "Naming grammar" — **binding**, and it applies to you exactly as it applies to Claude. `<type>/<slug>` or `<agent>/<type>-<slug>`, slug = 2–5 lowercase kebab words naming the subject. **Never keep a harness codename** (`cursor/sweet-pike-6b0c3c`): `git branch -m` it before the first push. `pnpm verify:branch` runs inside `pnpm gate` and fails a malformed name. |
-| Open PR to | **`beta`** always |
-| Merge to `main` | Allowed, via a `beta → main` promotion PR, once CI is green |
-| Merge on red CI | **Never.** Branch protection on `main` still requires both checks |
-| After merging to `main` | **Verify the deploy landed.** A merge is not a deploy |
-
-### When creating a PR
-
+## Commands that prove it works
 ```bash
-# 1. Start clean: cut a fresh branch from origin/main (same as the VPS dispatcher does)
-git fetch origin main
-git checkout -B cursor/feat-my-task-d523 origin/main
+pnpm install --frozen-lockfile
+pnpm test                        # vitest, keyless, $0
+pnpm lint && pnpm verify:arch    # types + anti-slop gates
+pnpm gate                        # CI's merge gate: lint, build, runtime assets, wiring, arch, doc claims, test (= pnpm predeploy)
+node --import tsx/esm --env-file=.env scripts/telegram-probe.ts "/jobs"   # real path: Telegram → jobs bot → tool → reply (spends money)
+```
+Use `cmd > /tmp/x-$$.log 2>&1; echo "exit=$?"`: `| tail` hides the exit code. Needs Postgres with pgvector (`sudo pg_ctlcluster 16 main start`); setup is `pnpm run setup` (`pnpm setup` is pnpm's own command).
+A bad `TELEGRAM_BOT_TOKEN` makes the process exit about 1s after boot. `pnpm test:integration` needs a real Gemini key.
 
-# 2. ... perform work ...
+## Branches and deploy
+- Flow: work branch → `beta` → `main`. Cut from fresh `origin/main`, open a draft PR to `beta`, merge `origin/beta` in before pushing. Never commit to `main`.
+- Promotion: `git checkout -B chore/promote-<slug> origin/main && git merge origin/beta`; merge with `gh pr merge --merge`, never `--squash`. Merge to `main` only on green CI (both required checks).
+- Deploy: `deploy.yml` runs after CI passes on `main`. Confirm prod moved with `ssh founderos-vps 'systemctl show founderos -p ActiveEnterTimestamp'`, not `git rev-parse HEAD`.
+- Branch names: `docs/antigravity/BRANCHING-STRATEGY.md` § "Naming grammar" (`<type>/<slug>`); `pnpm verify:branch`. Rename a harness codename before the first push. Ladder: `docs/process/BRANCH-MODEL.md`.
 
-# 3. Before pushing, merge latest beta back into your branch to prevent "out-of-date" status
-git fetch origin beta && git merge origin/beta
+## Rules CI enforces
+1. Tombstones: deleted modules (`src/kernel`, `kernel-boot.ts`, `kernel-run.ts`, office-run, pre-router…) fail if re-created — `verify-architecture.ts`; `tests/unit/jobs/jobs-entry.test.ts` fails if a kernel import returns.
+2. Ratchet: `governance/architecture-baseline.json` debt may only shrink.
+3. Only `src/gateway` and `src/jobs` import `src/gateway`; every src subsystem is imported by src or a script; no exported `*_RE` control-flow regexes.
+4. No src file over 400 lines.
+5. Fail-open catches carry `// allow-failopen: <reason>`.
+6. A PR adding a code or script file has a `Checked first:` line; every PR names a `Moves:` outcome — `scripts/verify-pr-scope.ts`.
+7. Branch name grammar — `pnpm verify:branch`. Doc claims (test counts etc.) match generated `docs/PROOF.md` — `pnpm verify:doc-claims`.
 
-# 4. Verify all typechecks, compilations, and tests pass locally
-pnpm gate
+## Hard limits (production)
+1. Never edit files or `git checkout` in `/opt/founderos` on the VPS: deploy writes that tree; code reaches prod only through PR → deploy. Review checkouts go in `/opt/review/<repo>`.
+2. Anything sent on the founder's behalf waits for his approval: DB row first (`src/infra/hitl.ts`), side effect after approval, idempotency-key check before every external send, audit row only on real success.
+3. Tools call `src/infra/providers/`, never gws or platform REST directly (ADR-029).
+4. No paid OpenRouter fallback, ever. The model chain lives only in `scripts/apply-prod-env-overrides.sh`; do not mirror it into markdown. Detail: `.claude/rules/model-policy.md`.
+5. Keep secrets and personal data (UPI ids, phones, keys) out of brain rows and docs.
 
-# 5. Push the branch
-git push -u origin cursor/feat-my-task-d523
+## Conventions (not enforced)
+- Routing, parsing and guards are pure unit-tested functions, never prompt instructions. Temperature 0.
+- Ambiguous requirement: ask for the missing field; never guess data.
+- Founder-facing output is actionable without reading code: each reason printed with its own result; split a Telegram message rather than hide a row (#26).
+- After a deploy, drive the change through the real path yourself (Telegram probe, real tool) and show the output. FounderOS is the founder's own harness, so prod has no customers to protect; never hand the live test back.
+- Zero paid calls in the dev loop: failing unit test first, then ONE live run of `scripts/probe-*.ts` or the Telegram probe.
+- Plans go to `docs/plans/YYYY-MM-DD-<feature>.md`, session notes to `docs/sessions/YYYY-MM-DD-<topic>.md` (`TEMPLATE.md`) when a session merges non-trivial work. Retire a doc with `**Status:** Superseded by …` in its first 20 lines.
+- Anything public uses the `no-ai-slop` skill. The metric is founder friction saved, not code aesthetics.
+- Close each session with **"Outstanding from your end"**: numbered actions only the founder can take, one line each with the exact command. If none: "Nothing outstanding from your end".
 
-# 6. Create the PR non-interactively (always specify base, title, and body)
-gh pr create --base beta --head cursor/feat-my-task-d523 --draft --title "feat: ..." --body "PR Description"
+## File map
+```
+src/jobs/        main.ts (composition root), bot.ts, scheduler.ts (crons), health.ts
+src/gateway/     jobhunt-* (commands, buttons, views), apply-* (Mini App), profile-*, telegram-poll.ts
+src/tools/       jobhunt/ (sources, scoring, forms), apify, career, web-search
+src/agents/      model.ts (error taxonomy), worker-invoke.ts, agent-tools/    src/evolution/  jobhunt analyzers
+src/infra/       hitl, budget, logger, single-instance, account-registry, providers/
+src/db/ schema + queries, rag-*    src/mcp/ brain hub    src/core/ config    video-factory/ standalone engine
 ```
 
-**Wrong:** `--base main` or ignoring out-of-date base branch drift → CI/branch policy blocks it.
-
-**Right:** Merge `beta` locally first, run `pnpm gate`, and specify `--body` to open the PR cleanly.
-
-See `docs/process/BRANCH-MODEL.md` for the full ladder.
-
----
-
-## Cursor Cloud specific instructions
-
-This section captures non-obvious, durable setup/run caveats for FounderOS in the
-Cursor Cloud VM. Standard commands live in `README.md` and `package.json` scripts —
-this only records the gotchas.
-
-### Services
-- **PostgreSQL** is the only hard dependency for tests/boot. It is installed
-  **natively** in the VM (no Docker here), with the `pgvector` extension (the
-  Drizzle migrations run `CREATE EXTENSION vector`). Role/db are `founderos`/`founderos`,
-  matching the `DATABASE_URL` in `.env`.
-- Postgres does **not** auto-start on VM boot. Start it before running setup/tests/app:
-  `sudo pg_ctlcluster 16 main start` (idempotent enough — it no-ops/errors harmlessly if already up).
-- Redis / Ollama / Firecrawl / LangSmith are all **optional** — the app
-  degrades gracefully without them. Don't treat them as blockers.
-- **gws** (Google Workspace CLI) is the default Gmail/Calendar backend (ADR-029).
-  Optional in CI/tests (mocked). Install + `gws auth login` on prod VPS.
-
-### Gotchas (these will bite you)
-- **`pnpm setup` is NOT the DB setup script.** `setup` is a built-in pnpm command, so
-  `pnpm setup` runs pnpm's own setup. Use **`pnpm run setup`** (drizzle migrations +
-  LangGraph checkpointer tables; idempotent, safe to re-run).
-- **A bad Telegram token kills the process.** The bot long-polls on startup; an invalid
-  `TELEGRAM_BOT_TOKEN` makes `getMe` return 401 and the polling crash calls
-  `process.exit(1)` (fail-loud by design). The health server comes up
-  first, so a placeholder token still proves boot, but the process self-terminates ~1s
-  later. Use a real BotFather token + `TELEGRAM_CHAT_ID` to keep the gateway alive.
-- `.env` is gitignored. A dev `.env` is created with the local `DATABASE_URL`; fill in
-  `GOOGLE_GENERATIVE_AI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` to run live.
-
-### Platform integration defaults (ADR-029)
-| Platform | Backend | Prod auth |
-|----------|---------|-----------|
-| Gmail + Calendar | `gws` (or `googleapis`) | `gws auth login` on VPS |
-| LinkedIn post | `direct` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
-| GitHub | Octokit | `GITHUB_TOKEN` |
-
-### Running / testing
-- Tests are keyless: `pnpm test` (vitest, ~2540 tests). Lint: `pnpm lint` (tsc --noEmit).
-  Build: `pnpm build:all` (backend `tsc`). Dev run: `pnpm dev` (the jobs process, `src/jobs/main.ts`).
-  Health: `curl localhost:3001/health`.
-- `pnpm test:integration` needs a **real** Gemini key + live Postgres.
-
-### Pre-deploy (mandatory — do not skip, do not claim "ready" without evidence)
-**A green `pnpm test` alone is NOT deploy-ready.** Type errors can hide behind
-`tsx` dev mode; production runs compiled `dist/` via `pnpm start`.
-
-Before merging to `main` or triggering deploy, run locally and paste/confirm output:
-
-```bash
-pnpm predeploy   # = lint + build:all + verify:wiring + test
-```
-
-| Step | What it catches |
-|------|-----------------|
-| `pnpm lint` | Type errors (no emit) |
-| `pnpm build:all` | **Compile-time errors** — backend emit |
-| `pnpm verify:wiring` | Half-wired tools / registry drift |
-| `pnpm test` | Regression + unit suite |
-
-**Agent rule:** Never say "deployed" or "ready for prod" until `pnpm predeploy` is
-green on the branch you are merging. CI and the deploy workflow both run `build:all`.
-If you did not run it, label the claim **NOT VERIFIED**.
-
-## End-of-session handoff (ALWAYS)
-
-**Automated Brain Sync:** If you created, modified, or deleted any file in the `docs/` directory during your session (including plans, architecture, or rules), you MUST autonomously run `pnpm brain:sync` in the terminal before concluding your task. Do not wait for the founder to do this.
-
-## Shared directives (binding, single copy)
-
-Five directives apply to every agent in this repo and are **not repeated here** — restating them
-is how they drift:
-
-1. **Strategic Mandate** — ship revenue-moving work over internal refactoring
-2. **Content Generation (No AI Slop)** — the `no-ai-slop` skill is mandatory for anything public
-3. **Implementation Plans & Memory** — plans go to `docs/plans/YYYY-MM-DD-feature-name.md`
-4. **Cross-Agent Awareness** — check `turicks-brain` + recent `docs/plans/` before complex work
-5. **Experience & Outcome Over Code Purity** — the metric is founder friction saved, not code aesthetics
-
-Full text, with the reasoning for each: [docs/rules/SHARED-DIRECTIVES.md](docs/rules/SHARED-DIRECTIVES.md). Read it before your first substantive action.
+## Read on demand
+| Task touches | Read first |
+|---|---|
+| Any code | `docs/antigravity/STANDARDS.md` |
+| New tool | `docs/rules/TOOL-STANDARDS.md`, `TOOL-INTEGRATION-PLAYBOOK.md` |
+| Tests | `docs/rules/TESTING-RULES.md`, `TEST-PYRAMID.md` |
+| Reviewing a PR | `docs/rules/CODE-REVIEW-CHECKLIST.md` |
+| Dispatching to Antigravity | `docs/antigravity/README.md` § "Before you dispatch" |
+| Why a rule exists | `docs/rules/CLAUDE-RULES-RATIONALE.md` |
+| Deploy, scripts, infra | `.claude/rules/prod-vps.md` |
+| Models, `src/agents`, eval | `.claude/rules/model-policy.md` |
+| `docs/`, brain sync | `.claude/rules/docs-and-brain.md` |
+| `video-factory/` | `.claude/rules/video-factory.md` |
