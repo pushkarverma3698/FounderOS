@@ -21,6 +21,11 @@ describe("evaluateRecall", () => {
     expect(r.hit).toBe(false);
     expect(r.reason).toMatch(/forbidden/);
   });
+  it("hits on row content when the source is an agent row", () => {
+    const rule: RecallCase = { q: "promote", project: "founderos", expect: "chore/promote-" };
+    expect(evaluateRecall(rule, ["ide_mcp"], 3, ["git checkout -B chore/promote-<slug> origin/main"]).hit).toBe(true);
+    expect(evaluateRecall(rule, ["ide_mcp"], 3, ["something else"]).hit).toBe(false);
+  });
   it("only looks at the first k sources", () => {
     expect(evaluateRecall(promote, ["a", "b", "c", "BRANCHING-STRATEGY"], 3).hit).toBe(false);
   });

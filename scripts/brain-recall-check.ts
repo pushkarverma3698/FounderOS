@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 export interface RecallCase {
   q: string;
   project: string;
-  /** Substring of the expected source path; at least one top-k source must contain it. */
+  /** Substring of the expected source path or row content; at least one top-k hit must contain it. */
   expect: string;
   /** Substring of a source that must NOT be in the top-k (a stale doc that used to outrank the current one). */
   forbid?: string;
@@ -37,7 +37,7 @@ export interface RecallOutcome {
   results: CaseResult[];
 }
 
-export type SearchFn = (c: RecallCase) => Promise<{ sources: string[] } | { error: string }>;
+export type SearchFn = (c: RecallCase) => Promise<{ sources: string[]; contents?: string[] } | { error: string }>;
 
 export function parseCases(raw: unknown): GoldenFile {
   const file = raw as { baseline?: unknown; cases?: unknown };
@@ -55,11 +55,13 @@ export function parseCases(raw: unknown): GoldenFile {
 }
 
 /** Pure: does the top-k source list satisfy the case? */
-export function evaluateRecall(c: RecallCase, sources: string[], k = 3): CaseResult {
+export function evaluateRecall(c: RecallCase, sources: string[], k = 3, contents: string[] = []): CaseResult {
   const top = sources.slice(0, k);
   const forbidden = c.forbid ? top.find((s) => s.includes(c.forbid as string)) : undefined;
   if (forbidden) return { case: c, hit: false, sources: top, reason: `forbidden source in top ${k}: ${forbidden}` };
-  if (!top.some((s) => s.includes(c.expect))) {
+  // Agent-written rows carry source "ide_mcp", so the current rule is often only recognisable by its content.
+  const matches = (s: string, i: number) => s.includes(c.expect) || (contents[i] ?? "").includes(c.expect);
+  if (!top.some(matches)) {
     return { case: c, hit: false, sources: top, reason: `expected "${c.expect}" not in top ${k}` };
   }
   return { case: c, hit: true, sources: top };
@@ -69,7 +71,7 @@ export async function runRecall(cases: RecallCase[], search: SearchFn, k = 3): P
   const results: CaseResult[] = [];
   for (const c of cases) {
     const found = await search(c);
-    results.push("error" in found ? { case: c, hit: false, sources: [], reason: `search error: ${found.error}` } : evaluateRecall(c, found.sources, k));
+    results.push("error" in found ? { case: c, hit: false, sources: [], reason: `search error: ${found.error}` } : evaluateRecall(c, found.sources, k, found.contents));
   }
   return { hits: results.filter((r) => r.hit).length, total: results.length, results };
 }
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
   const search: SearchFn = async (c) => {
     const res = await searchBrain({ query: c.q, topK: k, filters: { project: c.project }, table: "brain_memories" });
     if ("error" in res) return { error: `${res.error.stage}: ${res.error.message}` };
-    return { sources: res.hits.map((h) => h.source ?? "") };
+    return { sources: res.hits.map((h) => h.source ?? ""), contents: res.hits.map((h) => h.content) };
   };
 
   const out = await runRecall(golden.cases, search, k);
