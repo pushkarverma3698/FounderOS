@@ -1,5 +1,7 @@
 # FounderOS answers from what the founder is looking at
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 | | |
 |---|---|
 | **Branch** | `claude/founderos-intelligence-system-23b7c0` (base `beta` @ `3c1004de`) |

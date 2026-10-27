@@ -1,6 +1,6 @@
 # ADR-035 — Daily Budget Guard (Universal Cost Control)
 
-**Status:** Accepted · **Date:** 2026-06-17
+**Status:** Archived — infra daily-budget deleted; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

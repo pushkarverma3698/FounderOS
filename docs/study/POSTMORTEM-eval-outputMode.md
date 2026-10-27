@@ -1,5 +1,7 @@
 # Post-Mortem: Agent Eval Tool-Select 0/7 → 7/7
 
+**Status:** Archived — postmortem of src/eval outputMode, eval deleted; see tag archive/founderos-v3 (2026-10-27).
+
 > Date: 2026-06-03 · Severity: High (eval harness gave completely wrong signal) · Resolved: same day
 
 ---

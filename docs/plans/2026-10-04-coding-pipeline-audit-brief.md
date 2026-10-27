@@ -1,5 +1,7 @@
 # Brief: audit and test the FounderOS coding pipeline (Telegram → issue → Antigravity → PR → pr-brain → merge → prod)
 
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
+
 Paste this whole file as the first message of a fresh session. Depth: **Full** (deploy, CI, cron, acts on the founder's behalf).
 Read `CLAUDE.md`, `docs/rules/SHARED-DIRECTIVES.md`, `docs/antigravity/ISSUE-DRIVEN-CONTRACT.md` and
 `~/Projects/prompts/brain-doer-division.md` before acting.

@@ -1,6 +1,6 @@
 # Simplify FounderOS: one loop, one tool layer, one memory
 
-**Date:** 2026-10-08 · **Status:** founder approved in chat 2026-10-08 ("we will go with your decisions")
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
 **Builds on:** the prod chat audit in [2026-10-08-root-fix-task-list.md](2026-10-08-root-fix-task-list.md) and the live run in
 [docs/sessions/2026-10-08-heavy-model-live-run.md](../sessions/2026-10-08-heavy-model-live-run.md).
 **Supersedes:** the root-fix list (PR #1010), the daily-driver plan (PR #1002), the agent factory plan (PR #923) and AG-038.

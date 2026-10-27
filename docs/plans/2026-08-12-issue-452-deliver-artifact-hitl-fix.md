@@ -1,5 +1,7 @@
 # Plan: Fix HITL Pause Signal Swallowing in deliverArtifact (Issue #452)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 ## Problem Statement
 `deliverArtifact` in `src/agents/agent-tools/state.ts` wrapped its `hitlGate(...)` call inside a `try { ... } catch (err) { ... }` block. `hitlGate` delegates to LangGraph's `interrupt()`, which throws an exception to interrupt/pause the execution graph for human-in-the-loop approval. Because `hitlGate` sat inside the `try` block, that interrupt exception was caught by `state.ts`'s own `catch (err)` and converted into a generic string error message (`❌ Failed to deliver artifact: ...`), preventing the HITL approval card from being triggered in Telegram.
 

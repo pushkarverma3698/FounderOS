@@ -1,5 +1,7 @@
 # ADR-031 — P4/P5/P6: Signal transactions, schema split, hierarchy tracing
 
+**Status:** Archived — hierarchy phases deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-17
 - **Status:** Accepted (beta)
 - **Follows:** ADR-024 (dept_signals), ADR-029 (P2), ADR-030 (P3)

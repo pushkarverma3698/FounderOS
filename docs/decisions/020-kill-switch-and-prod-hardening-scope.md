@@ -1,5 +1,7 @@
 # ADR-020 — Global kill switch (flag-file) + before-production hardening scope
 
+**Status:** Archived — halt/kill-switch infra deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-12
 - **Status:** Accepted
 - **Branch:** `feat/production-hardening`

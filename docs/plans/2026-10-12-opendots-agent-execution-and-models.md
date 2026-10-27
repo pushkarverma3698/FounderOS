@@ -1,5 +1,7 @@
 # Plan 2026-10-12: OpenDots Agent Execution, Prompt Overhaul, and Model Routing
 
+**Status:** Superseded by [2026-10-13-opendots-simplify.md](../sessions/2026-10-13-opendots-simplify.md) (2026-10-27).
+
 ## Outcome
 1. OpenDots agents (Chief, Builder, Architect, Reviewer) handle ad-hoc questions and inspections directly via `claude` and `agy` CLIs on their computer without filing bogus GitHub issues.
 2. The computer container image (`opendots-computer-turicks:1`) includes local PostgreSQL, Redis, and Playwright Chromium dependencies so repository test suites (such as Oplify's 379 integration tests) pass.

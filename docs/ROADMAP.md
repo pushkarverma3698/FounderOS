@@ -2,6 +2,8 @@
 
 *For Pushkar Verma, Turicks. Updated: 2026-08-28.*
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5; the repo now runs only the job pipeline (`src/jobs/main.ts`).
+
 > 🟢 **PRODUCTION LIVE** since 2026-06-14 — Hetzner VPS, systemd, GitHub Actions CD.
 > Architecture is **v3 (contract-first kernel)** since 2026-07-08.
 

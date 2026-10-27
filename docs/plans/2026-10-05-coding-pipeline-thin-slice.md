@@ -1,5 +1,7 @@
 # Coding pipeline: audit (10-01 → 10-05) and the v2 thin slice
 
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
+
 > **Status (2026-10-05):** approved by the founder. This amends
 > [2026-09-30-coding-pipeline-v2.md](2026-09-30-coding-pipeline-v2.md): same invariant, smaller first build. Voice is
 > deferred; natural-language control is in scope.

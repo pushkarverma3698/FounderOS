@@ -1,5 +1,7 @@
 # Plan: RAG retrieval cleanup (item 3 of the 2026-09-28 audit)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 - **Branch:** `claude/fix-rag-retrieval-cleanup` (already exists on origin, base `beta`). PR → `beta`.
 - **Evidence:** `docs/plans/2026-09-28-perf-ux-rag-audit.md` §3. Read it first.
 - **Depth: Lite**: worker tool lists, prompts and an allowlist; no schema, no prod data. It

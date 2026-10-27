@@ -1,5 +1,7 @@
 # Goals with a daily standup, run by deterministic code
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 | | |
 |---|---|
 | **Branch** | `claude/feat-goals-daily-standup` (base `main` @ `1e797039`) |

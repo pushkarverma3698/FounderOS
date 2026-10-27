@@ -1,5 +1,7 @@
 # NL control + knowledge audit — plan and handoff (2026-10-04)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 Goal (founder): run the whole product in plain language, with no daily friction. FounderOS must know what it
 can do and remember what was said.
 
