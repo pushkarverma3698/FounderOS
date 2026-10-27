@@ -11,4 +11,4 @@
   - #32 Review every Antigravity brief against `docs/antigravity/README.md` § "Before you dispatch".
   - #35 A PR verdict is stale once the head moves.
 - Claude may merge to `main` when both required CI checks are green; never on red.
-- Before a complex task, read the newest files in `docs/plans/` and query `turicks-brain` for recent sessions (cross-agent awareness).
+- Session start: read the `session-brief` hook output (git + open PRs + recent brain decisions/bugs), then `search_memory` for the task with tag `founderos`. Before a complex task, also read the newest files in `docs/plans/`.
