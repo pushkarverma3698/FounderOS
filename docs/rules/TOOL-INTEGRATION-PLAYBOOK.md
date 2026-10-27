@@ -33,6 +33,8 @@ Every step below maps to preventing one of these.
 
 ## The 5 Integration Layers — a tool is only "integrated" when all are done
 
+> Update 2026-10-27: layers 2 to 5 below were the kernel's wiring. The kernel (`src/kernel/`, `agent-tools.ts`, `capabilities.ts`, `src/agents/prompts/`) and `src/infra/composio.ts` were removed 2026-10-10. Today only layer 1 (`src/tools/<name>.ts`) plus the caller in `src/jobs/` or `src/gateway/` applies. The text is kept as the record of the failure modes.
+
 A tool touches five files. Miss one and you get a silent failure.
 
 ```
@@ -59,7 +61,7 @@ For any third-party tool (Composio, an API):
    client.tools.list({ search: "gmail", limit: 100 })
    ```
 2. Record the exact **action slug**, **request params**, and **response field names** in the tool file's header comment.
-3. Confirm the connection exists and is ACTIVE (see `src/infra/composio.ts` connection IDs).
+3. Confirm the connection exists and is ACTIVE (Composio was removed 2026-10-05, `src/infra/composio.ts` with it; check the direct integration's own credentials instead).
 
 ### Phase 1 — RED: write the failing test first (prevents bug class regressions)
 - Unit-test the tool body with the provider **mocked** using its REAL response field names (not guessed ones — that's how the email-reader test caught a field-name bug).
@@ -75,7 +77,7 @@ For any third-party tool (Composio, an API):
 - **Layer 2** `agent-tools.ts`: wrap with `tool()`. If it writes, call `interrupt()` first; put the real call AFTER the approval check (it re-runs — keep pre-interrupt code pure).
 - **Layer 3** `capabilities.ts`: add to the correct entry of `DEPARTMENT_TOOLS`.
 - **Layer 4** the department `*_PROMPT`: list the tool, when to use it, and how to format its output.
-- **Layer 5** `buildPlannerPrompt` (`src/kernel/planner.ts`): the planner sees each worker's tool
+- **Layer 5** `buildPlannerPrompt` (`src/kernel/planner.ts`, removed 2026-10-10): the planner sees each worker's tool
   names from the catalog, so a tool wired at Layer 3 is already routable. Add a prompt rule only
   when the trigger phrase is ambiguous between two workers — `pnpm verify:wiring` warns when a
   department carries a tool its prompt never mentions.
@@ -103,7 +105,7 @@ For any third-party tool (Composio, an API):
 ```
 Contract
 - [ ] Real action slug + params + response fields verified against the live provider
-- [ ] Connection ACTIVE; IDs recorded in composio.ts
+- [ ] Connection ACTIVE; credentials recorded in the tool file header (composio.ts removed)
 Test-first
 - [ ] RED unit test written + watched fail (mocks use REAL response field names)
 - [ ] Cases: success / empty / provider-error / missing-key / default-args

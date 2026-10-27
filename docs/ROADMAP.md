@@ -4,12 +4,21 @@
 
 **Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5; the repo now runs only the job pipeline (`src/jobs/main.ts`).
 
-> 🟢 **PRODUCTION LIVE** since 2026-06-14 — Hetzner VPS, systemd, GitHub Actions CD.
-> Architecture is **v3 (contract-first kernel)** since 2026-07-08.
+> **Current state (2026-10-27):** production runs only the jobs pipeline (`src/jobs/main.ts`:
+> jobs bot, sweep, daily brief, follow-ups, digest) on the Hetzner VPS, with GitHub Actions CD.
+> The v3 kernel (July to October 2026) was removed 2026-10-10; its code is at tag `archive/founderos-v3`.
+> Sections below that describe the kernel are the record of that period.
 
 ---
 
 ## What FounderOS Is
+
+**A job-hunt pipeline with a Telegram front end.** It polls free ATS boards, screens roles against
+the founder's profile, tailors CVs and cover letters, and sends a daily brief. Applying goes
+through a Telegram Mini App and needs the founder's tap before anything is submitted (ADR-018).
+Entry point: `src/jobs/main.ts`.
+
+## What FounderOS Was (kernel era, removed 2026-10-10)
 
 **A deterministic agent kernel that takes real business actions — safely — with a Telegram gateway.**
 
@@ -37,6 +46,8 @@ message → plan → dispatch (pure) → agent ⇄ tools → collect → synthes
 
 ## Measured state (2026-08-28, counted not remembered)
 
+Snapshot of the kernel-era system before the 2026-10-10 cut; the test, table, golden-task and ratchet rows no longer describe the tree.
+
 | Measure | Value |
 |---|---|
 | Test suite | 397 files · **4,433 tests**, offline, $0 |
@@ -56,7 +67,7 @@ Full honest accounting, including what is deferred and where the ceilings are:
 
 The system's first real user is its author, and the job it has to do is get him hired in the
 Netherlands. That is the priority through Q3, and it is also the best available proof that
-the kernel works on something with a consequence.
+the pipeline works on something with a consequence.
 
 **The constraint is not supply.** 3,223 boards feed a pipeline that has stored 554 screened
 applications and submitted 2. Everything upstream of "apply" is finished and over-built;
@@ -72,7 +83,7 @@ Ranked by effect on applications submitted:
    comment describing a day-7/day-14 nudge that nothing implements.
 3. **Warm intros** — the pipeline is 100% cold ATS submission, the lowest-converting channel
    there is, into a recognised-sponsor pool small enough to exhaust.
-4. **A public evidence surface** — the kernel scores on nearly every 2026 AI-engineer hiring
+4. **A public evidence surface** — the kernel-era system scored on nearly every 2026 AI-engineer hiring
    rubric item (eval design, checkpointing, HITL, cost ledger, CI gates, weeks of production)
    and exposes none of it. Designed 2026-07-29, still unbuilt; `proof.turicks.com` does not
    resolve.
@@ -103,7 +114,7 @@ Audit and sequencing: `docs/plans/2026-08-22-portfolio-and-recruitment-readiness
 - Reply rate per 100 applications *(unmeasurable today — see item 1 above)*
 - Fresh roles surfaced within 24h of publication
 - Cost per run, and daily spend against `BUDGET_DAILY_USD`
-- Uptime, and turns completed without a `FailureReport`
+- Uptime, and sweeps and briefs completed without an error
 
 **Not tracked:** LOC, test count, board count. Those are inputs. A board polled is not a job
 applied for, and the gap between the two is this project's whole problem.
@@ -130,7 +141,7 @@ applied for, and the gap between the two is this project's whole problem.
 - Website: turicks.com · Proof gallery: proof.turicks.com — **planned, does not resolve**
 
 ### Built on FounderOS
-1. **FounderOS** — the kernel, and the thing running the job hunt
+1. **FounderOS** — the jobs pipeline running the job hunt (the kernel was removed 2026-10-10)
 2. **video-factory** — client social-video engine ([VIDEO-FACTORY.md](VIDEO-FACTORY.md))
 3. **cinematic-web** — Gumroad presets → DFY tier
 

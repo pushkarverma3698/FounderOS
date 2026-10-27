@@ -22,7 +22,7 @@ Tests that only call mock implementations of the tool itself do NOT count as int
 tests/integration/{tool-name}.test.ts
 ```
 
-Examples:
+Examples (illustrative naming; these files do not exist today, the real ones are listed in `tests/integration/`):
 - `tests/integration/send-email.test.ts`
 - `tests/integration/github-read.test.ts`
 - `tests/integration/search-web.test.ts`
@@ -53,7 +53,7 @@ Locally: `source .env && pnpm test:integration`.
 
 ## What Integration Tests Are NOT
 
-- Do NOT call the full office/supervisor — that is an E2E test (use `scripts/probe-real-task.ts`)
+- Do NOT run the whole jobs pipeline — that is an E2E check (use `scripts/telegram-probe.ts`; `probe-real-task.ts` was removed 2026-10-10)
 - Do NOT require a live Telegram bot
 - Do NOT require Postgres unless the tool itself requires it
 
@@ -65,7 +65,7 @@ Before merging a PR that adds or modifies a tool:
 - [ ] Integration test covers the real function call + error path
 - [ ] `pnpm test` green (unit + integration)
 - [ ] `pnpm lint` clean
-- [ ] Tool is wired in `agent-tools.ts` + `capabilities.ts` (`DEPARTMENT_TOOLS`) + `src/agents/prompts/<dept>.ts` (see PROGRAMMING-RULES.md)
+- [ ] Tool is wired where the jobs pipeline calls it (`src/tools/` implementation + its caller under `src/jobs/` or `src/gateway/`). The kernel wiring layers (`agent-tools.ts`, `capabilities.ts`, `prompts/<dept>.ts`) were removed 2026-10-10
 
 ## Why This Rule Exists
 

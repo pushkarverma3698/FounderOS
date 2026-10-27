@@ -30,6 +30,8 @@
 
 A tool is only "integrated" when **all 6 layers** are wired. Miss one → silent failure.
 
+> Update 2026-10-27: layers 4 to 6 named files that were removed 2026-10-10 with the kernel (`agent-tools.ts`, `capabilities.ts`, `src/agents/prompts/`, `src/kernel/planner.ts`). Layers 1 to 3 still apply; `src/agents/agent-tools/` now holds only `hitl.ts` and `external-mcp.ts`. The jobs pipeline imports tools directly from `src/jobs/` and `src/gateway/`.
+
 | # | Layer | File | What you add |
 |---|-------|------|-------------|
 | 1 | **Tool body** | `src/tools/{name}.ts` | `UnifiedTool` impl — the external call + error handling. Never throws. |
@@ -67,7 +69,7 @@ A tool is only "integrated" when **all 6 layers** are wired. Miss one → silent
 > `src/eval/office-invoker.ts`. None of those files exist; `office.ts` is a CI
 > **tombstone** — re-creating it fails `pnpm verify:arch` outright.
 >
-> **v3 truth:** a department is an entry in `DEPARTMENT_TOOLS`
+> **v3 truth (superseded 2026-10-10: the kernel is gone; only `src/jobs/main.ts` runs):** a department is an entry in `DEPARTMENT_TOOLS`
 > (`src/agents/capabilities.ts`) plus a prompt in `src/agents/prompts/`. There is no
 > supervisor and no routing table — `buildPlannerPrompt` (`src/kernel/planner.ts`)
 > reads each worker's tool names from the catalog.
@@ -205,7 +207,7 @@ tools and never crashes boot (failure isolation, rule #12).
 ## File Size Rules
 
 - 200–400 lines typical, **800 max**. When a file passes ~600, split it by concern.
-- `agent-tools.ts` was split at 660 lines into `agent-tools/{dept}.ts` modules +
+- `agent-tools.ts` (removed 2026-10-10) was split at 660 lines into `agent-tools/{dept}.ts` modules +
   a barrel. Follow that pattern: one module per department, a barrel that re-exports.
 
 ---

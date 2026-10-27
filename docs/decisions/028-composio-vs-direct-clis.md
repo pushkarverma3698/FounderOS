@@ -63,5 +63,5 @@ Do **not** replace with a generic CLI unless you find a maintained, OAuth-comple
 ## References
 
 - ADR-006 (auth strategy)
-- `src/infra/composio.ts`
+- `src/infra/composio.ts` (removed 2026-10-05)
 - Live evidence: 2026-06-16 cloud agent session (HITL shell + GitHub issue #96)

@@ -1,6 +1,8 @@
 # ADR-016 — Memory: FounderOS as the Single Source of Truth
 
 **Status:** Accepted
+
+> Update 2026-10-27: `src/infra/conversation-recorder.ts` and `src/tools/memory.ts` were removed 2026-10-10 with the agent kernel, so nothing records conversations into `conversations` any more (the table is still in `src/db/schema.ts`). The `episodic_memory` and `knowledge_entries` tiers and `scripts/sync-turicks-brain.ts` (`pnpm brain:sync`) remain; the shared brain MCP (`src/mcp/brain-tools.ts`, `hub.ts`) is the read/write path now.
 **Date:** 2026-06-04
 **Supersedes:** deleted `docs/superpowers/specs/2026-06-04-memory-system-design.md` (docs purge 2026-06)
 
