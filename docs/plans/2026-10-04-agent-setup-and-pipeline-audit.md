@@ -1,5 +1,7 @@
 # Agent setup and coding-pipeline audit — 2026-10-04
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Scope:** the Claude Code and Antigravity setup (laptop and VPS), the kernel worker prompts, and the issue → PR coding
 pipeline. **Status:** findings plus recommendations. The dispatcher slug fix ships separately (branch
 `fix/dispatch-branch-trailing-hyphen`). The prompt fixes are handed to Antigravity in

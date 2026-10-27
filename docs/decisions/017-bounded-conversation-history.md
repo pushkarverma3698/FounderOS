@@ -1,6 +1,6 @@
 # ADR-017 — Bounded Conversation History (the permanent loop fix)
 
-**Status:** Accepted
+**Status:** Archived — conversation history belonged to deleted kernel; see tag archive/founderos-v3 (2026-10-27).
 **Date:** 2026-06-04
 **Related:** ADR-010 (v2 ReAct rebuild), checkpointer.ts:70-78
 

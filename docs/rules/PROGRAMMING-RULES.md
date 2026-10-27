@@ -1,5 +1,7 @@
 # FounderOS — Programming Rules & Wiring Maps
 
+**Status:** Archived — every referenced path is gone; see tag archive/founderos-v3 (2026-10-27).
+
 > **Read this before adding ANYTHING to the codebase.**
 >
 > This document exists because the most common bug in this project is NOT logic —

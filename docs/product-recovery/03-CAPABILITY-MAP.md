@@ -1,5 +1,7 @@
 # Capability Map
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 For each capability: the canonical path, and **the exact link where the chain stops**.
 
 Chain notation: `INTENT → PLAN → WORKER → TOOL → EXTERNAL → OBSERVE → VERIFY → DELIVER`

@@ -1,5 +1,7 @@
 # Hermes, Skills, Tools, Capabilities
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 **Read this before planning any work involving Hermes.** The strategy documents describe a Hermes
 that does not exist in this repository.
 

@@ -1,5 +1,7 @@
 # Duplication Audit
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 The thesis predicted widespread capability duplication. **Measured, most of it is not there.**
 The real problem is the opposite shape: *one worker carrying too many near-synonymous tools*, and
 *orphaned subsystems nobody routes to*.

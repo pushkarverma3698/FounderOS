@@ -1,5 +1,7 @@
 # Root-fix task list (2026-10-08)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 The founder asked: go through the prod Telegram chat, show why FounderOS can't do simple work, collect the earlier fixes,
 and list everything needed to switch to FounderOS for daily work, with Telegram as the front end.
 

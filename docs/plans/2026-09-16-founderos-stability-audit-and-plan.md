@@ -1,5 +1,7 @@
 # FounderOS — Stability Audit & Plan (2026-09-16)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Evidence basis.** Production `journalctl` 2026-06-13 → 2026-09-16; the full Telegram
 transcript (96 turns, 2 chats, 32 days); live prod Postgres (`agents.*`); the Mac client's
 hourly `wake.log`; GitHub PR/issue API; and the source tree at `d9f73f3a` (= what prod runs).

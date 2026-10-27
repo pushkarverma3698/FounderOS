@@ -1,5 +1,7 @@
 # Execution Audit
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 ## The canonical trace
 
 **Prod turn `a194c5e5-237a-4c49-a24c-e4d852b482c6`, 2026-08-08T05:23:32Z.**

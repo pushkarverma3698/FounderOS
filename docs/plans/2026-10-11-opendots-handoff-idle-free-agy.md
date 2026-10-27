@@ -1,5 +1,7 @@
 # Handoff 2026-10-11: OpenDots — 60-min shifts, free idle shifts, agy fallback
 
+**Status:** Superseded by [2026-10-13-opendots-simplify.md](../sessions/2026-10-13-opendots-simplify.md) (2026-10-27).
+
 Branch `claude/chore-opendots-migration` (PR #1120 → beta). Previous session compacted twice; start fresh here.
 Background: `docs/sessions/2026-10-11-opendots-team-shift.md`.
 

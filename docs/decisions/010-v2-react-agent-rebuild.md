@@ -1,7 +1,7 @@
 # ADR-010: Rebuild as Prebuilt Supervisor + ReAct Sub-Agents (v2)
 
 **Date:** 2026-06-01  
-**Status:** Accepted  
+**Status:** Archived — v2 agent rebuild superseded by deletion; 20 of 22 referenced paths dead; see tag archive/founderos-v3 (2026-10-27).
 **Branch:** `feat/v2-react-agent`
 
 ---

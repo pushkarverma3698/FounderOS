@@ -1,6 +1,6 @@
 # ADR-034: Why Hallucination Bugs Recur — Full Audit (2026-06-17)
 
-**Status:** Accepted  
+**Status:** Archived — kernel hallucination audit deleted; see tag archive/founderos-v3 (2026-10-27).
 **Date:** 2026-06-17  
 **Context:** Production Telegram repeatedly shows ICP/strategy fabrication after empty KB,
 stale reply regurgitation on repeat asks, and fixes that pass CI but fail live.

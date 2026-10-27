@@ -1,5 +1,7 @@
 # Instruction Audit
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 Two distinct instruction systems are being conflated. Separating them is most of the fix.
 
 | System | Audience | Files | Size |

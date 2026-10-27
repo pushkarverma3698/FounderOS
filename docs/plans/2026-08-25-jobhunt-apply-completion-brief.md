@@ -1,6 +1,6 @@
 # Execution brief — finish the apply lane and start applying
 
-Date: 2026-08-25 · Author: Claude (gatekeeper session) · Status: ready to execute
+**Status:** Superseded by [2026-10-16-telegram-one-click-apply.md](2026-10-16-telegram-one-click-apply.md) (2026-10-27).
 Base commit: `ce99ff6` on `main` · Audit this derives from:
 `docs/plans/2026-08-24-jobhunt-supply-to-apply-pipeline-audit.md` (read REV 2 at the end first)
 
