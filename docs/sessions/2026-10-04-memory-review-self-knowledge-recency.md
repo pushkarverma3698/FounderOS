@@ -1,5 +1,7 @@
 # 2026-10-04 — conversation memory, `/review`, self-knowledge, recency
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Five draft PRs against the plan `docs/plans/2026-10-04-nl-control-and-knowledge-audit.md` (all labelled `unfreeze`):
 
 - #862: every finished turn goes to `conversation_turns`; "what did I say yesterday?" answers from it in the founder's own words.

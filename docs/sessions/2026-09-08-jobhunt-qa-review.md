@@ -1,5 +1,7 @@
 # 2026-09-08 — job pipeline QA review and systematic debugging
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Second pass over the pipeline audited earlier today
 ([2026-09-08-jobhunt-pipeline-deep-audit.md](2026-09-08-jobhunt-pipeline-deep-audit.md)). That one
 answered seven questions; this one hunts defects.
