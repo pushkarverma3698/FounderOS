@@ -19,8 +19,8 @@ Moved verbatim from `CLAUDE.md` on 2026-09-28 (PR docs/claude-md-trim). `CLAUDE.
     the jobhunt/gateway path, drive it through Telegram before calling it
     done.** `scripts/lib/mtproto.ts` sends as the founder and reads the bot's
     real reply (one-time setup: `TELEGRAM_TESTER_API_ID`/`_API_HASH`/`_SESSION`
-    in `.env` — absent as of 2026-09-07; the `telegram-tester.ts login` helper
-    was removed 2026-10-10). Until that exists, SSH tool-level execution is a fallback, not a
+    in `.env`; present on the VPS and proven working 2026-10-27. The `telegram-tester.ts login`
+    helper was removed 2026-10-10; mint steps are in the `scripts/lib/mtproto.ts` header). If it fails, SSH tool-level execution is a fallback, not a
     substitute — say so explicitly, and ask the founder to send the real
     message himself when the gap matters.
 - **Fix the schema, not the code**: if a task fails on ambiguous requirements,
@@ -158,7 +158,7 @@ unenforced, and is expected to decay.
 ## Git: why Claude may merge to `main` (founder directive, 2026-08-01)
 The earlier "founder merges only" rule and its CI ladder (`.github/workflows/branch-policy.yml`, deleted) were removed. Finished
 work sat undeployed for days waiting on a human click, and prod ran stale code while its fix was already green on `beta`. Waiting
-was the larger risk. What still gates a merge: branch protection on `main` requires both CI checks ("Type check + lint + wiring",
+was the larger risk. That also ended the weekly release train (ADR-039): a `beta → main` promotion goes out on green CI any day, with no Friday batch. What still gates a merge: branch protection on `main` requires both CI checks ("Type check + lint + wiring",
 "Unit + regression tests"). After the merge, watch the deploy: CD once failed silently and prod stayed on `a966e9a` for a full day.
 
 ## History

@@ -25,7 +25,7 @@ founder-visible seam now.
 - `scripts/telegram-tap.ts`: tap an inline button on a bot message.
 - Removed 2026-10-10: `scripts/qa.ts`, `e2e-telegram-qa.ts`, `telegram-tester.ts`, `probe-real-task.ts`.
 
-Both need `TELEGRAM_TESTER_API_ID` / `_API_HASH` / `_SESSION` in `.env` (see `scripts/lib/mtproto.ts`).
+Both need `TELEGRAM_TESTER_API_ID` / `_API_HASH` / `_SESSION` in `.env` (see `scripts/lib/mtproto.ts`, which also says how to mint a new session).
 
 ## Observability (LangSmith) — founder-provided key
 
