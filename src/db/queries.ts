@@ -31,7 +31,6 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
-  brainMemories,
   conversations,
   episodicMemory,
   missions,
