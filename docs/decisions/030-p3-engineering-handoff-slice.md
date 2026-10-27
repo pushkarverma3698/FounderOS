@@ -1,5 +1,7 @@
 # ADR-030 — P3: Engineering handoff typed state slice
 
+**Status:** Archived — engineering subgraph deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-17
 - **Status:** Accepted (beta)
 - **Follows:** [ADR-029](029-p2-engineering-subgraph-wired.md), [ADR-022](022-typed-interdept-contracts.md) pattern

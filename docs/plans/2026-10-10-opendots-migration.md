@@ -1,5 +1,8 @@
 # OpenDots migration (2026-10-10)
 
+> **Update 2026-10-14 (founder decision):** OpenDots and CloudCLI were removed from founderos-vps. Phone access is Claude Code
+> Remote Control, run as Linux user `claude-agent`. The jobs-only decision below still stands.
+
 Founder decision, 2026-10-10: retire FounderOS except the job pipeline. Run CopilotKit OpenDots on
 founderos-vps as the chief of staff + specialist agents, reached from the phone. Agents get the
 `claude` and `agy` CLIs. Jobs keep running as a standalone service with its own Telegram group, and

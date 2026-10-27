@@ -1,5 +1,7 @@
 # ADR-021 — Production multi-agent transition (Phase 1): context isolation, token measurement, Gemini caching & adapter defer
 
+**Status:** Archived — multi-agent kernel deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-14
 - **Status:** Accepted
 - **Branch:** `feat/phase1-context-isolation`

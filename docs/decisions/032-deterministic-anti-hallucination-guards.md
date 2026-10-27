@@ -1,7 +1,7 @@
 # ADR-032: Deterministic anti-hallucination guards (model-agnostic)
 
 **Date:** 2026-06-17
-**Status:** Accepted
+**Status:** Archived — low confidence: guards lived in deleted kernel verify; see tag archive/founderos-v3 (2026-10-27).
 **Supersedes/relates:** ADR-021 (context isolation), ADR-023 (judge), rules #16, #19, #22, #24
 
 ## Context

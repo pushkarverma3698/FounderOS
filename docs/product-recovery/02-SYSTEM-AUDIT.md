@@ -1,5 +1,7 @@
 # System Audit — measured inventory
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 All numbers measured 2026-08-08 against working tree `pr-423-local` (= `origin/main` content)
 and prod VPS `f7ea923`.
 

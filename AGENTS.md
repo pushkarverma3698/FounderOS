@@ -111,14 +111,9 @@ this only records the gotchas.
 - **`pnpm setup` is NOT the DB setup script.** `setup` is a built-in pnpm command, so
   `pnpm setup` runs pnpm's own setup. Use **`pnpm run setup`** (drizzle migrations +
   LangGraph checkpointer tables; idempotent, safe to re-run).
-- **The app cannot boot without a Gemini key.** `buildOffice()` constructs
-  `ChatGoogleGenerativeAI`, which throws at startup if `GOOGLE_GENERATIVE_AI_API_KEY`
-  is unset — even though `config.ts` marks it "optional in dev". Set it to run the app.
-  (Any non-empty value lets the office graph compile + serve `/health`; a *valid* key is
-  needed for real LLM routing.)
 - **A bad Telegram token kills the process.** The bot long-polls on startup; an invalid
   `TELEGRAM_BOT_TOKEN` makes `getMe` return 401 and the polling crash calls
-  `process.exit(1)` (fail-loud by design). The office compile + health server come up
+  `process.exit(1)` (fail-loud by design). The health server comes up
   first, so a placeholder token still proves boot, but the process self-terminates ~1s
   later. Use a real BotFather token + `TELEGRAM_CHAT_ID` to keep the gateway alive.
 - `.env` is gitignored. A dev `.env` is created with the local `DATABASE_URL`; fill in
@@ -131,17 +126,11 @@ this only records the gotchas.
 | LinkedIn post | `direct` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
 | GitHub | Octokit | `GITHUB_TOKEN` |
 
-### JARVIS cinematic UI (`apps/jarvis-next`) — **run on your machine**
-- **One command:** `pnpm dev:jarvis-local` → UI **http://localhost:3000**, API **:3001**
-- **Split:** `pnpm dev:jarvis-gateway` + `pnpm dev:jarvis-next`
-- Do **not** rely on cloud VPS port forwarding for preview; run locally in your repo checkout.
-- Needs Postgres + `GOOGLE_GENERATIVE_AI_API_KEY` in `.env`. Skips Telegram (no 409 with prod bot).
-
 ### Running / testing
 - Tests are keyless: `pnpm test` (vitest, ~2540 tests). Lint: `pnpm lint` (tsc --noEmit).
-  Build: `pnpm build:all` (backend `tsc` + `apps/jarvis` Vite). Dev run: `pnpm dev`.
+  Build: `pnpm build:all` (backend `tsc`). Dev run: `pnpm dev` (the jobs process, `src/jobs/main.ts`).
   Health: `curl localhost:3001/health`.
-- `pnpm eval` / `pnpm test:integration` need a **real** Gemini key + live Postgres.
+- `pnpm test:integration` needs a **real** Gemini key + live Postgres.
 
 ### Pre-deploy (mandatory — do not skip, do not claim "ready" without evidence)
 **A green `pnpm test` alone is NOT deploy-ready.** Type errors can hide behind
@@ -156,7 +145,7 @@ pnpm predeploy   # = lint + build:all + verify:wiring + test
 | Step | What it catches |
 |------|-----------------|
 | `pnpm lint` | Type errors (no emit) |
-| `pnpm build:all` | **Compile-time errors** — backend emit + JARVIS frontend |
+| `pnpm build:all` | **Compile-time errors** — backend emit |
 | `pnpm verify:wiring` | Half-wired tools / registry drift |
 | `pnpm test` | Regression + unit suite |
 

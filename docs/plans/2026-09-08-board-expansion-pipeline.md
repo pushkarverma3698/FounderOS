@@ -1,6 +1,6 @@
 # Board Expansion Pipeline & Stabilization
 **Date**: 2026-09-08
-**Status**: Implemented, Fully Tested (`pnpm gate` passed). Ready for review by Claude.
+**Status:** Archived (2026-10-27). Finished one-off; the work lives in src/tools/jobhunt/free-ats-cache.ts and free-ats-transport.ts.
 
 ## 1. What was done
 

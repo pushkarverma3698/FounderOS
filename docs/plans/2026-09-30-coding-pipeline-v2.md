@@ -1,5 +1,7 @@
 # FounderOS coding pipeline: one engine for /task and /goal on any onboarded repo
 
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
+
 > **Amended 2026-10-05:** build the thin slice in [2026-10-05-coding-pipeline-thin-slice.md](2026-10-05-coding-pipeline-thin-slice.md)
 > first. This plan stays the target design.
 >

@@ -3,7 +3,7 @@
 **Theme:** 9 — pipeline completes, terminal action never fires, 6 independent instances,
 self-flagged as recurring in the founder's own history
 ([docs/plans/2026-09-16-recurring-failure-patterns-and-behavior-audit.md](2026-09-16-recurring-failure-patterns-and-behavior-audit.md))
-**Status:** implementation plan, not yet built
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 
 ## Problem
 

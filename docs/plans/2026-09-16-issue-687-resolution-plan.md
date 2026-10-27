@@ -1,6 +1,6 @@
 # Issue #687 resolution plan
 
-**Status:** implementation plans written and committed; GitHub issue creation and `agent:ready`
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 labeling NOT yet done — pending founder go-ahead (see "Pending action" below).
 
 ## What happened

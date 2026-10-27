@@ -1,6 +1,6 @@
 # Plan: LinkedIn growth analytics loop
 
-**Status:** Planned (Phase 2)  
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 **Owner:** Marketing / infra  
 **Depends on:** `schedule_social_post` on `main`, `linkedin_analytics` agent tool (wired in PR #310 branch)
 
