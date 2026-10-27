@@ -2,6 +2,8 @@
 
 **Status:** Archived — executor engine removed; see tag archive/founderos-v3 (2026-10-27).
 
+> Update 2026-10-27: `src/agents/capabilities.ts` was removed 2026-10-10 with the kernel.
+
 ## Context
 
 Five hardening rounds (PRs #32, #33, #37, #43) fixed symptoms, but the 2026-06-09
