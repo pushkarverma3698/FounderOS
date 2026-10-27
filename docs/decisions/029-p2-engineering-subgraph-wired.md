@@ -1,5 +1,7 @@
 # ADR-029 — P2: Engineering subgraph wired into live office
 
+**Status:** Archived — engineering subgraph deleted (tombstoned domain subgraphs); see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-17
 - **Status:** Accepted (beta — flag default OFF)
 - **Follows:** [ADR-028](028-manager-no-tools-hierarchy.md), [ADR-027](027-tool-count-and-handoff-rules.md)

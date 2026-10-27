@@ -1,5 +1,7 @@
 # One brain: context audit and plan
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 | | |
 |---|---|
 | **Branch** | `claude/docs-one-brain-context-audit` (cut from `origin/main` @ `f74e3262`; PR base `beta`) |

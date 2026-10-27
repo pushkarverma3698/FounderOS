@@ -1,6 +1,6 @@
 # ADR-043 — Checkpoint TTL Sweep + Opt-in Idempotency Window
 
-**Status:** Accepted · **Date:** 2026-06-29 · **Branch:** `claude/founderos-roadmap-uhod8d`
+**Status:** Archived — checkpointer deleted; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

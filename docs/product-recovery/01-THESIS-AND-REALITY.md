@@ -1,5 +1,7 @@
 # Thesis vs. Reality
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 Each claim from the five strategy documents, classified and checked against the running system.
 Source-of-truth order: runtime → repository → tests → thesis → docs.
 

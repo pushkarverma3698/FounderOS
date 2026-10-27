@@ -4,7 +4,7 @@
 > moved to `mac-client`. F1 below is no longer the default path (see rev 2 F4); F2 is half fixed
 > (rev 2 F3); F3 and F7 are revised. Rev 1 is kept intact as the record of what was found first.
 
-Date: 2026-08-24 · Author: Claude (gatekeeper review) · Status: findings, awaiting founder decision
+**Status:** Superseded by [2026-09-28-jobhunt-supply-to-apply-audit.md](../audits/2026-09-28-jobhunt-supply-to-apply-audit.md) (2026-10-27).
 Commit audited: `ce99ff6` on `main`
 Artifact: https://claude.ai/code/artifact/ab633e44-f760-4e1a-859f-de176dbc1e5c
 

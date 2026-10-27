@@ -1,6 +1,6 @@
 # ADR-019: Engine Swap — Claude Code as the Task Executor
 
-**Status:** Accepted (2026-06-11)
+**Status:** Archived — executor engine removed; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

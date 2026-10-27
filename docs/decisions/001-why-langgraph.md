@@ -1,7 +1,7 @@
 # ADR-001: Why LangGraph Instead of a Custom State Machine
 
 **Date:** 2025-05  
-**Status:** Accepted  
+**Status:** Archived — low confidence: StateGraph graph deleted, langgraph dep remains but unused in src; see tag archive/founderos-v3 (2026-10-27).
 **Context:** FounderOS needs a framework to orchestrate multi-step agent workflows with persistence, human-in-the-loop (HITL) approvals, and recovery from crashes.
 
 ---

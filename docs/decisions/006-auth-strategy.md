@@ -1,7 +1,7 @@
 # ADR-006: Auth Strategy — Composio Internal + Google OAuth SaaS
 
 **Date**: 2026-06-01
-**Status**: Accepted
+**Status:** Archived — gateway auth removed with Telegram gateway; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

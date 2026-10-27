@@ -1,6 +1,6 @@
 # FounderOS — Gemini Instructions
 
-FounderOS is a deterministic agent kernel with a Telegram gateway.
+FounderOS runs the job pipeline: a Telegram jobs bot, its Mini App apply flow and the jobs crons (`src/jobs/main.ts`). The agent kernel was retired 2026-10-10.
 
 ## Precedence
 

@@ -1,7 +1,7 @@
 # ADR-014: Job-First Sequencing + Public-Ready Now
 
 **Date:** 2026-06-04  
-**Status:** Accepted  
+**Status:** Archived — goal reached via jobs-only cut; see tag archive/founderos-v3 (2026-10-27).
 **Replaces:** The "validate-then-public" sequencing in SCALING-AND-PORTFOLIO-STRATEGY.md
 
 ---

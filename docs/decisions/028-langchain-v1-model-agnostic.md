@@ -1,5 +1,7 @@
 # ADR-028: LangChain v1 model-agnostic office
 
+**Status:** Archived — kernel model layer deleted; see tag archive/founderos-v3 (2026-10-27).
+
 Date: 2026-06-16
 
 ## Status

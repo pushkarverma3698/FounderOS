@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-12  
 **Branch:** `antigravity/feat-opendots-fallback-cascade`  
-**Status:** In Progress
+**Status:** Superseded (2026-10-27). OpenDots was removed from founderos-vps on 2026-10-14; phone access is now Claude Code Remote Control as `claude-agent`.
 
 ## 1. Problem & Goal
 The founder is using OpenDots as an operating system to simulate human employees (Chief of Staff, Builder, Architect, Reviewer) working on dedicated virtual laptops. To operate at peak performance with minimum cost and zero downtime:

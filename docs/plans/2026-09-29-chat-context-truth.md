@@ -1,5 +1,7 @@
 # Chat answers from current facts, not June's
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 | | |
 |---|---|
 | **Branch** | `claude/fix-chat-context-truth` (base `main` @ `1e797039`) |

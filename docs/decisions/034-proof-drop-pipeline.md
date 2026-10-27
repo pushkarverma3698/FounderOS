@@ -1,6 +1,6 @@
 # ADR-034 — Proof Drop Pipeline (Phase D-Bis GTM)
 
-**Status:** Accepted · **Date:** 2026-06-17
+**Status:** Archived — proof renderers deleted; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

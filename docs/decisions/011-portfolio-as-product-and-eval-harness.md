@@ -1,7 +1,7 @@
 # ADR-011: Portfolio-as-Product + Eval Harness over a Critic
 
 **Date:** 2026-06-02
-**Status:** Accepted
+**Status:** Archived — eval harness deleted (src/eval); see tag archive/founderos-v3 (2026-10-27).
 **Supersedes (in part):** ADR-003 (the v1 critic) for the *quality-gate* responsibility.
 **Context:** The founder has one quarter of runway and two goals — land an AI/agent engineering job
 and start earning realistic money. We must decide how to direct FounderOS development to serve both.

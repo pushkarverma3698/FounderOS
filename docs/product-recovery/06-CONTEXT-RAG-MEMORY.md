@@ -1,5 +1,7 @@
 # Context, RAG & Memory
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 ## What actually enters the model per turn
 
 Traced through `makePlanNode` → `makeAgentNode`. **This is smaller than the thesis assumed.**

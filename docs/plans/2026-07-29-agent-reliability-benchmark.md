@@ -1,6 +1,6 @@
 # Agent Reliability Benchmark (ARB) — Design Spec
 
-_Date: 2026-07-29 · Status: approved design, pre-implementation · **Centrepiece artifact**_
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 
 ## Why this exists
 
