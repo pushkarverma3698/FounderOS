@@ -73,4 +73,4 @@ Deploy requirement: none beyond `TELEGRAM_CHAT_ID`; `JOBHUNT_SENDER_PROFILES` is
 - `mac-client/tests/test_apply_browser.py`
 - `docs/superpowers/specs/2026-08-08-jobhunt-apply-pipeline-audit-fix-design.md` (Finding 2 — the original audit that found this)
 - Commit `70212f6` (the reverted fix attempt), commit `e53dacf` (the revert, findings D1-D4)
-- `src/agents/prompts/jobhunt.ts` (hard limits — cites this ADR)
+- `src/agents/prompts/jobhunt.ts` (hard limits; removed 2026-10-10 with the kernel. The rule is now enforced in `src/tools/jobhunt/form-runner.ts` and `held-submit.ts`, which cite this ADR)

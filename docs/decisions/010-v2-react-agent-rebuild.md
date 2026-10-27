@@ -2,6 +2,8 @@
 
 **Date:** 2026-06-01  
 **Status:** Archived — v2 agent rebuild superseded by deletion; 20 of 22 referenced paths dead; see tag archive/founderos-v3 (2026-10-27).
+
+> Update 2026-10-27: `src/agents/agent-tools.ts` was removed 2026-10-10; only `src/agents/agent-tools/hitl.ts` and `external-mcp.ts` remain.
 **Branch:** `feat/v2-react-agent`
 
 ---

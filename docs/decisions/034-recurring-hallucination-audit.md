@@ -1,6 +1,8 @@
 # ADR-034: Why Hallucination Bugs Recur — Full Audit (2026-06-17)
 
 **Status:** Archived — kernel hallucination audit deleted; see tag archive/founderos-v3 (2026-10-27).
+
+> Update 2026-10-27: `scripts/e2e-telegram-qa.ts` was removed 2026-10-10; `scripts/telegram-probe.ts` is the real-path check now.
 **Date:** 2026-06-17  
 **Context:** Production Telegram repeatedly shows ICP/strategy fabrication after empty KB,
 stale reply regurgitation on repeat asks, and fixes that pass CI but fail live.
