@@ -1,6 +1,6 @@
 # Simplify the agent workflow: routines, verdict, VPS, brain
 
-**Status:** Approved 2026-10-27: D1 batch review, D2 alt/alt2 phone servers not used. D3 deferred.
+**Status:** Approved 2026-10-27: D1 batch review, D2 only `main:work` stays (founder, later the same day). D3 deferred.
 **Replaces:** nothing yet. Once merged, it supersedes the open "batch review vs add A" choice from the 2026-10-27 review-strategy session.
 
 ## Result
@@ -19,8 +19,9 @@ Keep the workflow and change the plumbing underneath it. The nightly loop works 
 | oplify-nightly | 10-27 timer run done in 18 min: api#79 merged, promotion draft #195 opened | journal, gh |
 | Usage limit | 3 blocks on alt2 in 2 days. `claude auth status`: main, alt and alt2 are all `subscriptionType: pro`. alt2 at 97% of its session at 12:31 UTC. | VPS |
 | Worktree fence | 27–39% of builder calls refused on 10-26. Test 10-27: a `--bg` session started in a `git worktree add` folder, without `-w`, ran `cd X && git status`, `X=…; git -C "$X" log` and `git log \| head` with no refusal (`1OK 2OK 3OK`, session 5b9804b3, alt2, Haiku). | docs `worktrees.md`, `agent-view.md` "How file edits are isolated"; test |
-| Resume timer | Fired about 9 times. 1 useful resume (10-27 11:17), 1 duplicate session (10-27 00:17, since patched). | journal |
-| WIP rescue | 15 saves, 0 restores. Some saves held only `node_modules`. | `routine-wip/*` refs |
+| Resume timer | Fired about 9 times. 1 useful resume (10-27 11:17), 1 duplicate session (10-27 00:17, since patched). It wakes the same session (worktree and context) when its last turn is the usage-limit error from the last 20 h, at most 3 times, then Telegram asks for "continue". Other crashes wait for the next day's run. | journal, `claude-routine` `resume_one` |
+| WIP rescue | 15 saves, 0 restores. Some saves held only `node_modules`. The leftover rule only looks at `task/issue-*` and `feat/t*`, so nothing ever reads a `routine-wip/*` branch. | `routine-wip/*` refs, job files |
+| Leftovers first | The next run resumes open PRs, `agent:working` issues and untouched branches before new work, and they count toward the daily cap. This is a job-file instruction only (`oplify-nightly.md:36-39`, `bh-morning.md:45`, DoD §5). No script checks it. | job files |
 | RAM reaper | 55 job kills since 10-25, including a `git push` (feat/t140) and two `git commit`s mid-run. eslint uses 1.1–1.5 GB per process inside a 4.5 GB slice. | reaper journal |
 | Disk | `/` at 92% (6.2 GB free). About 14 GB is dead weight: `/opt/agy-workspace` 3.8G, `/home/antigravity` 3.4G, `/opt/review` 3.0G, review-bh 3.7G. Removing them takes `/` from 66G to about 52G of 75G (about 70%). | `df`, `du` |
 | Drift | VPS `routine-verdict` is 361 lines (md5 4bbd…), laptop 334 (709a…). `claude-routine` and the pr-digest prompt also differ. Running `setup-claude-routines` today would roll prod back. | md5 |
@@ -35,7 +36,7 @@ Keep the workflow and change the plumbing underneath it. The nightly loop works 
 ## Decisions for the founder
 
 - **D1. Review: decided 2026-10-27, batch review.** batch review, and only at the promotion PR. The lead already reviews every PR before merging it: diff, red/green proof, CI. A second reviewer per PR ("add A") repeats that on accounts that already hit the limit. The gap is edge cases, and those matter at the point code reaches prod. Oplify: the run that opens the beta→production promotion PR runs the code-review plugin on the promotion diff, and systematic-debugging proves each finding with a failing test before it counts. BH has no production branch yet, so it gets the same step when it does.
-- **D2. Decided 2026-10-27: not used.** 8 of the 12 Remote Control servers go (about 450 MB RAM). Phone coding stays on `main`. The routines still use the alt/alt2 background daemons, so those stay either way.
+- **D2. Decided 2026-10-27: only `main:work`.** 11 of the 12 Remote Control servers go. The founder works from `main:work` (`~/work`, all clones, `--spawn same-dir --capacity 3`) and starts every repo from there. A session edits a repo only in its own `git worktree add` folder, never the clone in place. The routines still use the alt/alt2 background daemons, so those stay.
 - **D3. Accounts: no decision now.** Measure first. T3 removes the refused-and-retried calls, which should cut usage. If bh still hits the limit on 2 of its next 3 runs, choose: lead on Sonnet (no extra cost) or one Max account (costs more per month, and deletes the failover code).
 
 ## Target
@@ -56,13 +57,14 @@ KEEP: systemd timers, the account probe and failover (worked 10-26 10:11), `clau
    Proof: the next run has 0 git kills and fewer eslint kills than today's 24.
 5. **Resume and rescue (1 h).** Set `CLAUDE_CODE_RETRY_WATCHDOG=1` in the `claude-bgd@` unit. The docs say unattended sessions then wait out the usage window themselves. If a limit-hit `--bg` run continues on its own after the reset, delete the resume timer. If it does not, keep the timer (it is patched and worked on 10-27). Delete WIP rescue either way, because builders push after every commit (DoD §5).
    Proof: one limit-hit run finishes with no `[routine-resume` marker.
+   Added 2026-10-27: a crash that is not the usage limit also waits a day. If the watchdog does not cover it, the resume pass also wakes a run whose session stopped on any error, with the same 3-try cap.
 6. **Verdict (1 h).** The lead sets a commit status (`context=routine/review`) on the reviewed SHA instead of the hidden comment. The verdict reads it from `statusCheckRollup`, so a later push drops it by itself. If the run is still going, the verdict says "still running, resumes ~HH:MM" instead of a partial NO. Message fixed at 3 lines plus a count.
    Proof: run the verdict on today's PRs and show the Telegram text for a finished and an unfinished run.
-7. **Job files (1 h, after T3).** Drop the fence rewrites, state the Telegram wording once (bh-morning says it 3 times), and add one Haiku step that reads the last merged PRs and review comments touching the same files (context-gathering gap from the 10-27 review). Target: bh-morning ≤ 80 lines, DoD ≤ 60.
-   Proof: the next run of each routine is green with the shorter files.
+7. **Job files (1 h, after T3).** Leftovers first becomes a script, not an instruction: the ready-set step (`bh-ready.py` for BH, the same for Oplify) prints leftovers first and fills new work only up to the daily cap minus leftovers. The lead dispatches from that list. Drop the fence rewrites, state the Telegram wording once (bh-morning says it 3 times), and add one Haiku step that reads the last merged PRs and review comments touching the same files (context-gathering gap from the 10-27 review). Target: bh-morning ≤ 80 lines, DoD ≤ 60.
+   Proof: the next run of each routine is green with the shorter files. On a run with a leftover, the ready set lists it first and no new task starts beyond the cap.
 8. **Brain slice (repo PR, Antigravity: `docs/antigravity/AG-067-brain-sync-slim.md`).** The sync stops writing `knowledge_entries`, which removes one Ollama call per changed doc and the `--keyword-only` mode, the only thing that mode did. Delete the 4 query functions nothing calls. The recall baseline drops from 10 to 8, so one brittle case stops turning brain-sync red; misses still print. Dropping the three dead tables (`knowledge_entries`, `turicks_brain`, `research_cache`: 5,251 rows, none read) and narrowing `ALLOWED_RAG_TABLES` is a separate Full-depth step after a `pg_dump`, a week after the PR merges. The merged recall check and session brief from #1239's plan stay.
    Proof: `pnpm gate` green, `brain-sync.yml` green, the same top-1 result for 5 `search_memory` queries before and after.
-9. **After D1 and D2.** Install the code-review plugin for the agent account. Add the promotion-review step to oplify-nightly. Stop and disable the 8 alt/alt2 Remote Control servers (D2). The founder works mostly from `main:work`.
+9. **After D1 and D2.** Done 2026-10-27: the code-review plugin is installed for all 3 profiles. All `claude-remote@` units except `main:work` are stopped and disabled, plus `claude-remote-{alt,alt2}.path/.target`, which had restarted the alt servers. Left: the promotion-review step in oplify-nightly (after T1). `setup-claude-remote` and the VPS `CLAUDE.md` line about per-repo environments are changed in T1, so a re-run cannot bring the servers back.
 
 T1 comes first because every later task edits the same files. T2 and T8 are independent of the rest. T3 before T7.
 
