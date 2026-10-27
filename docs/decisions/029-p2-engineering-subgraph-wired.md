@@ -2,6 +2,8 @@
 
 **Status:** Archived — engineering subgraph deleted (tombstoned domain subgraphs); see tag archive/founderos-v3 (2026-10-27).
 
+> Update 2026-10-27: `scripts/e2e-telegram-qa.ts` was removed 2026-10-10; `scripts/telegram-probe.ts` is the real-path check now.
+
 - **Date:** 2026-06-17
 - **Status:** Accepted (beta — flag default OFF)
 - **Follows:** [ADR-028](028-manager-no-tools-hierarchy.md), [ADR-027](027-tool-count-and-handoff-rules.md)

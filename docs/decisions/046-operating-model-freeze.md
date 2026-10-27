@@ -146,8 +146,8 @@ independent whatever it is called:
    `FAIL`; `pr-brain` makes the PR ready or draft to match and posts the reviewed marker. A run with no verdict
    line is a failed attempt, never a pass.
 
-**How to go back:** `PR_BRAIN_ENGINE=claude` in the pr-brain crontab line. Tests for both engines live in
-`tests/unit/scripts/pr-brain-agy.test.ts` and `pr-brain-notify.test.ts`/`pr-brain-token.test.ts`.
+**How to go back:** `PR_BRAIN_ENGINE=claude` in the pr-brain crontab line. Tests for both engines lived in
+`tests/unit/scripts/pr-brain-agy.test.ts`, `pr-brain-notify.test.ts` and `pr-brain-token.test.ts`. Update 2026-10-27: those test files are no longer in this repo.
 
 **Why this is recorded here:** an earlier attempt (PR #791) swapped the CLI in place, did not meet these four
 conditions, and was rightly stopped by the gate citing this ADR. The conditions are the answer to that review,
