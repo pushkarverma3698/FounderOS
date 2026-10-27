@@ -73,6 +73,21 @@ export function needsChunkRefresh(matchingChunks: number, expectedChunks: number
   return matchingChunks !== expectedChunks;
 }
 
+/**
+ * What a sync does with one doc's vector chunks. An Archived/Superseded doc is never embedded: search skips those rows,
+ * so a vector is never read, and an embed timeout used to abort before the DELETE and leave the old chunks ACTIVE
+ * (2026-10-27: 44 kernel-era chunks stayed searchable). Its existing rows get the declared status in place instead.
+ */
+export function chunkPlan(
+  status: "ACTIVE" | "SUPERSEDED" | "ARCHIVED",
+  matchingChunks: number,
+  expectedChunks: number,
+): "current" | "restatus" | "embed" {
+  if (expectedChunks === 0) return "current";
+  if (status !== "ACTIVE") return "restatus";
+  return needsChunkRefresh(matchingChunks, expectedChunks) ? "embed" : "current";
+}
+
 /** Lines at the top of a doc that may carry its Status field. A Status line quoted further down is not a declaration. */
 const STATUS_HEADER_LINES = 20;
 /** A Status field whose value starts with superseded/archived: `**Status:** Superseded by …`, `Date: … · Status: archived`. */
@@ -633,9 +648,16 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
       AND metadata->>'content_sha' = ${sha}
   `);
   const matching = Number((counted[0] as { n: number | string } | undefined)?.n ?? 0);
-  if (!needsChunkRefresh(matching, chunks.length)) {
+  const status = declaredDocStatus(entry.content);
+  const plan = chunkPlan(status, matching, chunks.length);
+  if (plan === "restatus") {
+    await db.execute(sql`
+      UPDATE brain.brain_memories SET status = ${status}
+      WHERE source = ${entry.source} AND status <> ${status}
+    `);
     return { chunks: chunks.length, refreshed: false };
   }
+  if (plan === "current") return { chunks: chunks.length, refreshed: false };
 
   const embeddings = await embedTexts(chunks);
 
@@ -644,7 +666,6 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
     sql`DELETE FROM brain.brain_memories WHERE source = ${entry.source}`,
   );
 
-  const status = declaredDocStatus(entry.content);
   for (let i = 0; i < chunks.length; i++) {
     const metadata = {
       source_path: entry.source,
