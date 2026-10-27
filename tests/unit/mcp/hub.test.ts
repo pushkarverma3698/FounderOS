@@ -66,10 +66,10 @@ describe("hub — scope", () => {
 
   it("serves the brain only in brain scope, everything in all scope", async () => {
     const brain = (await (await connected("brain")).listTools()).tools.map((t) => t.name);
-    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug"]);
+    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug", "recent_memories"]);
     const all = (await (await connected("all")).listTools()).tools.map((t) => t.name);
     expect(all).toEqual([...brain, "gmail_search", "calendar_events", "list_connected_tools", "call_connected_tool"]);
-    expect(hubTools("all")).toHaveLength(9);
+    expect(hubTools("all")).toHaveLength(10);
   });
 
   it("enforces scope on calls, not only on the list", async () => {
@@ -359,8 +359,8 @@ describe("hub — stdio entry points", () => {
   }
 
   it("hub.ts serves everything by default and the brain in HUB_SCOPE=brain", async () => {
-    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(9);
-    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(5);
+    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(10);
+    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(6);
   }, 60_000);
 
   // A hub with an open bridge child never noticed its stdin close, so it outlived the
