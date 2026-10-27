@@ -1,0 +1,15 @@
+{
+  "baseline": 10,
+  "cases": [
+    { "q": "coding pipeline", "project": "founderos", "expect": "opendots-migration", "forbid": "coding-pipeline-v2" },
+    { "q": "how do we promote beta to main", "project": "founderos", "expect": "CLAUDE-RULES-RATIONALE", "forbid": "039-weekly-release-train" },
+    { "q": "who is allowed to merge to main", "project": "founderos", "expect": "CLAUDE-RULES-RATIONALE", "forbid": "039-weekly-release-train" },
+    { "q": "weekly release train promotion", "project": "founderos", "expect": "CLAUDE-RULES-RATIONALE" },
+    { "q": "what is the engineering operating model", "project": "founderos", "expect": "046-operating-model-freeze" },
+    { "q": "why is Postgres the canonical brain store", "project": "founderos", "expect": "038-postgres-canonical-brain" },
+    { "q": "what stays in FounderOS after the jobs-only cut", "project": "founderos", "expect": "opendots-migration" },
+    { "q": "MCP client bridge", "project": "founderos", "expect": "041-mcp-client-bridge" },
+    { "q": "test pyramid", "project": "founderos", "expect": "TEST-PYRAMID" },
+    { "q": "Telegram one-click apply", "project": "founderos", "expect": "telegram-one-click-apply" }
+  ]
+}
