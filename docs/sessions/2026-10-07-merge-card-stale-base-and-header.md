@@ -1,5 +1,7 @@
 # 2026-10-07: the merge card names its PR, and a moved beta no longer strands it
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Moves: A. Two seams left after #982/#983, both found by reading code (session doc
 `2026-10-07-pipeline-merge-card-seams.md` on PR #984).
 

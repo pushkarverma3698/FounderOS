@@ -1,5 +1,7 @@
 # 2026-10-01 — four plans, one branch: dispatch hardening, dated context, goals standup, jobhunt last mile
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 The four `docs/plans/2026-09-29-*.md` plans existed only as documents on four branches

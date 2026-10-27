@@ -1,5 +1,7 @@
 # 2026-10-09 — Phase 0 of the simplify plan (AG-050, 051, 052, 055)
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 Four briefs from `docs/plans/2026-10-08-simplify-founderos.md` were merged to beta in order (050 → 055 → 052 → 051) and promoted once through #1044 (merge commit d328d636). The deploy took prod to d328d636.

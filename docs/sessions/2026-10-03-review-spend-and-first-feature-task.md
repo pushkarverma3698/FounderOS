@@ -1,5 +1,7 @@
 # 2026-10-03 — review spend fixed, auto-merge off, and the first feature-sized task through the loop
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 The founder asked three things: switch pr-brain's auto-merge off, say whether FounderOS can handle real tasks "on the go", and say whether review tokens are being wasted. Then: test with a real task, cover the edge cases, fix the leaks, do the PR work.
