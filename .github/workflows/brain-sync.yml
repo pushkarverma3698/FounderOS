@@ -79,4 +79,4 @@ jobs:
 
             # AG-066: recall check. A golden set of questions through the same searchBrain path search_memory uses; fails
             # (exit 1) when an expected doc is missing from the top 3 or a stale superseded one is in it.
-            pnpm exec tsx scripts/brain-recall-check.ts
+            node --env-file=.env --import tsx/esm scripts/brain-recall-check.ts
