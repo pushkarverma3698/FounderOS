@@ -58,7 +58,7 @@ Override dir: `DAILY_QA_REPORT_DIR=/path pnpm qa:daily`
 ## Not covered (manual)
 
 - **MTProto Telegram round-trip** — needs `TELEGRAM_TESTER_SESSION`. Run:
-  `node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run group1`
+  `node --env-file=.env --import tsx/esm scripts/telegram-probe.ts "/jobs"`
 - **Full 40-task live probe** — weekly: `node --env-file=.env --import tsx/esm scripts/probe-live-qa.ts`
 
 ## Promotion checklist
