@@ -1,6 +1,6 @@
 # Simplify the agent workflow: routines, verdict, VPS, brain
 
-**Status:** Draft, waiting on founder decisions D1–D3 (2026-10-27)
+**Status:** Approved 2026-10-27: D1 batch review, D2 alt/alt2 phone servers not used. D3 deferred.
 **Replaces:** nothing yet. Once merged, it supersedes the open "batch review vs add A" choice from the 2026-10-27 review-strategy session.
 
 ## Result
@@ -34,8 +34,8 @@ Keep the workflow and change the plumbing underneath it. The nightly loop works 
 
 ## Decisions for the founder
 
-- **D1. Review: "batch review" or "add A"?** Recommended: batch review, and only at the promotion PR. The lead already reviews every PR before merging it: diff, red/green proof, CI. A second reviewer per PR ("add A") repeats that on accounts that already hit the limit. The gap is edge cases, and those matter at the point code reaches prod. Oplify: the run that opens the beta→production promotion PR runs the code-review plugin on the promotion diff, and systematic-debugging proves each finding with a failing test before it counts. BH has no production branch yet, so it gets the same step when it does.
-- **D2. Do you use the phone servers on the alt and alt2 accounts?** If not, 8 of the 12 Remote Control servers go (about 450 MB RAM). Phone coding stays on `main`. The routines still use the alt/alt2 background daemons, so those stay either way.
+- **D1. Review: decided 2026-10-27, batch review.** batch review, and only at the promotion PR. The lead already reviews every PR before merging it: diff, red/green proof, CI. A second reviewer per PR ("add A") repeats that on accounts that already hit the limit. The gap is edge cases, and those matter at the point code reaches prod. Oplify: the run that opens the beta→production promotion PR runs the code-review plugin on the promotion diff, and systematic-debugging proves each finding with a failing test before it counts. BH has no production branch yet, so it gets the same step when it does.
+- **D2. Decided 2026-10-27: not used.** 8 of the 12 Remote Control servers go (about 450 MB RAM). Phone coding stays on `main`. The routines still use the alt/alt2 background daemons, so those stay either way.
 - **D3. Accounts: no decision now.** Measure first. T3 removes the refused-and-retried calls, which should cut usage. If bh still hits the limit on 2 of its next 3 runs, choose: lead on Sonnet (no extra cost) or one Max account (costs more per month, and deletes the failover code).
 
 ## Target
@@ -62,7 +62,7 @@ KEEP: systemd timers, the account probe and failover (worked 10-26 10:11), `clau
    Proof: the next run of each routine is green with the shorter files.
 8. **Brain slice (repo PR, Antigravity: `docs/antigravity/AG-067-brain-sync-slim.md`).** The sync stops writing `knowledge_entries`, which removes one Ollama call per changed doc and the `--keyword-only` mode, the only thing that mode did. Delete the 4 query functions nothing calls. The recall baseline drops from 10 to 8, so one brittle case stops turning brain-sync red; misses still print. Dropping the three dead tables (`knowledge_entries`, `turicks_brain`, `research_cache`: 5,251 rows, none read) and narrowing `ALLOWED_RAG_TABLES` is a separate Full-depth step after a `pg_dump`, a week after the PR merges. The merged recall check and session brief from #1239's plan stay.
    Proof: `pnpm gate` green, `brain-sync.yml` green, the same top-1 result for 5 `search_memory` queries before and after.
-9. **After D1 and D2.** Install the code-review plugin for the agent account. Add the promotion-review step to oplify-nightly. Stop the 8 unused Remote Control servers if D2 says so.
+9. **After D1 and D2.** Install the code-review plugin for the agent account. Add the promotion-review step to oplify-nightly. Stop and disable the 8 alt/alt2 Remote Control servers (D2). The founder works mostly from `main:work`.
 
 T1 comes first because every later task edits the same files. T2 and T8 are independent of the rest. T3 before T7.
 
