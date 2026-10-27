@@ -4,6 +4,8 @@
 **Status:** Accepted
 **Context:** Phase 2 — Outbound pipeline introduced research caching, daily send quotas, and LLM prompt caching.
 
+> Update 2026-10-27: only one of the three caches is live. The research cache (`research:{md5(url)}`), the daily send quota (`incrQuota`/`getQuota`, never wired) and the LLM prompt cache were tied to the outbound pipeline and research department, removed 2026-10-10. Redis today is the embedding cache: `embedTextCached` in `src/lib/embed.ts` stores query vectors for 30 days through `src/infra/redis.ts`, fail-open. The reasoning for Redis over Postgres (native TTL, fail-open, ephemeral data) still holds for that cache. The `KEYS` helpers for the other two remain in `redis.ts` unused. Sections below are the 2026-05 record.
+
 ---
 
 ## Context
