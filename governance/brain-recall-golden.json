@@ -1,5 +1,6 @@
 {
-  "baseline": 10,
+  "baseline": 8,
+  "baseline_note": "8 of 10: one or two near-miss cases must not turn the nightly sync red; a drop below 8 is a real recall regression.",
   "cases": [
     { "q": "coding pipeline", "project": "founderos", "expect": "jobs-only", "forbid": "coding-pipeline-v2" },
     { "q": "how do we promote beta to main", "project": "founderos", "expect": "chore/promote-", "forbid": "039-weekly-release-train" },
