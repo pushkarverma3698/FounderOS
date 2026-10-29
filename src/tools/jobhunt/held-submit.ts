@@ -180,12 +180,23 @@ export async function awaitSubmitOutcome(
       return { kind: "code-needed", evidence: why ? `The form still asks for the code: ${why}` : "The form still asks for the code." };
     }
     if (dialog.message) return { kind: "unconfirmed", evidence: `Form showed an alert dialog after click: "${dialog.message}"` };
-    const errors = await page
-      .locator("[aria-invalid=true]:visible, [role=alert]:visible, .field-error:visible, .error-message:visible")
+    // Recruitee keeps empty [role=alert] placeholders on the page (6 on Payter, 2026-10-20): only alerts with text count.
+    const alerts = await page
+      .locator("[role=alert]:visible, .field-error:visible, .error-message:visible")
+      .allInnerTexts()
+      // allow-failopen: no readable alert means no visible error text was detected.
+      .catch(() => [] as string[]);
+    const said = alerts.map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+    const invalid = await page
+      .locator("[aria-invalid=true]:visible")
       .count()
-      // allow-failopen: 0 means no visible error element was detected.
+      // allow-failopen: 0 means no field was marked invalid.
       .catch(() => 0);
-    if (errors > 0) return { kind: "unconfirmed", evidence: `Form displayed ${errors} validation error element(s) after clicking submit` };
+    const errors = said.length + invalid;
+    if (errors > 0) {
+      const quoted = said.length > 0 ? `: ${[...new Set(said)].join("; ").slice(0, 200)}` : "";
+      return { kind: "unconfirmed", evidence: `Form displayed ${errors} validation error(s) after clicking submit${quoted}` };
+    }
     const evidence = "Clicked submit; no error appeared, but no confirmation banner or URL change was observed within 12s - check screenshot to verify";
     const botCheck = await page
       .locator(".grecaptcha-badge, iframe[src*='recaptcha'], script[src*='recaptcha']")
