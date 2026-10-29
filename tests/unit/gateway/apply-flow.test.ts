@@ -635,6 +635,18 @@ describe("apply flow", () => {
       expect(mockMarkRowApplied).not.toHaveBeenCalled();
     });
 
+    it("points to Submit it yourself, not the inbox, when a CAPTCHA stopped the click (EMA, 2026-10-17)", async () => {
+      const evidence = "The click opened a visible bot check, a CAPTCHA challenge (hCaptcha), that the bot does not solve, so it was not sent: submit it yourself from the job link.";
+      runner(async () => ({ ...SENT, confirmed: false, evidence }));
+      const { ctx, replies } = makeCtx();
+      await handleAutoApplyCallback(ctx as never, `jh:s:${ROW_ID}`);
+
+      const said = replies.find((r) => r.text.includes("Could not confirm"));
+      expect(said?.text).toContain("Submit it yourself");
+      expect(said?.text).not.toContain("Check your email");
+      expect(mockMarkRowApplied).not.toHaveBeenCalled();
+    });
+
     // grammY polling runs updates one at a time, so in prod a double tap reaches the bot only after the first
     // Submit finished, and by then Telegram has expired the tap (live run 2026-10-17, Telnyx, 06:58:36).
     it("sends nothing on a second tap handled after the first Submit finished unconfirmed", async () => {
