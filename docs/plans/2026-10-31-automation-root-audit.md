@@ -208,7 +208,7 @@ Live state at 15:20 UTC: phone session a8f339fa `idle` (main profile); e1dfd548 
 
 The lead session compacted twice, so per the founder's rule a new session continues from here.
 
-1. Step 2 builder finished (row 2). Step 3 builder (`feat/routine-config`) was still running when the old session stopped. Their work lands on those branches in `~/Projects/claude-agent-setup/.claude/worktrees/{bgd-wrapper,routine-config}`. If a branch has only its claim commit, the builder died: re-dispatch from the step row above.
+1. Step 2 builder finished (row 2). Step 3 builder (`feat/routine-config`) was still running when the old session stopped. Its work lands in `~/Projects/claude-agent-setup/.claude/worktrees/routine-config`. If that branch has only its claim commit, the builder died: re-dispatch from the step row above.
 2. Step 1 is built and CI-green but not lead-reviewed. Review it first (row 1, "Next").
 3. Open decision for the founder: `claude-remote-hooks/token-guard.py:280` in the public repo names a private repo's task file (pre-existing on `main`). Proposed fix: make the message generic.
 4. Cleanup owed: `ssh founderos-vps 'rm -r /tmp/x-cas /tmp/x-aud'`; scratch repo `pushkarverma3698/tracker-cas-scratch` (private) holds test rows, branches and PRs #1-#2 and a host session id in its history; keep it private or delete it after step 1 merges.
