@@ -77,7 +77,7 @@ Every environment runs the same thing: one tool, one one-liner, one tracker. Rul
 
 ### 1. The tracker is the brain
 
-- One CSV per project in its own repo, same shape as BachelorHouse's. New columns: Owner, Environment, Run, Branch, PR, Blocker, Next step, Updated. Status becomes a fixed list: Not started, Claimed, Building, In review, Waiting, Blocked, Done.
+- One CSV per project in its own repo, same shape as BachelorHouse's. New columns: Owner, Environment, Run, Branch, PR, Blocker, Next step, Updated. The column is named **Holder** in the tool ("Owner" already exists in the BachelorHouse CSV). Status becomes a fixed list: Not started, Claimed, Building, In review, Waiting, Blocked, Done.
 - One tool writes it, `tracker`, and nothing else does. Writes go through the GitHub contents API with sha compare-and-swap. A stale sha gets 409, the tool re-reads, merges its one row and retries. Every environment reaches the same file at once, with no clone to go stale.
 - Commands: `tracker next`, `tracker claim`, `tracker beat`, `tracker block`, `tracker done`, `tracker sync`.
 - GitHub still wins on one fact: a merged `Closes T-NNN` means Done. `tracker sync` runs on every read and fixes drift, so the 11-row problem can't return.
@@ -181,7 +181,7 @@ Each one gets a real test before migration, and the list grows when a new one tu
 - Oplify box's real schedule and weekend hours: no AWS access.
 - Claude Code features: docs and code only.
 - Whether the 64 killed jobs were retried, and whether the OOM kills ended any session's work.
-- Ubuntu 22.04 shipping systemd 249 (relevant to `ExitType=`): from memory.
+- ~~Ubuntu 22.04 shipping systemd 249~~ Corrected 10-31: the VPS runs Ubuntu 26.04 with systemd 259.
 - `api#79`'s origin and HB-* dependency order in epic #199: not read.
 
 ## Progress
@@ -193,9 +193,9 @@ Repo facts checked 2026-10-31: neither `claude-agent-setup` (public, `main` unpr
 | Step | Branch | PR | Proven | Next |
 |---|---|---|---|---|
 | 0 Plan committed | founderos `docs/tracker-first-routine` | (this PR) | — | step 1 |
-| 1 `tracker` tool | — | — | — | dispatch builder |
+| 1 `tracker` tool | claude-agent-setup `feat/tracker` | — | CI green (run 41215697428); 16 unit tests + 4 old suites exit 0, re-run by lead; live CAS on a private scratch repo: two writers, 6 forced 409 retries, both rows correct; takeover → old holder `check` exit 5 | fixing: 6h lease vs claim-branch 12h resume window (deadlock 6-12h), reuse an existing worktree; live same-row race, sync, reconcile, done, release |
 | 2 Update fix | — | — | — | — |
-| 3 `routine-new` | — | — | — | — |
+| 3 `routine-new` | claude-agent-setup `feat/routine-config` | — | — | builder running; real run on throwaway `routine-sandbox-1031`, timer disabled after |
 | 4 Lead prompt, skill, hooks, sweep, verdict | — | — | — | — |
 | 5 VPS scripts into git, cap, CI slot | — | — | — | — |
 | 6 BachelorHouse migration | — | — | — | — |
