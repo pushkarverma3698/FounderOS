@@ -193,9 +193,9 @@ Repo facts checked 2026-10-31: neither `claude-agent-setup` (public, `main` unpr
 | Step | Branch | PR | Proven | Next |
 |---|---|---|---|---|
 | 0 Plan committed | founderos `docs/tracker-first-routine` | (this PR) | — | step 1 |
-| 1 `tracker` tool | claude-agent-setup `feat/tracker` | — | CI green (run 41215697428); 16 unit tests + 4 old suites exit 0, re-run by lead; live CAS on a private scratch repo: two writers, 6 forced 409 retries, both rows correct; takeover → old holder `check` exit 5 | fixing: 6h lease vs claim-branch 12h resume window (deadlock 6-12h), reuse an existing worktree; live same-row race, sync, reconcile, done, release |
-| 2 Update fix | — | — | — | — |
-| 3 `routine-new` | claude-agent-setup `feat/routine-config` | — | — | builder running; real run on throwaway `routine-sandbox-1031`, timer disabled after |
+| 1 `tracker` tool | claude-agent-setup `feat/tracker` (head 3608410) | — | CI green on 3608410 (run 41216283173). Builder report, not yet re-run by lead: 18 unit tests pass; fixes for the 6-12h deadlock (resume passes `CLAIM_HOURS=LEASE_HOURS`), worktree reuse and one-line block text, each with a test that fails on the old code; live on scratch repo: same-row race (same and different slug, loser exits 3, no orphan branch), sync Closes/Part of, leftover-first exit 4, reconcile of an orphan branch, done, release (empty and with work), 6-12h takeover (claim commit back-dated) | lead: read diff f0d0bee..3608410, re-run `python3 -W error::ResourceWarning routines/ready/test_tracker.py -v`, pr-adversary, PR to main, merge on green, install on VPS |
+| 2 Update fix | claude-agent-setup `fix/bgd-wrapper` (claim 8d8ce21) | — | Harness ($0, isolated): DISABLE_AUTOUPDATER=1 alone fails (worker killed on launcher swap, same as base); `claude update` moves the launcher even with it set; wrapper loop as MainPID survives a swap and `kill -9` of the supervisor (NRestarts=0). Brain bug 6d8bc53d | builder running: wrapper in `claude-bgd`, DISABLE_AUTOUPDATER=1 in `claude-profile-env`, delete `claude-bgd-update` + its drop-in, test line in test.yml. Do NOT install until reviewed; restart claude-bgd@* once, only when no session is working |
+| 3 `routine-new` | claude-agent-setup `feat/routine-config` (claim e6f0abe) | — | — | builder running; real run on throwaway `pushkarverma3698/routine-sandbox-1031` (+ `-tracker`), timer disabled after; add its test line to test.yml |
 | 4 Lead prompt, skill, hooks, sweep, verdict | — | — | — | — |
 | 5 VPS scripts into git, cap, CI slot | — | — | — | — |
 | 6 BachelorHouse migration | — | — | — | — |
@@ -203,3 +203,14 @@ Repo facts checked 2026-10-31: neither `claude-agent-setup` (public, `main` unpr
 | Exit test | — | — | — | — |
 
 Live state at 15:20 UTC: phone session a8f339fa `idle` (main profile); e1dfd548 `failed`; bh-morning timer inactive; oplify-nightly next 11-01 09:30.
+
+### Handoff (second compaction, 2026-10-31 ~16:00 UTC)
+
+The lead session compacted twice, so per the founder's rule a new session continues from here.
+
+1. Builders still running in the old session when it stopped: step 2 (`fix/bgd-wrapper`) and step 3 (`feat/routine-config`). Their work lands on those branches in `~/Projects/claude-agent-setup/.claude/worktrees/{bgd-wrapper,routine-config}`. If a branch has only its claim commit, the builder died: re-dispatch from the step row above.
+2. Step 1 is built and CI-green but not lead-reviewed. Review it first (row 1, "Next").
+3. Open decision for the founder: `claude-remote-hooks/token-guard.py:280` in the public repo names a private repo's task file (pre-existing on `main`). Proposed fix: make the message generic.
+4. Cleanup owed: `ssh founderos-vps 'rm -r /tmp/x-cas /tmp/x-aud'`; scratch repo `pushkarverma3698/tracker-cas-scratch` (private) holds test rows, branches and PRs #1-#2 and a host session id in its history; keep it private or delete it after step 1 merges.
+5. No Telegram step message sent yet; none of steps 1-7 is finished. HARD LIMITS in the original brief still apply (phone session a8f339fa, BH PRs #103/#106/#107/#108, no proof run while a run is live, real tracker untouched until step 6).
+
