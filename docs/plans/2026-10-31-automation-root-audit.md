@@ -204,13 +204,14 @@ Repo facts checked 2026-10-31: neither `claude-agent-setup` (public, `main` unpr
 
 Live state at 15:20 UTC: phone session a8f339fa `idle` (main profile); e1dfd548 `failed`; bh-morning timer inactive; oplify-nightly next 11-01 09:30.
 
-### Handoff (second compaction, 2026-10-31 ~16:00 UTC)
+### Handoff (lead compacted twice, 2026-10-31 ~16:30 UTC)
 
-The lead session compacted twice, so per the founder's rule a new session continues from here.
+The lead session compacted twice, so per the founder's rule a new Opus lead session continues from here. Start by reading this table and the original brief (parent session `local_d206b5af`).
 
-1. All three builders finished (rows 1-3). Merge order: step 1 first (it adds CI), then add the test lines for steps 2 and 3 to `.github/workflows/test.yml` on their branches.
-2. Step 1 is built and CI-green but not lead-reviewed. Review it first (row 1, "Next").
-3. Open decision for the founder: `claude-remote-hooks/token-guard.py:280` in the public repo names a private repo's task file (pre-existing on `main`). Proposed fix: make the message generic.
-4. Cleanup owed: `ssh founderos-vps 'rm -r /tmp/x-cas /tmp/x-aud'`; scratch repo `pushkarverma3698/tracker-cas-scratch` (private) holds test rows, branches and PRs #1-#2 and a host session id in its history; keep it private or delete it after step 1 merges.
-5. No Telegram step message sent yet; none of steps 1-7 is finished. HARD LIMITS in the original brief still apply (phone session a8f339fa, BH PRs #103/#106/#107/#108, no proof run while a run is live, real tracker untouched until step 6).
-
+1. Steps 1 and 2 are merged and installed (rows 1-2). Telegram step messages sent for both.
+2. Step 3 builder (Sonnet, background in the old lead session) is on `claude-agent-setup` `feat/routine-config`, worktree `~/Projects/claude-agent-setup/.claude/worktrees/routine-config`: merge `origin/main` in, resolve the `setup-claude-routines` conflict, add `- run: python3 routines/ready/test_routine_config.py` to `test.yml`, add a `PAUSED=1` conf key that keeps a routine's timer off, with tests; push and report CI. If its head is still f58bc27 when you start, run `agy-guard` and check for a live writer before redoing that brief. Then: review the diff, re-run the tests, `pr-adversary`, PR to `main`, merge on green, install.
+3. Do not run a full `setup-claude-routines` on the VPS until `bh-morning.conf` carries `PAUSED=1`: today it re-arms every timer whose conf exists, and `claude-routine@bh-morning.timer` must stay off until the exit test. Install by hand from `git archive origin/main` and `cmp`. The conf lives in the private overlay `~/Projects/scripts/ai-tools/agent-overlay`: check scripts PR #39 before touching it.
+4. Open founder decision: `claude-remote-hooks/token-guard.py:280` (public repo, already on `main`) names a private repo's task file. Proposed fix: make the message generic.
+5. Risk for step 6: `claim-branch` counts a squash-merged task branch as a holder (not an ancestor of the integration branch). Check BachelorHouse's merge method before migrating.
+6. Cleanup owed on the VPS: `rm -r /tmp/x-cas /tmp/x-aud /tmp/x-rn-1031 /tmp/tmp.Fcq3bmnZ21 /tmp/tmp.ljpcdN5JVo`; `/etc/claude-routines/sandbox.conf` and the sandbox timer drop-in. Scratch repo `pushkarverma3698/tracker-cas-scratch` (private) holds test history and a host session id: keep private or delete. `routine-sandbox-1031` and `-tracker` are left for the founder.
+7. Next after step 3: steps 4-7 and the exit test as in "Build order". HARD LIMITS in the original brief still apply (phone session a8f339fa / `work-a7`, BH PRs #103/#106/#107/#108, no proof run while a run is live, real tracker untouched until step 6).
