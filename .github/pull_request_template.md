@@ -5,6 +5,8 @@ Full checklist: docs/rules/CODE-REVIEW-CHECKLIST.md
 
 Moves: <!-- A (coding PRs) | B (status) | C (jobs) | D (model switch) | crash-fix — required during the 30-day freeze, see scripts/verify-pr-scope.ts -->
 
+Checked first: <!-- Required when the PR adds a code or script file (scripts/verify-pr-scope.ts): what you searched before building (repo grep, the framework or product's own features, open issues) and what you found. -->
+
 ## What & why
 
 <!-- One or two lines: what this changes and the problem it solves. -->

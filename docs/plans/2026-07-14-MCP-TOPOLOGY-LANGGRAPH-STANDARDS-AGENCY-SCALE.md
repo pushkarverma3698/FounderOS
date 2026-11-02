@@ -1,6 +1,6 @@
 # Multi-Agent OS Architecture Pass — MCP Topology, LangGraph Standards, Agency Scale
 
-**Date:** 2026-07-14 · **Status:** Proposed (specification — no code changes in this PR)
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 **Scope:** (1) RAG audit + Mac↔VPS MCP network topology, (2) LangGraph.js layer standards and
 design rules, (3) agency automation and agent-workspace architecture.
 

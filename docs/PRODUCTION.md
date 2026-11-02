@@ -84,7 +84,7 @@ Per-run caps are enforced **before the run completes** via `BudgetGuardCallback`
 | `RUN_BUDGET_USD` | `0.50` | Max USD per single office run |
 | `RUN_BUDGET_TOKENS` | `50000` | Max tokens per single office run |
 | `BUDGET_DAILY_USD` | `5.0` | Daily spend reference cap |
-| `OFFICE_RECURSION_LIMIT` | `40` | Max supervisor/sub-agent steps before abort |
+| `OFFICE_RECURSION_LIMIT` | `150` | Max supervisor/sub-agent steps before abort |
 
 Pricing table lives in `src/infra/budget.ts` (`MODEL_COSTS`) — update when a
 provider changes rates.

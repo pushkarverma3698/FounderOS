@@ -1,6 +1,6 @@
 # ADR-042: Multi-Business Parameterization (bounded, not SaaS)
 
-**Status:** Accepted · **Implemented** 2026-06-27
+**Status:** Archived — multi-business kernel parameterization deleted; 7 of 7 paths checked partly dead; see tag archive/founderos-v3 (2026-10-27).
 **Builds on:** ADR-036 (account registry — per-company credential resolution), ADR-021 (cacheable prefix / context isolation)
 **Scope:** Phase 4 of the Production-Grade 1.0 program.
 

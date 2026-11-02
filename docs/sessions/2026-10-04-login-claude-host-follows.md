@@ -1,5 +1,7 @@
 # 2026-10-04 — /login claude, step 2: the server's own login follows the token
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 Read the prod logs after #864 shipped (deployed 15:19 UTC). The founder ran `/login claude <email>` at 15:22 and said the problem persisted. It had not failed. Both token files (mtime 15:22:43) hold a token in org `1c2fa9ef…`, the founder's chosen account. The reply named the only email the bot knows, which belongs to the stale host login (`942d106e…`), so it read as "still the old account".
 

@@ -15,6 +15,7 @@ import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
 import { geminiThinkingConfig } from "../core/gemini-thinking.js";
+import { modelMaxOutputTokens } from "../core/model-output-cap.js"; // AG-050: every model gets an output cap
 import { missingCredentialReason, noteWorkerModelChoice } from "./model-truth.js";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
@@ -39,12 +40,11 @@ export const DEFAULT_AGENT_MODEL = "google-genai:gemini-3.8-flash";
 const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
   "google/gemini-2.5-flash-preview-05-20:free": "gemini-3.5-flash-lite",
-  "gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
-  "gemini-2.0-flash": "gemini-3.8-flash",
-  "google/gemini-2.5-flash": "gemini-3.8-flash",
-  "gemini-2.5-flash": "gemini-3.8-flash",
-  "google/gemini-flash-latest": "gemini-3.8-flash",
-  "gemini-flash-latest": "gemini-3.8-flash",
+  "gemini-2.5-flash-preview-05-20": "gemini-3.8-flash", "gemini-2.0-flash": "gemini-3.8-flash",
+  "google/gemini-2.5-flash": "gemini-3.8-flash", "gemini-2.5-flash": "gemini-3.8-flash",
+  "google/gemini-flash-latest": "gemini-3.8-flash", "gemini-flash-latest": "gemini-3.8-flash",
+  "deepseek-flash": "deepseek/deepseek-v4.1-flash", "deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+  "deepseek/deepseek-v1-4.1-flash": "deepseek/deepseek-v4.1-flash",
   // 2026-08-27: dropped the OpenRouter free-tier dead-slug entries that used
   // to live here (meta-llama/llama-3.3-70b-instruct:free,
   // qwen/qwen3-next-80b-a3b-instruct:free, etc.). They all pointed at
@@ -161,10 +161,12 @@ export function isModelFallbackError(err: unknown): boolean {
   return httpStatusOf(err) === 404;
 }
 
+export const shouldEngageFallback = (err: unknown): boolean => isModelFallbackError(err) || isQuotaExhaustedError(err); // + credit 402: free fallback (prod 2026-10-08)
 export function isQuotaExhaustedError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
   return (
+    httpStatusOf(err) === 402 ||
     /credits?\s*(are\s*)?depleted/.test(msg) ||
     /exceeded your current quota/.test(msg) ||
     /quota.*exceeded/.test(msg) ||
@@ -316,7 +318,7 @@ function buildModel(
     return new ChatVertexAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxOutputTokens: modelMaxOutputTokens(),
       authOptions: { keyFilename: credsPath, projectId: project },
       location: process.env["GOOGLE_CLOUD_LOCATION"]?.trim() || "us-central1",
     });
@@ -332,9 +334,8 @@ function buildModel(
       apiKey,
       model: parsed.model,
       temperature,
-      maxRetries: 2,
-      // LOW unless GEMINI_THINKING_LEVEL says otherwise — see core/gemini-thinking.ts.
-      thinkingConfig: geminiThinkingConfig(),
+      maxRetries: 2, maxOutputTokens: modelMaxOutputTokens(),
+      thinkingConfig: geminiThinkingConfig(), // LOW unless GEMINI_THINKING_LEVEL says otherwise
     });
   }
 
@@ -346,7 +347,7 @@ function buildModel(
     return new ChatAnthropic({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       apiKey: process.env["ANTHROPIC_API_KEY"],
     });
   }
@@ -359,7 +360,7 @@ function buildModel(
     return new ChatOpenAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       apiKey: apiKey || "missing-openrouter-key",
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
     });
@@ -374,7 +375,7 @@ function buildModel(
     return new ChatOpenAI({
       model: parsed.model,
       temperature,
-      maxRetries: 2,
+      maxRetries: 2, maxTokens: modelMaxOutputTokens(),
       // A local proxy authenticates by being local; the SDK still demands a value.
       apiKey: process.env["OMNIROUTER_API_KEY"] || "omnirouter-local",
       configuration: { baseURL: process.env["OMNIROUTER_BASE_URL"] || "http://127.0.0.1:20128/v1" },
@@ -385,7 +386,7 @@ function buildModel(
   return new ChatOpenAI({
     model: parsed.model,
     temperature,
-    maxRetries: 2,
+    maxRetries: 2, maxTokens: modelMaxOutputTokens(),
     ...(process.env["OPENAI_API_KEY"] ? { apiKey: process.env["OPENAI_API_KEY"] } : {}),
   });
 }

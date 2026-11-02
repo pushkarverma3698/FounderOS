@@ -1,5 +1,7 @@
 # 2026-10-03 — Switchable coding CLI (Claude Code ⇄ Antigravity)
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 Built the engine switch at Full depth. The founder can hand a Telegram task to a named coding CLI or set
@@ -46,6 +48,6 @@ Decisions worth keeping:
 
 - Claude's success path on the VPS: needs the founder's token (`claude setup-token`).
 - Live Telegram run (`/claude` → card → issue → daemon → PR) on a real Oplify task.
-- `engine:agy` and `engine:claude` labels on the 4 `DEFAULT_REPOS` after merge.
+- `engine:agy` and `engine:claude` labels on the 4 dispatch repos after merge.
 - Planner prompt and `capabilities.ts` still describe dispatch as Antigravity-only.
 - `down-state` "never puts a literal secret on any command line" fails on this Mac; unchanged file and test, not run on base.

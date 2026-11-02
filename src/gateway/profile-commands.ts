@@ -16,23 +16,32 @@
  * and his own contact details.
  */
 
-import type { Context } from "grammy";
+import type { Context, InlineKeyboard } from "grammy";
+import { profileEditorKeyboard } from "./profile-editor-link.js";
 import {
   applyProfilePathFor,
-  parseApplyProfile,
   readApplyProfile,
   renderApplyProfile,
   setProfileField,
-  writeApplyProfile,
 } from "../tools/jobhunt/apply-profile.js";
+import {
+  buildDefaultDossierMarkdown,
+  candidateDossierPathFor,
+  readCandidateDossier,
+  recordLearnedAnswer,
+  writeCandidateDossier,
+} from "../tools/jobhunt/candidate-dossier.js";
+import { setProfilePath } from "../tools/jobhunt/answer-store.js";
 import { childLogger } from "./../infra/logger.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
 
 const log = childLogger({ module: "gateway:profile-commands" });
 
 export type ProfileCommand =
   | { readonly kind: "show" }
+  | { readonly kind: "doc" }
+  | { readonly kind: "remember"; readonly question: string; readonly answer: string }
   | { readonly kind: "set"; readonly path: string; readonly value: string }
   | { readonly kind: "usage"; readonly reason: string };
 
@@ -49,7 +58,23 @@ export function parseProfileCommand(raw: string): ProfileCommand {
   if (trimmed.length === 0) return { kind: "show" };
 
   const [verb, ...rest] = trimmed.split(/\s+/);
-  if (verb?.toLowerCase() !== "set") {
+  const lowerVerb = verb?.toLowerCase();
+  if (lowerVerb === "doc" || lowerVerb === "dossier") {
+    return { kind: "doc" };
+  }
+  if (lowerVerb === "remember" || lowerVerb === "qa") {
+    const afterVerb = trimmed.slice(trimmed.toLowerCase().indexOf(lowerVerb) + lowerVerb.length).trim();
+    const eqIdx = afterVerb.indexOf("=");
+    if (eqIdx <= 0) {
+      return { kind: "usage", reason: "`remember` needs `question = answer`." };
+    }
+    const question = afterVerb.slice(0, eqIdx).trim();
+    const answer = afterVerb.slice(eqIdx + 1).trim();
+    return question.length > 0 && answer.length > 0
+      ? { kind: "remember", question, answer }
+      : { kind: "usage", reason: "`remember` needs both a question and an answer separated by `=`." };
+  }
+  if (lowerVerb !== "set") {
     return { kind: "usage", reason: `I don't know "${verb}".` };
   }
   if (rest.length < 2) {
@@ -70,17 +95,25 @@ export function parseProfileCommand(raw: string): ProfileCommand {
 
 const USAGE =
   "<b>/profile</b> — show what every application form gets filled from.\n" +
+  "<b>/profile doc</b> — inspect or initialize the candidate's Reference Dossier &amp; learned Q&amp;A bank.\n" +
+  "<b>/profile remember &lt;question&gt; = &lt;answer&gt;</b> — teach a form answer once.\n" +
   "<b>/profile set &lt;field&gt; &lt;value&gt;</b> — change one field.\n\n" +
-  "With a second candidate registered, name whose: <code>/profile wife</code>, " +
-  "<code>/profile wife set phone +31 6 12345678</code>.\n\n" +
+  "With a second candidate registered, name whose: <code>/profile tashi doc</code>, " +
+  "<code>/profile tashi remember Notice period = Immediate</code>.\n\n" +
   "Examples:\n" +
   "<code>/profile set phone +31 6 12345678</code>\n" +
-  "<code>/profile set answers.years_experience 4</code>\n" +
+  "<code>/profile remember Expected salary = 65000 EUR</code>\n" +
   "<code>/profile set answers.work_authorization requires-sponsorship</code>";
 
-/** `/profile`, `/profile set <field> <value>`, and `/profile <who> [set <field> <value>]`. */
+/** The "Edit answers" web_app button, or nothing (group chat, someone else's profile, no https link base). */
+function editorMarkup(ctx: Context, profileId: string): { reply_markup?: InlineKeyboard } {
+  const kb = profileEditorKeyboard(ctx.chat?.id, ctx.from?.id, profileId);
+  return kb ? { reply_markup: kb } : {};
+}
+
+/** `/profile`, `/profile doc`, `/profile remember Q = A`, `/profile set <field> <value>`. */
 export async function handleProfile(ctx: Context): Promise<void> {
-  const arg = resolveProfileArg(ctx.match?.toString() ?? "", ["set"]);
+  const arg = resolveProfileArg(ctx.match?.toString() ?? "", ["set", "doc", "dossier", "remember", "qa"]);
   if (isProfileArgMiss(arg)) {
     await ctx.reply(safeHtml(profileMissMessage(arg)));
     return;
@@ -97,6 +130,51 @@ export async function handleProfile(ctx: Context): Promise<void> {
 
   const current = await readApplyProfile(path);
 
+  if (command.kind === "doc") {
+    const docPath = candidateDossierPathFor(arg.profile.id);
+    let dossier = await readCandidateDossier(arg.profile.id);
+    if (!dossier && current.ok) {
+      const seed = buildDefaultDossierMarkdown(current.profile);
+      await writeCandidateDossier(arg.profile.id, seed).catch(
+        // allow-failopen: read-only preview still works if disk is read-only in tests.
+        () => undefined,
+      );
+      dossier = await readCandidateDossier(arg.profile.id);
+    }
+    const bank = {
+      ...(dossier?.qaPairs ?? {}),
+      ...(current.ok ? (current.profile.question_bank ?? {}) : {}),
+    };
+    const qaEntries = Object.entries(bank);
+    const qaPreview =
+      qaEntries.length > 0
+        ? qaEntries
+            .slice(0, 10)
+            .map(([k, v]) => `• <code>${safeHtml(k)}</code> → ${safeHtml(String(v))}`)
+            .join("\n")
+        : "<i>None recorded yet — answers you give during /apply are saved here automatically.</i>";
+    await ctx.reply(
+      `📄 <b>${safeHtml(arg.profile.candidateName)} — Reference Dossier</b>\n` +
+        `File: <code>${safeHtml(docPath)}</code>\n` +
+        `Structured facts: <b>${Object.keys(dossier?.facts ?? {}).length}</b> · Learned Q&amp;A: <b>${qaEntries.length}</b>\n\n` +
+        `<b>Learned Q&amp;A Bank</b>\n${qaPreview}\n\n` +
+        `<i>Add more anytime with:</i> <code>/profile ${arg.explicit ? "tashi " : ""}remember Question = Answer</code>`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  if (command.kind === "remember") {
+    await recordLearnedAnswer(arg.profile.id, command.question, command.answer);
+    log.info({ profileId: arg.profile.id, question: command.question }, "Recorded learned Q&A via /profile remember");
+    await ctx.reply(
+      `💾 Saved to ${safeHtml(arg.profile.candidateName)}'s dossier &amp; question bank:\n` +
+        `<b>${safeHtml(command.question)}</b> → <code>${safeHtml(command.answer)}</code>`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
   if (command.kind === "show") {
     await ctx.reply(
       current.ok
@@ -104,7 +182,7 @@ export async function handleProfile(ctx: Context): Promise<void> {
         : `No usable ${who}apply profile — ${safeHtml(current.reason)}.\n\n` +
             `Nothing can fill a form until this exists. Set the four an ATS always asks for:\n` +
             `<code>/profile set first_name …</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>.`,
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...editorMarkup(ctx, arg.profile.id) },
     );
     return;
   }
@@ -129,22 +207,18 @@ export async function handleProfile(ctx: Context): Promise<void> {
     });
     return;
   }
-
-  // RE-VALIDATED BEFORE IT IS WRITTEN. `/profile set email nonsense` must fail
-  // in Telegram, where he can retype it, rather than on a form three days later.
-  const revalidated = parseApplyProfile(JSON.stringify(edited.next));
-  if (!revalidated.ok) {
-    await ctx.reply(
-      `That would break the profile — ${safeHtml(revalidated.reason)}. Nothing was changed.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-
+  // Saved through the answer store: validated, backed up, written atomically with the dossier Core Facts
+  // in step (a profile-only edit of salary or notice period changed nothing a form would read).
+  // `/profile set email nonsense` must fail here, where he can retype it, rather than on a form three days later.
+  let saved: Awaited<ReturnType<typeof setProfilePath>>;
   try {
-    await writeApplyProfile(edited.next, path);
+    saved = await setProfilePath(arg.profile.id, command.path, command.value);
   } catch (err) {
     await ctx.reply(`Couldn't save the profile: ${safeHtml((err as Error).message)}. Nothing changed.`);
+    return;
+  }
+  if (!saved.ok) {
+    await ctx.reply(`That would break the profile — ${safeHtml(saved.reason)}. Nothing was changed.`, { parse_mode: "HTML" });
     return;
   }
 

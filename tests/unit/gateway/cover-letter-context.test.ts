@@ -10,6 +10,12 @@ describe("founderContextFor", () => {
     expect(founderContextFor(DEFAULT_PROFILE_ID)).toContain("guesthouse");
   });
 
+  it("states the partner permit the founder confirmed on 2026-10-18, never a sponsored permit", () => {
+    const ctx = founderContextFor(DEFAULT_PROFILE_ID)!;
+    expect(ctx).toContain("partner permit");
+    expect(ctx).not.toMatch(/highly skilled|sponsor|IND /i);
+  });
+
   it("gives every other profile none, so her letter never carries his story", () => {
     expect(founderContextFor("wife-nl-finance")).toBeUndefined();
     expect(founderContextFor("anyone-else")).toBeUndefined();

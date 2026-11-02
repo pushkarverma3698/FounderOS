@@ -1,5 +1,7 @@
 # ADR-028 — Manager has no tools (CrewAI hierarchical rule)
 
+**Status:** Archived — manager hierarchy deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-16
 - **Status:** Accepted
 - **Branch:** `cursor/hierarchy-manager-pattern-7ecf`

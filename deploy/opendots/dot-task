@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# dot-task: the app's scheduled tasks from a shell, on the host or inside any Dot's computer.
+# The app runs one task at a time, and a Dot's own turn is one, so a run requested from inside a turn starts only
+# after that turn ends: request it, report the id, and read its answer later with `show` (never wait in the turn).
+set -euo pipefail
+
+usage() {
+  cat <<'EOF' >&2
+Usage:
+  dot-task list                                          List all tasks
+  dot-task create "<prompt>" [--interval <sec>] [--thread <id>]  Create a task
+  dot-task show <task-id>                                Status, interval and the last run's answer
+  dot-task run <task-id>                                 Queue a run (starts after the current turn ends)
+  dot-task pause <task-id>                               Pause task
+  dot-task cancel <task-id>                              Cancel task
+EOF
+  exit 2
+}
+
+# Resolve OpenDots API URL
+if [[ -n "${OPENDOTS_API:-}" ]]; then
+  BASE_URL="${OPENDOTS_API%/api}"
+elif curl -fsS --connect-timeout 1 http://app:4310/health >/dev/null 2>&1; then
+  BASE_URL="http://app:4310"
+else
+  BASE_URL="http://127.0.0.1:4310"
+fi
+
+# Resolve Owner Token
+TOKEN="${OPENDOTS_TOKEN:-}"
+if [[ -z "$TOKEN" && -f /workspace/.opendots-token ]]; then
+  TOKEN=$(head -n 1 /workspace/.opendots-token | tr -d '[:space:]')
+fi
+if [[ -z "$TOKEN" && -f /opt/opendots/app/.env ]]; then
+  TOKEN=$(grep '^OWNER_TOKEN=' /opt/opendots/app/.env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)
+fi
+
+api() {
+  if [[ -z "$TOKEN" ]]; then
+    echo "dot-task: OWNER_TOKEN not found in env, /workspace/.opendots-token, or /opt/opendots/app/.env" >&2
+    exit 1
+  fi
+  curl -fsS -X "$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    "$BASE_URL/api$2" ${3:+--data "$3"}
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  list)
+    res=$(api GET /state)
+    echo -e "ID\tSTATUS\tINTERVAL\tPROMPT"
+    echo "$res" | jq -r '.tasks[] | "\(.id)\t\(.status)\t\(if .intervalSeconds then "\(.intervalSeconds)s" else "manual" end)\t\(.prompt | gsub("\n"; " ") | .[0:70])"'
+    ;;
+  create)
+    prompt="${1:-}"
+    [[ -n "$prompt" ]] || usage
+    shift || true
+    interval="null"
+    thread="null"
+    while (($#)); do
+      case "$1" in
+        --interval) interval="$2"; shift 2 ;;
+        --thread) thread="\"$2\""; shift 2 ;;
+        *) usage ;;
+      esac
+    done
+    payload=$(jq -nc --arg p "$prompt" --argjson i "$interval" --argjson t "$thread" \
+      '{prompt: $p} + (if $i != null then {intervalSeconds: $i} else {} end) + (if $t != null then {threadId: $t} else {} end)')
+    api POST /tasks "$payload"
+    echo ""
+    ;;
+  run|pause|cancel)
+    id="${1:-}"
+    [[ -n "$id" ]] || usage
+    # The API answers with the whole task record; the confirmation line is all anyone needs. A refusal still exits non-zero.
+    api POST "/tasks/$id/actions" "$(jq -nc --arg a "$cmd" '{action: $a}')" >/dev/null
+    echo "task $id: $cmd requested"
+    ;;
+  show)
+    id="${1:-}"
+    [[ -n "$id" ]] || usage
+    # GET /api/tasks/:id lists runs newest first.
+    api GET "/tasks/$id" | jq -r '.task as $t | (.runs // [] | first) as $r |
+      "\($t.id // "")\t\($t.status)\t\(if $t.intervalSeconds then "every \($t.intervalSeconds)s" else "manual" end)",
+      (if $r == null then "no run yet"
+       else "last run: \($r.status)" + (if $r.error then " - \($r.error)" else "" end), ($r.result.text // empty) end)'
+    ;;
+  *)
+    usage
+    ;;
+esac

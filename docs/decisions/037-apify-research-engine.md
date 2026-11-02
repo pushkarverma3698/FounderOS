@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-06-24 · **Phase:** D (Revenue Flywheel)
 
+> Update 2026-10-27: `src/infra/research-memory.ts` and the research tools wiring (capabilities, prompts, graph) were removed 2026-10-10 with the kernel. `src/tools/apify.ts` remains; the `research_cache` table is still defined in `src/db/schema.ts` but nothing writes to it.
+
 ## Context
 The `research` department could only *search* the web (Gemini grounding → DuckDuckGo
 fallback) — it saw titles + ~300-char snippets, never full page content. There was no

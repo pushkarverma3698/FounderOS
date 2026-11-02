@@ -1,7 +1,7 @@
 /**
  * FounderOS — which Google mailboxes exist
  * ========================================
- * The three built-in accounts (src/core/accounts.ts) plus any the founder added from Telegram
+ * The one built-in account (`personal`, src/core/accounts.ts) plus any the founder added from Telegram
  * with `/login google add <name>`. An added mailbox is nothing but its signed-in credentials file
  * at `~/.founderos/accounts/<name>/gws/credentials.json`: no DB row, no config. Signing it out
  * (`/login google remove <name>`) deletes that folder and the name is gone everywhere.
@@ -11,7 +11,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { ACCOUNT_KEYS, isAccountKey } from "../core/accounts.js";
+import { GOOGLE_BUILTIN_ACCOUNT, isBuiltinGoogleAccount } from "../core/accounts.js";
 
 export interface MailboxFs {
   home(): string;
@@ -47,17 +47,17 @@ export function mailboxProfileDir(name: string, fs: MailboxFs = realFs): string 
   return `${fs.home()}/.founderos/accounts/${name}/gws`;
 }
 
-/** Built-in accounts first, then added ones (signed in at least once), alphabetical. */
+/** The built-in account first, then added ones (turicks and naggar count as added once signed in), alphabetical. */
 export function listGoogleMailboxes(fs: MailboxFs = realFs): string[] {
   const added = fs
     .listDirs(`${fs.home()}/.founderos/accounts`)
-    .filter((n) => !isAccountKey(n) && !mailboxNameProblem(n) && fs.exists(`${mailboxProfileDir(n, fs)}/credentials.json`))
+    .filter((n) => !isBuiltinGoogleAccount(n) && !mailboxNameProblem(n) && fs.exists(`${mailboxProfileDir(n, fs)}/credentials.json`))
     .sort();
-  return [...ACCOUNT_KEYS, ...added];
+  return [GOOGLE_BUILTIN_ACCOUNT, ...added];
 }
 
 export function isAddedMailbox(name: string, fs: MailboxFs = realFs): boolean {
-  return !isAccountKey(name) && listGoogleMailboxes(fs).includes(name);
+  return !isBuiltinGoogleAccount(name) && listGoogleMailboxes(fs).includes(name);
 }
 
 /**
@@ -67,4 +67,19 @@ export function isAddedMailbox(name: string, fs: MailboxFs = realFs): boolean {
 export function addedMailboxDir(name: string, fs: MailboxFs = realFs): { dir: string } | { error: string } {
   if (isAddedMailbox(name, fs)) return { dir: mailboxProfileDir(name, fs) };
   return { error: `No Google account named "${name}". Known: ${listGoogleMailboxes(fs).join(", ")}. Add one with /login google add <name>.` };
+}
+
+/** A word that says "this mailbox" when it follows a mailbox name: "work inbox", "personal email". */
+const MAIL_WORD = "(?:inbox|mailbox|mails?|e-?mails?|gmail|account)";
+
+/**
+ * The one mailbox the founder's message names next to a mail word ("my work inbox" → "work"), or
+ * undefined when it names none or two different ones. read_emails puts this above the model's
+ * account argument: on 2026-10-08 "my work inbox" was read from turicks because the model chose.
+ */
+export function mailboxNamedIn(text: string, mailboxes: readonly string[]): string | undefined {
+  const named = new Set(
+    mailboxes.filter((name) => new RegExp(`(?<![\\w-])${name}\\s+${MAIL_WORD}\\b`, "i").test(text)),
+  );
+  return named.size === 1 ? [...named][0] : undefined;
 }

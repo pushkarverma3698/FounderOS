@@ -1,9 +1,7 @@
 ---
 paths:
   - "src/agents/**"
-  - "src/gateway/kernel-boot.ts"
   - "scripts/apply-prod-env-overrides.sh"
-  - "src/eval/**"
 ---
 
 # Model policy

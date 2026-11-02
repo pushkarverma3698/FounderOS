@@ -1,7 +1,7 @@
 # SCALE Gate — Deferred FounderOS Builds
 
 > **Type:** strategy · **Status:** Deferred until $5K+ banked OR first paying client  
-> **ADR:** [032-ai-native-studio-repositioning.md](../decisions/032-ai-native-studio-repositioning.md)
+> **ADR:** [033-ai-native-studio-repositioning.md](../decisions/033-ai-native-studio-repositioning.md)
 
 Captured build list — **do not implement until SCALE gate triggers.**
 
@@ -20,7 +20,7 @@ Captured build list — **do not implement until SCALE gate triggers.**
 
 **Wiring (when built):**
 - `src/tools/gen-asset.ts` → test → `agent-tools/marketing.ts` wrapper
-- Add to `marketing` + `engineering` in `capabilities.ts`
+- Wire into the jobs pipeline caller (`capabilities.ts` and `agent-tools/marketing.ts` were removed 2026-10-10)
 - HITL-gate if external API cost > threshold
 
 **Triple-filter:** Outcome (faster showcases) · Hiring signal (multimodal tools) · Reuse (existing tool pattern)

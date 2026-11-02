@@ -1,5 +1,7 @@
 # Task 3 — Wire the telemetry analyzers into the acting loop
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Date:** 2026-08-13 · **Branch:** `claude/founderos-remediation-plan-st8oal`
 **Prerequisites:** Task 1 (occurrence axis, PR #472) and Task 2 (findings persistence, PR #471), both merged to `main` at `d9d0a67`.
 

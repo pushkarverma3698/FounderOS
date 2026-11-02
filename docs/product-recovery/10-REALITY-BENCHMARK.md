@@ -1,5 +1,7 @@
 # Reality Benchmark
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 Replaces *"did the supervisor route correctly?"* with *"did the founder get the thing?"*
 
 The existing golden eval scores routing / tool choice / HITL and reports **29% overall** while

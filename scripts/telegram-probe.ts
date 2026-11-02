@@ -18,8 +18,8 @@
  * founder has already walked away from. Silence is a result too: zero replies is
  * reported as a FAILURE with the elapsed wait, never as a clean exit.
  *
- * Requires TELEGRAM_TESTER_API_ID / _API_HASH / _SESSION (see
- * `scripts/telegram-tester.ts login`). Costs one real turn of model spend, so it
+ * Requires TELEGRAM_TESTER_API_ID / _API_HASH / _SESSION (mint steps: header of
+ * `scripts/lib/mtproto.ts`). Costs one real turn of model spend, so it
  * belongs in the live-verification zone — after the unit tests are green, not
  * during the loop (CLAUDE.md § "Zero paid calls in the dev loop").
  *
@@ -27,22 +27,10 @@
  */
 
 import { connect, probePeer, sleep, POLL_INTERVAL_MS, assertMtprotoConfigured } from "./lib/mtproto.js";
+// Progress chatter ("🤔 Working on it…", "On it: …", "Step 2 of 3: …") is not the answer: see lib/bot-progress.ts.
+import { isProgressChatter } from "./lib/bot-progress.js";
 
 const DEFAULT_WAIT_S = 360;
-
-/**
- * Progress chatter the gateway streams while a turn runs (kernel-progress.ts).
- * These are NOT the answer, and counting one as the answer is a false green:
- * the first run of this probe reported "OK, 1 reply in 9s" for a turn that
- * actually took 200s, because "🤔 Working on it…" arrived and the collector
- * went quiet. A probe that exists to catch false greens must not emit one.
- */
-const TRANSIENT_PREFIXES = ["🤔", "🔧", "✍️", "🔍", "📋", "⏳", "📝"];
-
-const isTransient = (text: string): boolean => {
-  const t = text.trimStart();
-  return t.length === 0 || TRANSIENT_PREFIXES.some((p) => t.startsWith(p));
-};
 
 async function main(): Promise<void> {
   const prompt = process.argv[2];
@@ -73,7 +61,7 @@ async function main(): Promise<void> {
       const text = String(msg.message ?? "");
       if (msg.id <= sent.id || msg.out || seen.has(msg.id)) continue;
       seen.add(msg.id);
-      if (isTransient(text)) {
+      if (isProgressChatter(text)) {
         console.log(`   · ${text.trim().slice(0, 70)}`);
         continue;
       }

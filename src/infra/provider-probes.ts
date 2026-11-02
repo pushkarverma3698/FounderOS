@@ -6,6 +6,7 @@
  */
 
 import { runGws } from "./gws-runner.js";
+import { getGoogleAccount } from "./account-registry.js";
 import {
   getCalendarBackend,
   getGmailBackend,
@@ -48,9 +49,26 @@ function check(status: ProviderStatus, detail: string): ProviderCheck {
   return { status, detail };
 }
 
-/** Probe gws: binary exists + auth/list smoke (maxResults 1). */
+/**
+ * The gws profile a plain "read my email" uses. Probing the host's default login instead sent a
+ * false "Google sign-in expired" on every deploy (prod 2026-10-09: that login's grant was dead while
+ * the default account read fine). Unresolvable (e.g. DB down at boot) → the host login, as before.
+ */
+async function defaultAccountProfile(): Promise<{ dir?: string; label: string }> {
+  try {
+    const { ctx, credentials } = await getGoogleAccount({ platform: "google" });
+    return { dir: credentials.gws_profile_dir, label: ctx.account_key };
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "Probe could not resolve the default Google account; probing the host login");
+    return { label: "host login" };
+  }
+}
+
+/** Probe gws: binary exists + auth/list smoke (maxResults 1), on the default account's profile. */
 export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Promise<ProviderCheck> {
-  const auth = await runGws(["auth", "status"], Math.min(timeoutMs, 5_000));
+  const profile = await defaultAccountProfile();
+  const opts = { gwsProfileDir: profile.dir };
+  const auth = await runGws(["auth", "status"], Math.min(timeoutMs, 5_000), opts);
   // "not installed" is gws-runner's ENOENT mapping (missing binary / empty GWS_BIN)
   // — an unconfigured host, not a failing provider.
   if (!auth.ok && (auth.error.includes("not found") || auth.error.includes("not installed"))) {
@@ -60,14 +78,15 @@ export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Pr
   const listed = await runGws(
     ["gmail", "users", "messages", "list", "--params", JSON.stringify({ userId: "me", maxResults: 1 })],
     timeoutMs,
+    opts,
   );
   if (listed.ok) {
-    return check("up", "gws gmail.users.messages.list OK");
+    return check("up", `gws gmail.users.messages.list OK (${profile.label})`);
   }
   if (auth.ok) {
-    return check("down", `gws authenticated but Gmail list failed: ${listed.error}`);
+    return check("down", `gws authenticated but Gmail list failed (${profile.label}): ${listed.error}`);
   }
-  return check("down", `gws not ready: ${listed.error}`);
+  return check("down", `gws not ready (${profile.label}): ${listed.error}`);
 }
 
 /** Probe googleapis: service-account + subject configured, then a 1-message list. */

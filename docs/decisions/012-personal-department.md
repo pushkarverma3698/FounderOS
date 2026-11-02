@@ -1,5 +1,7 @@
 # ADR-012: Personal Department (laptop operator) with HITL + path-guard
 
+**Status:** Archived — departments deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Status:** Accepted (2026-06-03)
 - **Context branch:** `feat/personal-department`
 

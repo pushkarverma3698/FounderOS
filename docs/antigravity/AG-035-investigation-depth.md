@@ -1,5 +1,7 @@
 # AG-035 — Investigation depth: read-only steps get room to find the answer
 
+> Superseded in part (2026-10-08): the caps are now 20 (read) and 10 (write), set by code from the step class; the planner's `max_tool_calls` is ignored and read-only tool narrowing was removed. The 15 and 6 below are the original design. See `src/kernel/step-budget.ts`.
+
 **Source:** [docs/plans/2026-10-07-understanding-plan.md](../plans/2026-10-07-understanding-plan.md) task 6.
 **Depends on:** nothing.
 **Branch:** `task/issue-<N>-investigation-depth`, cut from `origin/beta`. PR base: `beta`.

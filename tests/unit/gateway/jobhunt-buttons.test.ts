@@ -106,18 +106,16 @@ describe("markRowApplied", () => {
 });
 
 describe("handleJobCallback", () => {
-  const deps = { runKernelText: vi.fn() };
-
   it("passes through payloads that belong to another handler", async () => {
     const ctx = ctxFor("approve:abc");
-    expect(await handleJobCallback(ctx, deps)).toBe(false);
+    expect(await handleJobCallback(ctx)).toBe(false);
     expect(ctx.answerCallbackQuery).not.toHaveBeenCalled();
   });
 
   it("✅ I applied marks the row, spends the button and confirms", async () => {
     getApplicationById.mockResolvedValue(ROW);
     const ctx = ctxFor(`jh:a:${ID}`);
-    expect(await handleJobCallback(ctx, deps)).toBe(true);
+    expect(await handleJobCallback(ctx)).toBe(true);
     expect(updateApplicationStage).toHaveBeenCalledTimes(1);
     expect(ctx.editMessageReplyMarkup).toHaveBeenCalled();
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("Marked applied — Ockto"));
@@ -126,7 +124,7 @@ describe("handleJobCallback", () => {
   it("a double tap writes once", async () => {
     getApplicationById.mockResolvedValue({ ...ROW, stage: "applied" });
     const ctx = ctxFor(`jh:a:${ID}`);
-    await handleJobCallback(ctx, deps);
+    await handleJobCallback(ctx);
     expect(updateApplicationStage).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: "Already marked applied" });
   });
@@ -134,9 +132,9 @@ describe("handleJobCallback", () => {
   it("📝 Draft tailors for the ROW's candidate, not the chat's", async () => {
     getApplicationById.mockResolvedValue(ROW);
     const ctx = ctxFor(`jh:d:${ID}`);
-    await handleJobCallback(ctx, deps);
+    await handleJobCallback(ctx);
     expect(draftRow).toHaveBeenCalledTimes(1);
-    const [, row, , , profile] = draftRow.mock.calls[0] as [unknown, JobApplication, unknown, string, { id: string }];
+    const [, row, , profile] = draftRow.mock.calls[0] as [unknown, JobApplication, unknown, { id: string }];
     expect(row.id).toBe(ID);
     expect(profile.id).toBe("wife-nl-finance");
   });
@@ -144,7 +142,7 @@ describe("handleJobCallback", () => {
   it("says so when the role is gone rather than failing silently", async () => {
     getApplicationById.mockResolvedValue(null);
     const ctx = ctxFor(`jh:d:${ID}`);
-    await handleJobCallback(ctx, deps);
+    await handleJobCallback(ctx);
     expect(draftRow).not.toHaveBeenCalled();
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: "That role is no longer on file." });
   });

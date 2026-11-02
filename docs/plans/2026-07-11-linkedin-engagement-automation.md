@@ -1,7 +1,7 @@
 # LinkedIn Engagement Automation — Implementation Plan
 
 **Date:** 2026-07-11
-**Status:** DRAFT — plan for review (supersedes the deferred posting/engagement parts of ADR-009)
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 **Author:** engineering (architecture brainstorm)
 **Depends on:** ADR-009 (ban risk), ADR-029 (direct integrations), ADR-036 (account registry)
 

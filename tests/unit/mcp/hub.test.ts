@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,10 +66,10 @@ describe("hub — scope", () => {
 
   it("serves the brain only in brain scope, everything in all scope", async () => {
     const brain = (await (await connected("brain")).listTools()).tools.map((t) => t.name);
-    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug"]);
+    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug", "recent_memories"]);
     const all = (await (await connected("all")).listTools()).tools.map((t) => t.name);
     expect(all).toEqual([...brain, "gmail_search", "calendar_events", "list_connected_tools", "call_connected_tool"]);
-    expect(hubTools("all")).toHaveLength(9);
+    expect(hubTools("all")).toHaveLength(10);
   });
 
   it("enforces scope on calls, not only on the list", async () => {
@@ -177,7 +177,7 @@ describe("hub — Google reads never alert on Telegram", () => {
   });
 
   it("the bot's read path alerts (so the mock would see a send)", async () => {
-    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "turicks" });
+    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "personal" });
     expect(r.success).toBe(false);
     expect(r.error).toContain("re-authorization");
     expect(sendToChat).toHaveBeenCalledTimes(1);
@@ -186,8 +186,8 @@ describe("hub — Google reads never alert on Telegram", () => {
   it("the hub returns the same re-authorization error for mail and calendar, and sends nothing", async () => {
     const mail = await callGoogleTool("gmail_search", { query: "x" });
     expect(isError(mail)).toBe(true);
-    expect(text(mail)).toContain("## naggar\nError: Google account needs re-authorization");
-    const cal = await callGoogleTool("calendar_events", { account: "turicks" });
+    expect(text(mail)).toContain("Error: Google account needs re-authorization");
+    const cal = await callGoogleTool("calendar_events", { account: "personal" });
     expect(text(cal)).toContain("needs re-authorization");
     expect(sendToChat).not.toHaveBeenCalled();
   });
@@ -359,18 +359,53 @@ describe("hub — stdio entry points", () => {
   }
 
   it("hub.ts serves everything by default and the brain in HUB_SCOPE=brain", async () => {
-    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(9);
-    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(5);
+    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(10);
+    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(6);
   }, 60_000);
 
-  it("turicks-brain.ts still serves the five brain tools for configs that start it", async () => {
-    expect(await toolsOf("src/mcp/turicks-brain.ts")).toEqual([
-      "search_memory",
-      "get_memory",
-      "remember",
-      "save_decision",
-      "save_bug",
-    ]);
+  // A hub with an open bridge child never noticed its stdin close, so it outlived the
+  // laptop ssh session that started it. When that session ends, the hub must exit.
+  it("exits when its stdin closes, even with a connected server open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hub-eof-"));
+    writeFileSync(
+      join(dir, "mcp-bridge.json"),
+      JSON.stringify({
+        servers: {
+          echo: {
+            transport: "stdio",
+            command: process.execPath,
+            args: ["--import", "tsx/esm", join(REPO, "tests/fixtures/mcp-echo-server.ts")],
+            department: "research",
+          },
+        },
+      }),
+    );
+    const child = spawn(process.execPath, ["--import", "tsx/esm", join(REPO, "src/mcp/hub.ts")], {
+      cwd: REPO,
+      env: { ...env, MCP_BRIDGE_MANIFEST: join(dir, "mcp-bridge.json") },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    let out = "";
+    const echoed = new Promise<void>((resolve) =>
+      child.stdout.on("data", (d: Buffer) => {
+        out += d.toString();
+        if (out.includes("echo:hi")) resolve();
+      }),
+    );
+    const send = (m: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
+    send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    send({ method: "notifications/initialized" });
+    send({ id: 2, method: "tools/call", params: { name: "call_connected_tool", arguments: { server: "echo", tool: "echo", arguments: { text: "hi" } } } });
+    try {
+      await echoed;
+      child.stdin.end();
+      const code = await Promise.race([exited, new Promise<string>((r) => setTimeout(() => r("still running"), 15_000))]);
+      expect(code).toBe(0);
+    } finally {
+      child.kill("SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it("refuses to start with an unknown HUB_SCOPE", () => {

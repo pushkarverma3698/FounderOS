@@ -79,6 +79,27 @@ export function errText(reason: unknown): string {
 }
 
 /**
+ * brain_memories only: list each source doc once before any doc repeats, keeping rank order, so two chunks of one doc
+ * cannot push a different, relevant doc out of the top-k. Every hit is still returned (the repeats follow), so a
+ * query that matches one doc keeps its full top-k. Agent-written rows share the source "ide_mcp" but are separate
+ * memories, so each counts as its own doc.
+ */
+export function spreadAcrossSources(hits: RagHit[]): RagHit[] {
+  const seen = new Set<string>();
+  const first: RagHit[] = [];
+  const repeats: RagHit[] = [];
+  for (const h of hits) {
+    const key = !h.source || h.source === "ide_mcp" ? `row:${h.content}` : h.source;
+    if (seen.has(key)) repeats.push(h);
+    else {
+      seen.add(key);
+      first.push(h);
+    }
+  }
+  return [...first, ...repeats];
+}
+
+/**
  * Retrieve `topK` hits for `query` from `table`, fusing vector + keyword.
  * Never throws — every outcome is a typed result the tool can render.
  *
@@ -99,13 +120,13 @@ export async function hybridRagSearch(
   const recent = table === "brain_memories";
   const nowMs = (deps.now ?? Date.now)();
   const top = (hits: RagHit[]): RagHit[] =>
-    (recent ? orderWithRecency(rankScored(hits), nowMs) : hits).slice(0, topK);
+    (recent ? spreadAcrossSources(orderWithRecency(rankScored(hits), nowMs)) : hits).slice(0, topK);
 
   // Both signals available → fuse. (An empty corpus fuses to [] — not an error.)
   if (vec.status === "fulfilled" && kw.status === "fulfilled") {
     const fused = reciprocalRankFusion([vec.value, kw.value], (h) => h.content);
     // Weigh before cutting to topK, so a near-tied recent document can displace an old one at the boundary.
-    const hits = recent ? orderWithRecency(fused, nowMs) : fused.map((f) => f.item);
+    const hits = recent ? spreadAcrossSources(orderWithRecency(fused, nowMs)) : fused.map((f) => f.item);
     return { hits: hits.slice(0, topK), mode: "hybrid" };
   }
 

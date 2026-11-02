@@ -34,6 +34,7 @@ import { z } from "zod";
 import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataRoot } from "../../core/data-root.js";
+import { atomicWrite } from "./atomic-write.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 
 /**
@@ -70,6 +71,15 @@ const answersSchema = z
     notice_period_detail: z.string().optional(),
     needs_relocation: z.boolean().optional(),
     willing_to_relocate: z.boolean().optional(),
+    auto_consent: z.boolean().optional(),
+    current_company: z.string().optional(),
+    current_title: z.string().optional(),
+    highest_degree: z.string().optional(),
+    university: z.string().optional(),
+    github: z.string().optional(),
+    referral_source: z.string().optional(),
+    /** Voluntary EEO answers by category (`self-identification.ts`); a category not set is declined. */
+    self_identification: z.record(z.string()).optional(),
   })
   .partial({ work_authorization: true });
 
@@ -90,6 +100,8 @@ export const applyProfileSchema = z.object({
   default_resume: z.string().trim().optional(),
   resumes: z.record(z.string()).optional(),
   answers: answersSchema.optional(),
+  question_bank: z.record(z.string()).optional(),
+  dossier_path: z.string().trim().optional(),
 }).passthrough();
 
 export type ApplyProfile = z.infer<typeof applyProfileSchema>;
@@ -116,8 +128,9 @@ export const APPLY_PROFILE_PATH =
  * first one's name, email or resume paths.
  */
 export function applyProfilePathFor(profileId: string): string {
-  if (profileId === DEFAULT_PROFILE_ID) return APPLY_PROFILE_PATH;
-  return join(dirname(APPLY_PROFILE_PATH), `apply-profile-${profileId}.json`);
+  const base = process.env["APPLY_PROFILE_PATH"]?.trim() || APPLY_PROFILE_PATH;
+  if (profileId === DEFAULT_PROFILE_ID) return base;
+  return join(dirname(base), `apply-profile-${profileId}.json`);
 }
 
 export type ProfileRead =
@@ -267,5 +280,5 @@ export async function writeApplyProfile(
   raw: Record<string, unknown>,
   path: string = APPLY_PROFILE_PATH,
 ): Promise<void> {
-  await fs.writeFile(path, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
+  await atomicWrite(path, `${JSON.stringify(raw, null, 2)}\n`);
 }

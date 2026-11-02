@@ -41,6 +41,12 @@ const DEFAULT_TENANT = "turicks";
  */
 export const APPLYABLE_SECTIONS = ["do_today", "stretch", "standing"] as const;
 
+/**
+ * The sections the Mini App job list shows: the applyable ones, then `ask`. `ask` rows are still not part of
+ * the chat queue; the founder chooses to open one by hand, the same as `/apply <id>` does.
+ */
+export const HOME_SECTIONS = [...APPLYABLE_SECTIONS, "ask"] as const;
+
 /** How many screened rows the Log tab carries. Enough to audit, bounded so the write stays one call. */
 export const LOG_TAB_ROWS = 500;
 
@@ -54,11 +60,12 @@ export const LOG_TAB_ROWS = 500;
 export async function listApplyQueue(
   tenantId: string = DEFAULT_TENANT,
   profileId?: ProfileScope,
+  sections: readonly string[] = APPLYABLE_SECTIONS,
 ): Promise<JobApplication[]> {
   const db = getDb();
   const conditions = [
     eq(jobApplications.tenant_id, tenantId),
-    inArray(jobApplications.brief_section, [...APPLYABLE_SECTIONS]),
+    inArray(jobApplications.brief_section, [...sections]),
     isNull(jobApplications.applied_at),
     isNull(jobApplications.skipped_at),
   ];

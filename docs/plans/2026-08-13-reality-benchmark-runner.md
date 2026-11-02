@@ -1,5 +1,7 @@
 # Reality Benchmark runner — make real evidence cheaper than fake evidence
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Date:** 2026-08-13 · **Branch:** `claude/benchmark-runner`
 **Serves:** Task 0 of the self-improvement remediation plan, which gates Task 6.
 
