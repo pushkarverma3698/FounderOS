@@ -125,18 +125,18 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
     const genInfo = output.generations?.[0]?.[0]?.generationInfo as Record<string, unknown> | undefined;
     const { inputTokens, outputTokens } = tokenCountsOf(output);
 
-    // G6: use the actual model from the response when available — handles the
-    // fallback model case where AGENT_MODEL ≠ what was actually called. The
-    // model field location varies by provider (OpenAI, Gemini, Anthropic).
-    const actualModel =
-      (genInfo?.["model"] as string | undefined) ??
-      (llmOut?.["model_id"] as string | undefined) ??
-      (llmOut?.["model"] as string | undefined) ??
-      this.modelId;
-
     // Correlated by runId, NOT by async context — see COST_AGENT_METADATA_KEY.
     const attribution = runId === undefined ? undefined : this.pendingAttribution.get(runId);
     if (runId !== undefined) this.pendingAttribution.delete(runId);
+
+    // Which model answered: the name the response carries (OpenAI-compatible
+    // providers put it under `model_name`), else the model the STAGE was built
+    // to call (attribution.model), else the run-wide constructor id. That last
+    // one is AGENT_MODEL, so relying on it alone recorded the primary for every
+    // stage (AG-031: 311 prod rows, none naming the worker model).
+    const reported = (o: Record<string, unknown> | undefined): string | undefined =>
+      [o?.["model"], o?.["model_name"], o?.["model_id"]].find((v): v is string => typeof v === "string" && v.length > 0);
+    const actualModel = reported(genInfo) ?? reported(llmOut) ?? attribution?.model ?? this.modelId;
 
     this.tracker.accrue(inputTokens, outputTokens, actualModel);
     this.onAccrue?.({

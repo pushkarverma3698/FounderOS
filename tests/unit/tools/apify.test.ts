@@ -358,4 +358,24 @@ describe("crawlSite", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.source).toBe("fetch");
   });
+
+  it("never returns more than max_pages, even when the actor overshoots (prod 2026-10-08: 13 pages for max_pages=10)", async () => {
+    env.APIFY_TOKEN = "apify_test";
+    const items = Array.from({ length: 13 }, (_, i) => ({ url: `https://docs.x/${i}`, title: `P${i}`, markdown: "body" }));
+    mockFetch.mockResolvedValueOnce(jsonResponse(items));
+    const res = await crawlSite("https://docs.x", 10);
+    expect(res.ok && res.data.length).toBe(10);
+  });
+
+  it("stops at once when the turn's abort signal fires, and does not fall back to a fetch", async () => {
+    env.APIFY_TOKEN = "apify_test";
+    const ctl = new AbortController();
+    mockFetch.mockImplementationOnce((_url: string, init: { signal: AbortSignal }) =>
+      new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(new Error("aborted")))));
+    const pending = crawlSite("https://docs.x", 5, 120_000, ctl.signal);
+    ctl.abort();
+    const res = await pending;
+    expect(res.ok).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });

@@ -21,14 +21,15 @@
  * a one-shot text call does not have and does not need. This is the small half
  * of the same idea, living where `src/tools` and `src/agents` can both reach it.
  *
- * ENGAGEMENT RULE IS SHARED, deliberately: `isModelFallbackError` decides here
+ * ENGAGEMENT RULE IS SHARED, deliberately: `shouldEngageFallback` decides here
  * exactly as it decides in the kernel. 5xx/429/transport/404-retired fall
  * through; 401/403 fail LOUD, because the chain shares the primary's key and a
  * silent fallback would hide a dead key behind a slower success.
  */
 
 import { childLogger } from "../infra/logger.js";
-import { buildFallbackModels, getWorkerModel, isModelFallbackError } from "./model.js";
+import { buildFallbackModels, getWorkerModel, shouldEngageFallback } from "./model.js";
+import { getEffectiveWorkerModelId } from "./model-truth.js";
 import {
   BudgetGuardCallback,
   costAttributionMetadata,
@@ -146,7 +147,7 @@ export async function invokeWorkerWithFallbacks(
         // priced with DEFAULT_COST whenever a provider response carried no
         // model name of its own. Measured on prod 2026-08-25. Same class of
         // bug as jq's `//` not catching "" (2026-08-08).
-        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || "", costSink)],
+        callbacks: [new BudgetGuardCallback(createRunBudget(), getEffectiveWorkerModelId() ?? (process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || ""), costSink)],
       }
     : undefined;
 
@@ -159,7 +160,7 @@ export async function invokeWorkerWithFallbacks(
     // A TIMEOUT always falls through: a provider that never answers is exactly
     // the case the chain exists for, and `isModelFallbackError` cannot see it
     // because there is no status code on a promise that simply never settles.
-    if (!isTimeout(err) && !isModelFallbackError(err)) throw err;
+    if (!isTimeout(err) && !shouldEngageFallback(err)) throw err;
     primaryError = err;
   }
 

@@ -9,7 +9,7 @@
 
 import { InlineKeyboard } from "grammy";
 import type { SignalRow } from "../tools/jobhunt/gaps.js";
-import { safeHtml } from "./approval-card.js";
+import { safeHtml } from "./safe-html.js";
 
 const PREFIX = "jh:g:";
 /** Buttons under one report: the top of the list, not all of it. */

@@ -66,6 +66,7 @@ export async function runActorSync(
   actorId: string,
   input: Record<string, unknown>,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<ActorRun> {
   const token = env.APIFY_TOKEN;
   if (!token) return { ok: false, error: "APIFY_TOKEN not set" };
@@ -79,7 +80,8 @@ export async function runActorSync(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(timeoutMs),
+      // The turn's own signal rides along: a cancelled turn must not leave this request running.
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]) : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       // The BODY, not just the status. Apify puts the actual complaint there —
@@ -270,15 +272,19 @@ export async function crawlSite(
   startUrl: string,
   maxPages: number,
   timeoutMs = DEFAULT_CRAWL_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<ScrapeOutcome> {
   if (useApify()) {
     const run = await runActorSync(
       CONTENT_CRAWLER_ACTOR,
       { startUrls: [{ url: startUrl }], maxCrawlPages: maxPages, saveMarkdown: true },
       timeoutMs,
+      signal,
     );
+    if (signal?.aborted) return { ok: false, error: "crawl cancelled: the turn was aborted" };
     if (run.ok) {
-      const data = mapCrawlerItems(run.items, new Date().toISOString());
+      // maxCrawlPages is a target, not a ceiling: the actor returned 13 pages for 10 on 2026-10-08.
+      const data = mapCrawlerItems(run.items, new Date().toISOString()).slice(0, maxPages);
       if (data.length > 0) return { ok: true, data, source: "apify" };
       log.warn({ startUrl }, "Apify crawler returned no pages — trying single-page fetch fallback");
     } else {

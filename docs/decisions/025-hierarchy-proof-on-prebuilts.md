@@ -1,5 +1,7 @@
 # ADR-025 — Hierarchy proof on the prebuilt supervisor (Phase 5 spike)
 
+**Status:** Archived — hierarchy deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-14
 - **Status:** Accepted (capability proven; production promotion deferred + gated)
 - **Branch:** `feat/phase5-hierarchy-spike`

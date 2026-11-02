@@ -31,7 +31,6 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
-  brainMemories,
   conversations,
   episodicMemory,
   missions,
@@ -120,6 +119,45 @@ export async function getPendingInterrupt(threadId: string) {
   return row ?? null;
 }
 
+/** What a pending card shows, from its callback_data JSON: the gated tool and its summary (or title). Pure. */
+export function approvalCardText(callbackData: string | null): { action: string; summary: string } {
+  let data: unknown = null;
+  try {
+    data = callbackData ? JSON.parse(callbackData) : null;
+  } catch {
+    data = null; // allow-failopen: a row with unparseable callback_data still lists, as "unknown"
+  }
+  const o = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  return { action: str(o["action"]) || "unknown", summary: str(o["summary"]) || str(o["title"]) };
+}
+
+/**
+ * Pending, unexpired approval cards of one thread (and its `<thread>:<sub>` runs, e.g. `:shell-fp`), oldest first.
+ * One read, for the planner's in-flight block (kernel/in-flight.ts).
+ */
+export async function listPendingApprovalCards(threadId: string, now: Date, limit = 50) {
+  const sub = `${threadId.replace(/[\\%_]/g, "\\$&")}:%`;
+  const rows = await getDb()
+    .select({
+      id: hitlApprovals.interrupt_id,
+      callbackData: hitlApprovals.callback_data,
+      createdAt: hitlApprovals.created_at,
+      expiresAt: hitlApprovals.expires_at,
+    })
+    .from(hitlApprovals)
+    .where(
+      and(
+        or(eq(hitlApprovals.thread_id, threadId), sql`${hitlApprovals.thread_id} LIKE ${sub}`),
+        eq(hitlApprovals.status, "pending"),
+        gt(hitlApprovals.expires_at, now),
+      ),
+    )
+    .orderBy(hitlApprovals.created_at)
+    .limit(limit);
+  return rows.map((r) => ({ id: r.id, ...approvalCardText(r.callbackData), createdAt: r.createdAt, expiresAt: r.expiresAt }));
+}
+
 /** Fetch a single interrupt record by its primary key. */
 export async function getInterruptById(interruptId: string) {
   const db = getDb();
@@ -129,6 +167,40 @@ export async function getInterruptById(interruptId: string) {
     .where(eq(hitlApprovals.interrupt_id, interruptId))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Keep the founder's message on the card it is waiting behind (AG-047): one per card, the newest replaces the
+ * older. False when the card is no longer pending (it was resolved in the meantime), so the caller can say so.
+ */
+export async function holdMessageOnInterrupt(interruptId: string, text: string, heldAt: Date = new Date()): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .update(hitlApprovals)
+    .set({ held_text: text, held_at: heldAt })
+    .where(and(eq(hitlApprovals.interrupt_id, interruptId), eq(hitlApprovals.status, "pending")))
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
+  return rows.length > 0;
+}
+
+/**
+ * Take the held message off a card, at most once: the clear only succeeds if the text is still the one just read,
+ * so two taps or a retry cannot both run it. Null when nothing is held.
+ */
+export async function claimHeldMessage(interruptId: string): Promise<{ text: string; heldAt: Date } | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ text: hitlApprovals.held_text, heldAt: hitlApprovals.held_at })
+    .from(hitlApprovals)
+    .where(eq(hitlApprovals.interrupt_id, interruptId))
+    .limit(1);
+  if (!row?.text) return null;
+  const cleared = await db
+    .update(hitlApprovals)
+    .set({ held_text: null, held_at: null })
+    .where(and(eq(hitlApprovals.interrupt_id, interruptId), eq(hitlApprovals.held_text, row.text)))
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
+  return cleared.length > 0 ? { text: row.text, heldAt: row.heldAt ?? new Date() } : null;
 }
 
 /** Store the Telegram message_id after sending the HITL notification. */
@@ -169,7 +241,7 @@ export async function cancelPendingApprovals(threadId: string): Promise<number> 
   const db = getDb();
   const result = await db
     .update(hitlApprovals)
-    .set({ status: "cancelled", resolved_at: new Date() })
+    .set({ status: "cancelled", resolved_at: new Date(), held_text: null, held_at: null }) // /reset also drops a message held behind the card
     .where(
       and(
         eq(hitlApprovals.thread_id, threadId),
@@ -960,128 +1032,6 @@ async function writeFounderContext(tenantId: string, data: Record<string, unknow
     });
 }
 
-// ── Knowledge Entries (knowledge_entries / turicks-brain) ─────────────────────
-
-/**
- * Full-text keyword search over turicks-brain knowledge entries.
- * Searches title + content case-insensitively.
- * Returns top N current entries ordered by recency.
- */
-export async function searchKnowledgeEntries(
-  tenantId: string,
-  query: string,
-  limit = 5,
-): Promise<Array<{ title: string; content: string; entry_type: string; tags: string[] | null }>> {
-  const db = getDb();
-  const terms = tokenizeQuery(query);
-
-  // Match ANY significant term across title + content (OR), not the whole query
-  // as one substring. Empty/all-stopword queries fall back to recent entries.
-  const matchAnyTerm: SQL | undefined =
-    terms.length > 0
-      ? or(
-          ...terms.flatMap((t) => {
-            const p = `%${t}%`;
-            return [
-              sql`${knowledgeEntries.title} ILIKE ${p}`,
-              sql`${knowledgeEntries.content} ILIKE ${p}`,
-            ];
-          }),
-        )
-      : undefined;
-
-  const candidates = await db
-    .select({
-      title: knowledgeEntries.title,
-      content: knowledgeEntries.content,
-      entry_type: knowledgeEntries.entry_type,
-      tags: knowledgeEntries.tags,
-    })
-    .from(knowledgeEntries)
-    .where(
-      and(
-        eq(knowledgeEntries.tenant_id, tenantId),
-        eq(knowledgeEntries.is_current, true),
-        matchAnyTerm,
-      ),
-    )
-    .orderBy(desc(knowledgeEntries.updated_at))
-    .limit(Math.min(limit * CANDIDATE_FACTOR, MAX_CANDIDATES));
-
-  // Rank by how many distinct terms each row contains (title + content + tags).
-  return rankByTerms(
-    candidates,
-    terms,
-    (r) => `${r.title} ${r.content} ${(r.tags ?? []).join(" ")}`,
-    limit,
-  );
-}
-
-/** Fetch all current entries of a specific type (e.g. "adr", "brand", "case_study"). */
-export async function getKnowledgeByType(
-  tenantId: string,
-  entryType: string,
-  limit = 10,
-): Promise<Array<{ title: string; content: string; tags: string[] | null }>> {
-  const db = getDb();
-  return db
-    .select({
-      title: knowledgeEntries.title,
-      content: knowledgeEntries.content,
-      tags: knowledgeEntries.tags,
-    })
-    .from(knowledgeEntries)
-    .where(
-      and(
-        eq(knowledgeEntries.tenant_id, tenantId),
-        eq(knowledgeEntries.entry_type, entryType),
-        eq(knowledgeEntries.is_current, true),
-      ),
-    )
-    .orderBy(desc(knowledgeEntries.updated_at))
-    .limit(limit);
-}
-
-// ── RAG Health (knowledge_entries + brain_memories) ──────────────────────────
-
-/**
- * Count current knowledge entries for a tenant. Used by the health endpoint
- * to surface empty-store as a distinct state (the prod outage class from 2026-06-15
- * where turicks_brain was empty but the error said "Ollama unavailable"). Rule #22:
- * verify STATE not just schema — a table existing ≠ having rows.
- */
-export async function getKnowledgeEntryCount(tenantId: string): Promise<number> {
-  const db = getDb();
-  const [row] = await db
-    .select({ n: count() })
-    .from(knowledgeEntries)
-    .where(
-      and(
-        eq(knowledgeEntries.tenant_id, tenantId),
-        eq(knowledgeEntries.is_current, true),
-      ),
-    );
-  return Number(row?.n ?? 0);
-}
-
-/**
- * Count brain vector rows. A zero count means brain:sync has never
- * been run — this is the silent failure class that caused the 2026-06-15 RAG
- * outage. The health endpoint reports this separately from getKnowledgeEntryCount
- * because the two tables serve different purposes:
- *   knowledge_entries = structured docs (ADRs, brand, strategy)
- *   brain_memories    = embedded vector chunks for semantic search (ADR-038)
- *
- * Counts the table retrieval actually reads. It counted `turicks_brain` while
- * brain:sync wrote `brain_memories`, which would have reported a healthy store
- * from rows no search could return.
- */
-export async function getTuricksBrainCount(): Promise<number> {
-  const db = getDb();
-  const [row] = await db.select({ n: count() }).from(brainMemories);
-  return Number(row?.n ?? 0);
-}
-
 // ── Conversations (conversations) ─────────────────────────────────────────────
 
 /**
@@ -1584,6 +1534,24 @@ export async function reclaimStrandedReminders(tenantId: string): Promise<Remind
     .set({ status: "scheduled" })
     .where(and(eq(reminders.tenant_id, tenantId), eq(reminders.status, "firing")))
     .returning();
+}
+
+/** Scheduled reminders of one chat with from <= remind_at < until, soonest first (the in-flight block). */
+export async function listRemindersDue(tenantId: string, chatId: string, from: Date, until: Date, limit = 50) {
+  return getDb()
+    .select({ id: reminders.id, text: reminders.text, remindAt: reminders.remind_at })
+    .from(reminders)
+    .where(
+      and(
+        eq(reminders.tenant_id, tenantId),
+        eq(reminders.chat_id, chatId),
+        eq(reminders.status, "scheduled"),
+        gte(reminders.remind_at, from),
+        lt(reminders.remind_at, until),
+      ),
+    )
+    .orderBy(reminders.remind_at)
+    .limit(limit);
 }
 
 /** Upcoming (still-scheduled) reminders for the founder's "what's queued" view. */

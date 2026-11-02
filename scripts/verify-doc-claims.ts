@@ -54,6 +54,9 @@ const RECRUITER_PATH = [
   "docs/study/PORTFOLIO-GAPS-AND-ACTIONS.md",
 ];
 
+/** Docs whose source-file count describes the archived full system, not the jobs-only tree. */
+const ARCHIVE_SCALE_DOCS = ["docs/ROADMAP.md", "docs/study/INTERVIEW-BRIEF.md"];
+
 interface Claim {
   /** Human name, used in the failure message. */
   readonly name: string;
@@ -65,6 +68,24 @@ interface Claim {
   readonly files?: readonly string[];
   /** Why any file is excluded — required when `files` is narrower than the path. */
   readonly exemption?: string;
+  /**
+   * The doc states a floor ("580+ files"), not an exact count: it holds while
+   * `actual - floorSlack < claimed <= actual`. For counts that move on every PR. The
+   * source-file count did, so any two PRs adding a src file failed each other's CI
+   * until one of them ran --fix (2026-10-09: #1106, #1107, #1110, #1111).
+   */
+  readonly floorSlack?: number;
+}
+
+/** Whether a documented number agrees with the measured one. */
+export function claimHolds(claimed: number, actual: number, floorSlack?: number): boolean {
+  if (floorSlack === undefined) return claimed === actual;
+  return claimed <= actual && actual - claimed < floorSlack;
+}
+
+/** The floor --fix writes: the measured count rounded down to the nearest ten. */
+export function floorOf(actual: number): number {
+  return Math.floor(actual / 10) * 10;
 }
 
 function read(relPath: string): string {
@@ -120,13 +141,6 @@ function countAdrs(): number {
   ).length;
 }
 
-function countGoldenTasks(): number {
-  const src = read("src/eval/golden-tasks.ts");
-  const body = src.match(/export const GOLDEN_TASKS[^=]*=\s*\[([\s\S]*?)\n\];/)?.[1];
-  if (body === undefined) throw new Error("Could not locate GOLDEN_TASKS array in src/eval/golden-tasks.ts");
-  return (body.match(/^\s{2}\{/gm) ?? []).length;
-}
-
 function countFreeBoards(): number {
   const csv = "docs/strategy/data/free-ats-boards.csv";
   if (!existsSync(join(ROOT, csv))) throw new Error(`Board registry missing at ${csv}`);
@@ -158,17 +172,15 @@ const CLAIMS: readonly Claim[] = [
   {
     name: "TypeScript source file count",
     measure: countGitTrackedSourceFiles,
-    patterns: [/\b(\d[\d,]*) TypeScript source files/g, /Source \| (\d[\d,]*) files/g],
+    patterns: [/\b(\d[\d,]*)\+? TypeScript source files/g, /Source \| (\d[\d,]*)\+? files/g],
+    floorSlack: 100,
+    files: RECRUITER_PATH.filter((f) => !ARCHIVE_SCALE_DOCS.includes(f)),
+    exemption: `${ARCHIVE_SCALE_DOCS.join(" and ")} quote the full system's size at archive/founderos-v3, before the 2026-10-10 jobs-only cut`,
   },
   {
     name: "ADR count",
     measure: countAdrs,
     patterns: [/\b(\d[\d,]*) ADRs/g],
-  },
-  {
-    name: "golden task count",
-    measure: countGoldenTasks,
-    patterns: [/\b(\d[\d,]*) golden tasks/g, /\b(\d[\d,]*)-task golden set/g],
   },
   {
     name: "free ATS board registry size",
@@ -188,6 +200,8 @@ export interface Violation {
   readonly line: number;
   readonly claimed: number;
   readonly actual: number;
+  /** What --fix writes in place of `claimed`: `actual`, or its floor for a floor claim. */
+  readonly fixTo: number;
   readonly text: string;
 }
 
@@ -208,8 +222,9 @@ export function checkClaim(claim: Claim): Violation[] {
           const raw = match[1];
           if (raw === undefined) continue;
           const claimed = toNumber(raw);
-          if (claimed !== actual) {
-            violations.push({ claim: claim.name, file, line: index + 1, claimed, actual, text: text.trim() });
+          if (!claimHolds(claimed, actual, claim.floorSlack)) {
+            const fixTo = claim.floorSlack === undefined ? actual : floorOf(actual);
+            violations.push({ claim: claim.name, file, line: index + 1, claimed, actual, fixTo, text: text.trim() });
           }
         }
       }
@@ -246,11 +261,11 @@ function applyFixes(violations: readonly Violation[]): number {
       // Replace only the offending literal, in whichever rendering it appears in,
       // leaving surrounding prose untouched.
       const stale = renderings(v.claimed);
-      const fresh = renderings(v.actual);
+      const fresh = renderings(v.fixTo);
       let updated = current;
       for (const [i, form] of stale.entries()) {
         if (updated.includes(form)) {
-          updated = updated.replace(form, fresh[i] ?? String(v.actual));
+          updated = updated.replace(form, fresh[i] ?? String(v.fixTo));
           break;
         }
       }

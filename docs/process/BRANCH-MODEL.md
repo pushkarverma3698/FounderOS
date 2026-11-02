@@ -1,8 +1,8 @@
 # Branch Model — beta / main
 
 FounderOS uses a **two-stage promotion** — `feat/* → beta → main` — so production
-(`main`) stays protected while agents integrate continuously on `beta`. Only the
-founder promotes `beta → main` (CD auto-deploy).
+(`main`) stays protected while agents integrate continuously on `beta`. Claude may merge
+the `beta → main` promotion once both required CI checks are green (CD auto-deploys).
 
 > **Note:** an earlier `stable` tier (`beta → stable → main`) was **retired** — it
 > added a promotion hop with no protection value once branch protection landed on
@@ -36,9 +36,11 @@ feat/*           ●─●   ●─●                       short-lived, cut fr
    ```
 3. **Open PRs to `beta`** — CI must pass. Any work/agent
    branch may target `beta`; the policy rejects only `main` as a beta PR head.
-4. **Promotion** (founder merges in GitHub UI):
-   - When `beta` is green + live-verified → PR **`beta` → `main`** → CD deploys
-5. **Agents never merge to `main`.** Draft PRs to `beta` only.
+4. **Promotion**: when `beta` is green, build `chore/promote-<slug>` from `origin/main` plus
+   `git merge origin/beta`, open a PR to `main`, and merge it with `gh pr merge --merge` (never
+   `--squash`: squash strands the `main → beta` sync) once CI is green → CD deploys.
+5. **Claude may merge the promotion; implementers do not.** Antigravity, Codex and Gemini open
+   draft PRs to `beta` only.
 
 ## Per-feature workflow
 
@@ -55,8 +57,10 @@ After merge to `beta`, test on the VPS **without** deploying (beta is not deploy
 When satisfied:
 
 ```bash
-gh pr create --base main --head beta --title "release: promote beta to production"
-# founder merges → GitHub Actions deploys
+git fetch origin && git checkout -B chore/promote-<slug> origin/main && git merge origin/beta
+# push the branch, then:
+gh pr create --base main --title "chore: promote <slug>"
+gh pr merge --merge    # on green CI, never --squash → GitHub Actions deploys
 ```
 
 ## Branch protection (configured on GitHub)

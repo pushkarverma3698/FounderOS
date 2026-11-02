@@ -1,6 +1,6 @@
 # Telegram UX audit — founder DM + jobs group, 2026-09-26 → 10-03
 
-**Status:** draft for founder decision. Nothing here is built.
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 **Source:** both chats read in full over MTProto (DM: 946 messages, jobs group: 55). The raw dumps stay
 in a local scratchpad because this repo is public. Only short excerpts appear below.
 **Moves:** C (jobs) and A (coding loop). Most job fixes touch `src/tools/jobhunt/` or `mac-client/`,

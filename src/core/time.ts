@@ -130,8 +130,21 @@ export function formatInZone(when: Date, timeZone = appTimeZone()): string {
  */
 export function plannerNowLine(clock: Clock = systemClock, timeZone = appTimeZone()): string {
   const now = clock();
+  const w = wallDate(now, timeZone);
+  const iso = (y: number, mo: number, d: number): string => new Date(Date.UTC(y, mo - 1, d)).toISOString().slice(0, 10);
+  const today = iso(w.y, w.mo, w.d);
+  const tomorrow = iso(w.y, w.mo, w.d + 1);
+  // 2026-10-09: "tomorrow 9am" sent just after midnight was booked for the day after the one he meant: he is still
+  // awake in "last night", so the coming morning is today's date. Spelled out in code; the model's date arithmetic is not.
+  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now));
+  const afterMidnight =
+    hour < 4
+      ? `It is after midnight: "tomorrow"/"kal" said now means the coming morning, ${today}, unless he names a weekday or a date. ` +
+        `Say the date you booked in your reply. `
+      : "";
   return (
     `Current time: ${formatInZone(now, timeZone)} (${timeZone}, UTC${zoneOffset(now, timeZone)}). ` +
+    `Today is ${today}; tomorrow is ${tomorrow}. ${afterMidnight}` +
     `Interpret any bare clock time the founder gives ("9am", "18:00", "tonight", "tomorrow") as ${zoneAbbrev(now, timeZone)}. ` +
     `Emit scheduled_at / remind_at as a full ISO 8601 datetime WITH that offset. Never pick a time already in the past.`
   );

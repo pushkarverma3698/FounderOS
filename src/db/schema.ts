@@ -81,6 +81,14 @@ export const hitlApprovals = agentsSchema.table(
 
     /** Human edits applied before approving */
     edits: text("edits"),
+
+    /**
+     * A message the founder sent while this card was pending (AG-047): one per card, the newest wins. The gateway
+     * runs it as a normal turn after his tap is answered (src/gateway/held-message.ts). NULL = nothing held.
+     */
+    held_text: text("held_text"),
+    /** When held_text arrived; older than the HITL restore window and it is dropped, not run. */
+    held_at: timestamp("held_at", { withTimezone: true }),
   },
   (t) => ({
     /** Hot path: resolve HITL via thread_id + status filter */
@@ -600,7 +608,7 @@ export type NewConversation = typeof conversations.$inferInsert;
  * Stores significant events: decisions made, tasks completed, outcomes,
  * and conversation highlights worth recalling later.
  *
- * Agents write to this via the `record_event` tool (HITL-gated).
+ * Agents write to this via the `record_event` tool (no approval: a low-risk write into his own log).
  * The `search_memory` tool queries this table alongside knowledge_entries
  * and founder_context to answer "what happened with X?" questions.
  */
@@ -611,7 +619,7 @@ export const episodicMemory = agentsSchema.table(
 
     tenant_id: text("tenant_id").notNull().default("turicks"),
 
-    /** conversation | decision | outcome | task_completed */
+    /** note | conversation | decision | outcome | task_completed */
     event_type: text("event_type").notNull(),
 
     /** When the event actually happened (not when it was written) */
@@ -1812,6 +1820,9 @@ export * from "./conversation-turns-schema.js";
 
 // job_digest_state (0044). Own file for the same reason; re-exported so the parity test sees it.
 export * from "./job-digest-schema.js";
+
+// journey_runs (0046). Own file for the same reason; re-exported so the parity test sees it.
+export * from "./journey-runs-schema.js";
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

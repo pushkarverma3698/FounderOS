@@ -22,6 +22,7 @@
 #   LANGCHAIN_API_KEY    — LangSmith tracing (optional; sets LANGCHAIN_TRACING_V2=true when present)
 set -euo pipefail
 
+OVERRIDES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-/opt/founderos}"
 cd "$APP_DIR"
 
@@ -44,13 +45,16 @@ cd "$APP_DIR"
 #   The repo is public, so they live on the box, not in git or the snapshot.
 #   2026-10-02: JOBHUNT_CHAT_ID (the family jobs group, src/infra/telegram-send.ts) is the same kind of id.
 #   Unset, the job lane falls back to the founder's chat, so a wiped value moves every job message back there.
-#   AGENT_DISPATCH_BIN makes a filed issue start in seconds (src/tools/dispatch-tick.ts);
+#   AGENT_DISPATCH_BIN makes a filed issue start a job at once through fos-job.socket (src/tools/dispatch-tick.ts);
 #   unset on prod until 2026-09-29, so #762 waited for the next 15-minute cron tick.
 #   2026-10-06: AGENT_PIPELINE_V2 (coding pipeline switch) and ORACLE_ALLOWED_HOSTS are founder-set on the box;
 #   the #941 deploy dropped both. Unset, the pipeline is off.
+#   2026-10-16: APPLY_LINK_BASE_URL / APPLY_LINK_SECRET are created on the box (block at the end of this file).
+#   The PROD_DOTENV snapshot never carries them, so without this a render would drop the secret and every
+#   apply link already sent to the founder would stop verifying.
 #   2026-10-05: COMPOSIO_API_KEY stays here only until the founder approves removing the COMPOSIO_* lines
 #   from prod .env (Composio code is gone); delete it from this list in the same step.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH GEMINI_THINKING_LEVEL TELEGRAM_ALLOWED_CHAT_IDS TELEGRAM_ANSWER_ALL_CHAT_IDS TELEGRAM_OWNER_USER_ID JOBHUNT_CHAT_ID AGENT_DISPATCH_BIN AGENT_PIPELINE_V2 ORACLE_ALLOWED_HOSTS"
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH GEMINI_THINKING_LEVEL TELEGRAM_ALLOWED_CHAT_IDS TELEGRAM_ANSWER_ALL_CHAT_IDS TELEGRAM_OWNER_USER_ID JOBHUNT_CHAT_ID AGENT_DISPATCH_BIN AGENT_PIPELINE_V2 ORACLE_ALLOWED_HOSTS APPLY_LINK_BASE_URL APPLY_LINK_SECRET"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -126,8 +130,8 @@ fi
 # 2026-09-17: gemini-flash-latest (→ gemini-3.5-flash) is STILL the 2026-07-13
 # failure — live-probed today, 2/2 calls returned 503 "high demand", not a
 # one-off. gemini-2.5-flash is fully retired (404: "no longer available to new
-# users"; Google's own error names gemini-3.6-flash as the replacement).
-# Pinned AGENT_MODEL directly to gemini-3.6-flash instead of the rolling alias —
+# users"; Google's own error names gemini-3.8-flash as the replacement).
+# Pinned AGENT_MODEL directly to gemini-3.8-flash instead of the rolling alias —
 # live-probed 2/2 success, ~1-2s — so a future Google-side alias move can't
 # silently reintroduce the 2026-07-13 storm again. AGENT_FALLBACK_MODELS is
 # untouched: gemini-3.1-flash-lite still live-probes 200 today, so the existing
@@ -140,20 +144,41 @@ fi
 # (checked against /api/v1/models) — dropped from the chain. Per-role pools and the
 # worker primary come from the measured bench in docs/sessions/2026-10-04-model-pools.md:
 # workers + synthesizer on ling-3.0-flash (30x cheaper per call, same valid-args score),
-# planner primary UNCHANGED (gemini-3.6-flash is the only 36/36 model). Free models are
+# planner primary UNCHANGED (gemini-3.8-flash is the only 36/36 model). Free models are
 # fallbacks only. Planner primary review is due about 2026-10-11 (deepseek-v4.1-flash).
-grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS)=' .env > .env.patched || true
+# 2026-10-08: the AI Studio key's prepaid credit ran out (every google-genai call
+# returns 402), and the 10-07 chat audit found 2 of 10 founder asks answered right.
+# Planner, workers and synthesizer move to Claude Sonnet 5.5 through OpenRouter
+# ($2/M in, $10/M out; founder approved the heavy model). The judge moves to
+# Gemini 3.6 Flash through OpenRouter, so it is not grading its own family. The
+# shared fallback keeps only the free Nemotron slug: the Google-direct slugs are
+# dead while the key is unfunded. Per-run caps rise to fit a 20-call read step
+# on Sonnet (about 12K tokens a call). Golden set before/after: docs/sessions/2026-10-08-heavy-model-live-run.md.
+# 2026-10-08 (AG-050): Sonnet moved the golden set from 53% to 53% at about $0.33 a turn, so
+# the defaults go back to cheap models. The AI Studio key still returns 402 (probed at build
+# time), so all three go through OpenRouter: planner gemini-3.8-flash, workers ling-3.0-flash,
+# judge gemini-3.1-flash-lite (a different model from the drafter). Every fallback list is the
+# free Nemotron slug only (founder rule: no paid fallback; tests/unit/agents/model-output-cap.test.ts
+# fails on any slug without :free). Every model also carries MODEL_MAX_OUTPUT_TOKENS (default
+# 4096, src/core/model-output-cap.ts), so OpenRouter stops reserving a 65K output window.
+grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS|RUN_BUDGET_USD|RUN_BUDGET_TOKENS)=' .env > .env.patched || true
+primary_model=openrouter:google/gemini-3.8-flash
+worker_model=openrouter:inclusionai/ling-3.0-flash
+# SONNET_TRIAL: uncomment the next line to go back to Sonnet on planner and workers.
+# primary_model=openrouter:anthropic/claude-sonnet-5.5; worker_model=openrouter:anthropic/claude-sonnet-5.5
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-3.6-flash'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free'
-  printf '%s\n' 'JUDGE_MODEL=google-genai:gemini-3.1-flash-lite'
-  printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:inclusionai/ling-3.0-flash'
-  printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash'
-  printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router'
+  printf '%s\n' "AGENT_MODEL=$primary_model"
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
+  printf '%s\n' 'JUDGE_MODEL=openrouter:google/gemini-3.1-flash-lite'
+  printf '%s\n' "WORKER_AGENT_MODEL=$worker_model"
+  printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
+  printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:nvidia/nemotron-3-super-120b-a12b:free'
+  printf '%s\n' 'RUN_BUDGET_USD=1.5'
+  printf '%s\n' 'RUN_BUDGET_TOKENS=400000'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-3.6-flash, JUDGE_MODEL=google-genai:gemini-3.1-flash-lite"
+echo "==> Patched .env: AGENT_MODEL=$primary_model, WORKER_AGENT_MODEL=$worker_model, JUDGE_MODEL=openrouter:google/gemini-3.1-flash-lite, fallbacks free only"
 
 # Pin the job-sweep spend controls. Both were unset in production until
 # 2026-08-05, and both defaulted quietly rather than loudly:
@@ -285,5 +310,38 @@ fi
 if ! grep -q '^STATIC_SITE_HOME_ROOT=' .env; then
   printf 'STATIC_SITE_HOME_ROOT=/var/www\n' >> .env
   echo "==> Patched .env: STATIC_SITE_HOME_ROOT default"
+fi
+
+# Apply link (2026-10-16): the jobs bot serves /apply/<token>, and the founder opens it from a phone over
+# public Tailscale Funnel (scripts/infra/apply-link-funnel.sh, run by deploy/deploy.sh).
+# Both values are created on the box ONCE and never overwritten: a present, non-empty value always wins
+# (a present-but-empty line counts as missing, like PRESERVE_IF_MISSING). Neither failure aborts the render;
+# the app refuses to mint links while either value is unset, which is the loud direction.
+#   APPLY_LINK_BASE_URL  https://<this node's MagicDNS name>, read from `tailscale status --json`.
+#   APPLY_LINK_SECRET    random signing key. It is generated into a variable and appended with printf
+#                        (a builtin, so it never reaches argv or a log); the echo line below does not print it.
+if ! grep -qE '^APPLY_LINK_BASE_URL=.' .env; then
+  if APPLY_LINK_BASE_URL_NEW="$(bash "$OVERRIDES_DIR/infra/apply-link-funnel.sh" --print-base-url)" && [ -n "$APPLY_LINK_BASE_URL_NEW" ]; then
+    (umask 077; grep -v -E '^APPLY_LINK_BASE_URL=' .env > .env.patched || true)
+    printf 'APPLY_LINK_BASE_URL=%s\n' "$APPLY_LINK_BASE_URL_NEW" >> .env.patched
+    mv .env.patched .env
+    chmod 600 .env
+    echo "==> Patched .env: APPLY_LINK_BASE_URL=$APPLY_LINK_BASE_URL_NEW"
+  else
+    echo "!! APPLY_LINK_BASE_URL not set (could not read the tailscale DNS name, reason above); apply links stay off" >&2
+  fi
+  unset APPLY_LINK_BASE_URL_NEW
+fi
+if ! grep -qE '^APPLY_LINK_SECRET=.' .env; then
+  if command -v openssl >/dev/null 2>&1 && APPLY_LINK_SECRET_NEW="$(openssl rand -hex 32)" && [ -n "$APPLY_LINK_SECRET_NEW" ]; then
+    (umask 077; grep -v -E '^APPLY_LINK_SECRET=' .env > .env.patched || true)
+    printf 'APPLY_LINK_SECRET=%s\n' "$APPLY_LINK_SECRET_NEW" >> .env.patched
+    mv .env.patched .env
+    chmod 600 .env
+    echo "==> Patched .env: APPLY_LINK_SECRET generated (value not shown)"
+  else
+    echo "!! APPLY_LINK_SECRET not generated (openssl missing or failed); apply links stay off" >&2
+  fi
+  unset APPLY_LINK_SECRET_NEW
 fi
 chmod 600 .env

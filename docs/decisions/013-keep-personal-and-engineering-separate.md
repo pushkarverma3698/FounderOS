@@ -1,5 +1,7 @@
 # ADR-013: Keep `personal` and `engineering` as separate, scoped departments
 
+**Status:** Archived — departments deleted; boundary lives in ADR-015; see tag archive/founderos-v3 (2026-10-27).
+
 - **Status:** Accepted (2026-06-03)
 - **Supersedes:** nothing — reinforces ADR-010 (v2 ReAct office) and ADR-012 (personal department)
 

@@ -20,13 +20,20 @@ export async function runHubStdio(scope: HubScope): Promise<void> {
   const server = buildHubServer({ scope });
   await server.connect(new StdioServerTransport());
   log.info({ scope, tools: hubTools(scope).map((t) => t.name) }, "FounderOS hub started (stdio)");
+  let closing = false;
   const shutdown = async () => {
+    if (closing) return;
+    closing = true;
     await closeBridgeConnections();
     await server.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  // The ssh session ending closes stdin. Without this, an open bridge child keeps
+  // the hub alive after its laptop session is gone (AG-052).
+  process.stdin.on("end", shutdown);
+  process.stdin.on("close", shutdown);
 }
 
 // Serve only when started as the entry file, not when imported (turicks-brain.ts, tests).

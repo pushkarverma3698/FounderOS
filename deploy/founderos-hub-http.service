@@ -1,0 +1,40 @@
+# /etc/systemd/system/founderos-hub-http.service
+# FounderOS hub over Streamable HTTP (src/mcp/hub-http.ts) for clients that cannot
+# start the stdio hub over SSH: OpenDots Connections and the OpenDots computers.
+#
+# Install once (as root):
+#   install -d -m 750 -o root -g founderos /etc/founderos
+#   ( umask 027; { echo "HUB_HTTP_TOKEN=$(openssl rand -hex 32)"; echo "HUB_HTTP_BRAIN_TOKEN=$(openssl rand -hex 32)"; \
+#       echo "HUB_HTTP_HOST=$(docker network inspect opendots-computers -f '{{(index .IPAM.Config 0).Gateway}}')"; } \
+#       > /etc/founderos/hub-http.env ); chgrp founderos /etc/founderos/hub-http.env
+#   ufw allow in from <opendots-computers subnet> to <HUB_HTTP_HOST> port 3100 proto tcp
+#   cp deploy/founderos-hub-http.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now founderos-hub-http
+# deploy.sh restarts it after each deploy, when it is installed.
+[Unit]
+Description=FounderOS hub (MCP over Streamable HTTP)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=founderos
+Group=founderos
+WorkingDirectory=/opt/founderos
+Environment=NODE_ENV=production
+Environment=HOME=/home/founderos
+Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Tokens and bind address; the app's own secrets come from .env below.
+EnvironmentFile=/etc/founderos/hub-http.env
+ExecStart=/usr/bin/node --env-file=.env --import tsx/esm src/mcp/hub-http.ts
+# The bind address is a Docker bridge gateway, which exists only once Docker has
+# created the network: keep retrying instead of giving up after a boot race.
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

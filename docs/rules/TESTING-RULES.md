@@ -153,6 +153,7 @@ vi.mock("../../../src/tools/email.js", () => ({
 }));
 
 // ✅ RIGHT — mock only the external boundary
+// (example from the Composio era: src/infra/composio.js was removed 2026-10-05; mock whichever provider module the tool imports today)
 vi.mock("../../../src/infra/composio.js", () => ({
   executeComposioAction: vi.fn(),
   getComposioApiKey: vi.fn(() => "test-key"),
@@ -249,6 +250,7 @@ Copy this for any new Composio-backed tool:
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Composio-era example; src/infra/composio.js was removed 2026-10-05.
 const mockExecuteComposioAction = vi.fn();
 const mockGetComposioApiKey = vi.fn(() => "test-key");
 
@@ -397,12 +399,14 @@ watch it silently do the wrong thing:
 **MTProto user client** (gramjs), which can both *send as the founder* and *tap inline
 buttons* (`card.click({ data: Buffer.from("approve") })`). The harnesses are:
 
-- `scripts/telegram-tester.ts` — single send / approve / reject / read.
-- `scripts/e2e-telegram-qa.ts` — the full 22-task suite (read · write · multi-step ·
-  adversarial · crash-recovery) with per-task evidence capture.
+- `scripts/telegram-probe.ts` — one prompt in, every bot reply out, with per-reply latency.
+- `scripts/telegram-tap.ts` — tap an inline button on a bot message.
 
-One-time setup is a founder MTProto login (`telegram-tester.ts login`) → session string in
-`.env` (gitignored; it is a full account login — never commit or print it).
+`telegram-tester.ts` and the 22-task `e2e-telegram-qa.ts` suite were removed 2026-10-10 with
+the agent kernel. Setup is `TELEGRAM_TESTER_API_ID` / `_API_HASH` / `_SESSION` in `.env`
+(see `scripts/lib/mtproto.ts`; gitignored; it is a full account login — never commit or
+print it). The old `telegram-tester.ts login` helper is gone too, so a new session string
+needs a one-off gramjs login script.
 
 ---
 
@@ -439,8 +443,8 @@ real-path suite MUST include, and gate on:
 | Ambiguous ("do the thing") | asks to clarify | guesses and takes an action |
 | Out-of-scope (joke) | graceful answer or "out of scope" | fakes a tool call / routes to a dept |
 
-`scripts/e2e-telegram-qa.ts` encodes these as auto-signals (e.g. "🚨 injection produced an
-approval card") so the human verdict can't miss them.
+The removed `e2e-telegram-qa.ts` (2026-10-10) encoded these as auto-signals (e.g. "🚨 injection
+produced an approval card"). Today the verdict is read by hand from `scripts/telegram-probe.ts` output.
 
 ---
 
