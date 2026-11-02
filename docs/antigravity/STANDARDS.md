@@ -173,7 +173,7 @@ on the first line; the founder reads top-down.
 
 ## 11. Never, without an explicit instruction in the brief
 
-- Commit, push, rebase, force-push, change branch, or open a PR.
+- Commit, push, rebase, force-push, change branch, or open a PR. (A brief that says "open a draft PR" is that instruction.)
 - Edit CI config, `.env`, secrets, or credentials.
 - Delete a file not named in the brief.
 - Run a destructive command (`rm -rf`, a database drop).
