@@ -2,22 +2,16 @@
  * sync-turicks-brain.ts
  * =====================
  * Reads all docs (ADRs, brand guidelines, phase docs, strategic vision, case study)
- * and upserts them into the turicks-brain stores:
- *   1. knowledge_entries — keyword/title search (one versioned row per doc) +
- *      a doc-level embedding for hybrid search.
- *   2. brain_memories    — the pgvector store the agents query via
- *      search_turicks_brain / search_knowledge (ADR-038 moved this off the old
- *      `turicks_brain` table; that table is frozen and read by nothing). Each doc
- *      is CHUNKED and every chunk embedded via local Ollama (nomic-embed-text,
- *      768-dim). RAG text never leaves the box.
+ * and syncs them into brain.brain_memories, the pgvector store search_memory and
+ * the agents query (ADR-038 moved this off the old `turicks_brain` table; that
+ * table is frozen and read by nothing). Each doc is CHUNKED and every chunk
+ * embedded via local Ollama (nomic-embed-text, 768-dim). RAG text never leaves the box.
  *
  * Run after any architectural decision, brand update, or phase completion:
  *   pnpm brain:sync
  *
- * Idempotent:
- *   - knowledge_entries: title as upsert key; bumps version on content change.
- *   - brain_memories: per-source refresh (delete this source's chunks, re-insert),
- *     SKIPPED entirely when every chunk already carries this content's sha256.
+ * Idempotent: per-source refresh (delete this source's chunks, re-insert),
+ * SKIPPED entirely when every chunk already carries this content's sha256.
  *
  * Requires: Ollama running with nomic-embed-text pulled, Postgres + pgvector up.
  *
@@ -38,8 +32,6 @@ import { hostname } from "node:os";
 import { join, basename } from "node:path";
 import { sql } from "drizzle-orm";
 import { getDb } from "../src/db/client.js";
-import { knowledgeEntries } from "../src/db/schema.js";
-import { eq, and } from "drizzle-orm";
 import { embedText, embedTexts, chunkText } from "../src/lib/embed.js";
 
 /** Postgres vector literal: number[] → "[1,2,3]". */
@@ -499,125 +491,6 @@ export function resolveSyncTarget(opts: {
   };
 }
 
-// ── Doc-level embedding (knowledge_entries.embedding, VECTOR(768)) ────────────
-
-/** An existing row needs a (back)filled embedding when none is stored. */
-export function needsEntryEmbedding(row: { embedding?: number[] | null }): boolean {
-  return !row.embedding || row.embedding.length === 0;
-}
-
-/** Text embedded for a doc: title + first chunk (1800 chars), so it stays inside the model's context. */
-export function entryEmbeddingText(title: string, content: string): string {
-  return `${title}\n\n${chunkText(content)[0] ?? ""}`;
-}
-
-export type EntryEmbedResult = { ok: true; vector: number[] } | { ok: false; error: string };
-
-/** Embeds one entry via the injected embedder; never throws, so one bad embed cannot abort the sync. */
-export async function tryEmbedEntry(
-  title: string,
-  content: string,
-  embed: (text: string) => Promise<number[]>,
-): Promise<EntryEmbedResult> {
-  try {
-    return { ok: true, vector: await embed(entryEmbeddingText(title, content)) };
-  } catch (err) {
-    // allow-failopen: reported to the caller, counted in the sync summary and logged per doc; the keyword row is still written
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-// ── Upsert logic ──────────────────────────────────────────────────────────────
-
-type EmbedFn = (text: string) => Promise<number[]>;
-/** How the doc-level embedding went: written, failed (row still saved), or not attempted. */
-type EmbedOutcome = "embedded" | "failed" | "none";
-
-async function upsertEntry(
-  entry: DocEntry,
-  embed: EmbedFn | null,
-): Promise<{ action: "inserted" | "updated" | "skipped"; id: string; embedded: EmbedOutcome }> {
-  const db = getDb();
-  let embedded: EmbedOutcome = "none";
-  const embedFor = async (): Promise<number[] | undefined> => {
-    if (!embed) return undefined;
-    const r = await tryEmbedEntry(entry.title, entry.content, embed);
-    if (r.ok) {
-      embedded = "embedded";
-      return r.vector;
-    }
-    embedded = "failed";
-    console.error(`⚠️  Doc embedding failed for "${entry.title}": ${r.error}`);
-    return undefined;
-  };
-  const existing = await db
-    .select()
-    .from(knowledgeEntries)
-    .where(
-      and(
-        eq(knowledgeEntries.tenant_id, "turicks"),
-        eq(knowledgeEntries.title, entry.title),
-        eq(knowledgeEntries.is_current, true),
-      ),
-    )
-    .limit(1);
-
-  if (existing.length === 0) {
-    const [row] = await db
-      .insert(knowledgeEntries)
-      .values({
-        tenant_id: "turicks",
-        entry_type: entry.entry_type,
-        title: entry.title,
-        content: entry.content,
-        source: entry.source,
-        tags: entry.tags,
-        metadata: entry.metadata,
-        version: 1,
-        is_current: true,
-        embedding: await embedFor(),
-      })
-      .returning({ id: knowledgeEntries.id });
-    return { action: "inserted", id: row!.id, embedded };
-  }
-
-  const current = existing[0]!;
-  if (current.content === entry.content) {
-    // Unchanged content: backfill the embedding if an earlier sync left it NULL.
-    if (embed && needsEntryEmbedding(current)) {
-      const vector = await embedFor();
-      if (vector) {
-        await db.update(knowledgeEntries).set({ embedding: vector }).where(eq(knowledgeEntries.id, current.id));
-      }
-    }
-    return { action: "skipped", id: current.id, embedded };
-  }
-
-  // Content changed — mark old as non-current, insert new version
-  await db
-    .update(knowledgeEntries)
-    .set({ is_current: false })
-    .where(eq(knowledgeEntries.id, current.id));
-
-  const [row] = await db
-    .insert(knowledgeEntries)
-    .values({
-      tenant_id: "turicks",
-      entry_type: entry.entry_type,
-      title: entry.title,
-      content: entry.content,
-      source: entry.source,
-      tags: entry.tags,
-      metadata: entry.metadata,
-      version: (current.version ?? 1) + 1,
-      is_current: true,
-      embedding: await embedFor(),
-    })
-    .returning({ id: knowledgeEntries.id });
-
-  return { action: "updated", id: row!.id, embedded };
-}
-
 /**
  * Refresh a single source's chunks in the brain_memories vector table.
  * Idempotent: deletes any existing chunks for this source_path, then inserts
@@ -697,7 +570,6 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const keywordOnly = process.argv.includes("--keyword-only");
   const target = resolveSyncTarget({
     hostname: hostname(),
     allowLocal: process.argv.includes("--local"),
@@ -709,74 +581,47 @@ async function main() {
   }
   console.log(`🎯 Target: ${target.label}`);
 
-  if (!keywordOnly) {
-    // Rows from docs an older manifest synced but this one no longer collects are
-    // never visited by the per-source backfill below; tag them too. Scoped to
-    // repo doc paths, so agent-written rows (source = ide_mcp) are untouched.
-    const tagged = await getDb().execute(sql`
-      UPDATE brain.brain_memories SET project = ${projectForSource("docs/")}
-      WHERE source LIKE 'docs/%' AND project IS NULL
-    `);
-    const n = (tagged as unknown as { count?: number }).count ?? 0;
-    if (n > 0) console.log(`🏷  Tagged ${n} untagged doc chunks with project "${projectForSource("docs/")}".`);
-  }
+  // Rows from docs an older manifest synced but this one no longer collects are
+  // never visited by the per-source backfill below; tag them too. Scoped to
+  // repo doc paths, so agent-written rows (source = ide_mcp) are untouched.
+  const tagged = await getDb().execute(sql`
+    UPDATE brain.brain_memories SET project = ${projectForSource("docs/")}
+    WHERE source LIKE 'docs/%' AND project IS NULL
+  `);
+  const n = (tagged as unknown as { count?: number }).count ?? 0;
+  if (n > 0) console.log(`🏷  Tagged ${n} untagged doc chunks with project "${projectForSource("docs/")}".`);
 
-  if (keywordOnly) {
-    console.log(
-      "🧠 Syncing docs to knowledge_entries (keyword-only — no Ollama, no brain_memories vectors)…\n",
+  console.log("🧠 Syncing docs to brain_memories vectors…\n");
+
+  // Fail loud + early if Ollama can't embed: otherwise the vector search would
+  // silently stay empty. One cheap probe before the loop.
+  try {
+    await embedText("connectivity probe");
+  } catch (err) {
+    console.error(
+      `❌ Ollama embeddings unavailable — aborting before any write.\n   ${(err as Error).message}\n` +
+        `   Start Ollama and pull the embed model, then re-run:  ollama pull nomic-embed-text`,
     );
-  } else {
-    console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + brain_memories vectors)…\n");
-
-    // Fail loud + early if Ollama can't embed — otherwise we'd write keyword rows
-    // with no vectors and the vector search would silently stay empty (the exact
-    // production bug this rewrite fixes). One cheap probe before the loop.
-    try {
-      await embedText("connectivity probe");
-    } catch (err) {
-      console.error(
-        `❌ Ollama embeddings unavailable — aborting before any write.\n   ${(err as Error).message}\n` +
-          `   Start Ollama and pull the embed model, then re-run:  ollama pull nomic-embed-text\n` +
-          `   Or use keyword-only (no vectors):  node --import tsx/esm scripts/sync-turicks-brain.ts --keyword-only`,
-      );
-      process.exit(1);
-    }
+    process.exit(1);
   }
 
   const docs = collectDocs(".");
   console.log(`Found ${docs.length} documents to sync.\n`);
 
-  let inserted = 0;
-  let updated = 0;
-  let skipped = 0;
   let totalChunks = 0;
   let currentDocs = 0;
   let failures = 0;
-  let entriesEmbedded = 0;
-  let entryEmbedFailures = 0;
 
   for (const doc of docs) {
     try {
-      const { action, embedded } = await upsertEntry(doc, keywordOnly ? null : embedText);
-      if (embedded === "embedded") entriesEmbedded++;
-      else if (embedded === "failed") entryEmbedFailures++;
-
-      let chunks = 0;
-      let refreshed = false;
-      if (!keywordOnly) {
-        ({ chunks, refreshed } = await syncVectorChunks(doc));
-        if (refreshed) totalChunks += chunks;
-        else currentDocs++;
-      }
-
-      const icon = action === "inserted" ? "✅" : action === "updated" ? "🔄" : "—";
+      const { chunks, refreshed } = await syncVectorChunks(doc);
+      if (refreshed) totalChunks += chunks;
+      else currentDocs++;
       console.log(
-        `${icon} [${action}] ${doc.entry_type}: ${doc.title}` +
-          (keywordOnly ? "" : `  (${chunks} chunks${refreshed ? " embedded" : " already current"})`),
+        refreshed
+          ? `✅ ${doc.entry_type}: ${doc.title} (${chunks} chunks embedded)`
+          : `— ${doc.entry_type}: ${doc.title} (${chunks} chunks already current)`,
       );
-      if (action === "inserted") inserted++;
-      else if (action === "updated") updated++;
-      else skipped++;
     } catch (err) {
       failures++;
       console.error(`❌ Failed: ${doc.title}`, err);
@@ -784,13 +629,8 @@ async function main() {
   }
 
   console.log(
-    `\n✅ Sync complete → ${target.label}: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
-      (keywordOnly
-        ? " (keyword-only)"
-        : ` · ${totalChunks} vector chunks embedded into brain_memories` +
-          ` · ${currentDocs} docs already current (no embedding needed)` +
-          ` · ${entriesEmbedded} doc embeddings written to knowledge_entries`) +
-      (entryEmbedFailures > 0 ? ` · ${entryEmbedFailures} doc embeddings FAILED (rows saved, will backfill next sync)` : "") +
+    `\n✅ Sync complete → ${target.label}: ${totalChunks} chunks embedded into brain_memories` +
+      ` · ${currentDocs} docs already current (no embedding needed)` +
       (failures > 0 ? ` · ${failures} FAILED` : ""),
   );
   process.exit(failures > 0 ? 1 : 0);

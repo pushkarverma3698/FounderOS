@@ -18,3 +18,12 @@ describe("chunkPlan", () => {
     expect(chunkPlan("ARCHIVED", 0, 0)).toBe("current");
   });
 });
+
+describe("brain sync writes one store", () => {
+  it("no longer exports the knowledge_entries doc-embedding helpers", async () => {
+    const mod = (await import("../../../scripts/sync-turicks-brain.js")) as Record<string, unknown>;
+    for (const name of ["upsertEntry", "tryEmbedEntry", "needsEntryEmbedding", "entryEmbeddingText"]) {
+      expect(mod[name], name).toBeUndefined();
+    }
+  });
+});
