@@ -14,6 +14,7 @@ import { writeToolIngestOptions } from "./brain-write-args.js";
 import { db } from "../db/client.js";
 import { brainMemories } from "../db/schema.js";
 import { eq, ilike, or } from "drizzle-orm";
+import { RECENT_MEMORIES_TOOL, recentMemories } from "./brain-recent.js";
 
 export interface McpToolResult {
   [key: string]: unknown;
@@ -89,7 +90,8 @@ export const BRAIN_TOOLS = [
       },
       required: ["bug"]
     }
-  }
+  },
+  RECENT_MEMORIES_TOOL,
 ];
 
 export function formatResult(text: string): McpToolResult {
@@ -145,6 +147,9 @@ export async function callBrainTool(name: string, args: Record<string, unknown>)
         return formatResult(text);
       }
       
+      case "recent_memories":
+        return formatResult(await recentMemories(args));
+
       case "remember":
       case "save_decision":
       case "save_bug": {

@@ -1,5 +1,7 @@
 # FounderOS Plans Index
 
+**Status:** Archived (2026-10-27). Stale index; the plans it lists are gone or retired.
+
 All strategic and implementation plans for FounderOS development.
 
 ## Active Plans

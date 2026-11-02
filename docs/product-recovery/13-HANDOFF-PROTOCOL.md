@@ -1,5 +1,7 @@
 # Handoff Protocol
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 The context problem this program diagnoses applies to the program itself. **No implementing
 session loads the strategy conversation, and no session loads all twelve phases.**
 

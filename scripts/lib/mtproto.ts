@@ -9,8 +9,9 @@
  * ── ONE-TIME SETUP (founder) ─────────────────────────────────────────────────
  *   1. https://my.telegram.org/apps → create app → copy api_id + api_hash
  *   2. .env:  TELEGRAM_TESTER_API_ID=...  TELEGRAM_TESTER_API_HASH=...
- *   3. npx tsx --env-file=.env scripts/telegram-tester.ts login
- *      → paste the printed TELEGRAM_TESTER_SESSION=... line into .env
+ *   3. Mint the session: scripts/telegram-tester.ts was removed in fd58a2f5 (2026-10-10). Restore its `login`
+ *      command from `git show fd58a2f5^:scripts/telegram-tester.ts` (GramJS StringSession); the founder types
+ *      the phone and code himself. Paste the printed TELEGRAM_TESTER_SESSION=... line into .env
  *
  * SECURITY: TELEGRAM_TESTER_SESSION is a full login to the founder's Telegram
  * account. It lives only in .env (gitignored). Never commit, print, or ship it.
@@ -52,7 +53,7 @@ export function assertMtprotoConfigured(): void {
   if (!Number.isFinite(API_ID) || !API_HASH || !SESSION) {
     throw new Error(
       "MTProto session not configured. Need TELEGRAM_TESTER_API_ID / _API_HASH / _SESSION in .env.\n" +
-        "  Run: npx tsx --env-file=.env scripts/telegram-tester.ts login",
+        "  Mint steps: see the header of scripts/lib/mtproto.ts",
     );
   }
 }
@@ -86,7 +87,7 @@ export async function connect(): Promise<TelegramClient> {
   client.setLogLevel?.("error");
   await client.connect();
   if (!(await client.isUserAuthorized())) {
-    throw new Error("Session expired/invalid. Re-run: npx tsx --env-file=.env scripts/telegram-tester.ts login");
+    throw new Error("Session expired/invalid. Re-mint it (see the header of scripts/lib/mtproto.ts)");
   }
   return client;
 }

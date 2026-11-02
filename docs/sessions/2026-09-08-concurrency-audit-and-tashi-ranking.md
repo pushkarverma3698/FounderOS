@@ -1,5 +1,7 @@
 # 2026-09-08 — concurrency/rate-limit hard audit, main/beta desync fix, Tashi's ranking, and the board expansion goes to prod
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 1. **Diagnosed "main broke"** — it wasn't. CI and prod were green throughout. The real problem:

@@ -92,9 +92,9 @@ describe("hub-http — server", () => {
     const all = await client(ALL);
     const brain = await client(BRAIN);
     try {
-      expect((await all.listTools()).tools).toHaveLength(9);
+      expect((await all.listTools()).tools).toHaveLength(10);
       const brainTools = (await brain.listTools()).tools.map((t) => t.name);
-      expect(brainTools).toHaveLength(5);
+      expect(brainTools).toHaveLength(6);
       expect(brainTools).not.toContain("gmail_search");
       // Scope is enforced on the call too, not only in the list.
       const r = await brain.callTool({ name: "gmail_search", arguments: { query: "x" } });

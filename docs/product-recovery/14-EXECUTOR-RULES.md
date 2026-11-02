@@ -1,5 +1,7 @@
 # Executor Rules — binding on Antigravity
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 **Read this before executing any phase.** It is short on purpose. Every rule below names the
 incident that produced it and states **what enforces it** — a rule enforced by nothing decays
 (`CLAUDE.md` #27), so where a mechanism exists, the mechanism is the rule and this file is only

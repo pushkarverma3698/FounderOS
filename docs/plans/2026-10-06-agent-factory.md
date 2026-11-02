@@ -1,5 +1,7 @@
 # Agent factory: FounderOS makes and supervises agents
 
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
+
 > **Status (2026-10-06):** PROPOSED. Nothing is built. Two founder decisions are needed (§ 10).
 > **Depth:** Full. It touches a schedule, a DB schema, and turns that can act on the founder's behalf.
 > **Brief:** [AG-023](../antigravity/AG-023-named-routines.md) builds Option 1.
