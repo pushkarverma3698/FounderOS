@@ -1,5 +1,7 @@
 # FounderOS — 12-Phase Transition Program
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 **This document is the contract.** Sonnet implements a phase; Antigravity validates it. Neither
 redesigns the architecture. A phase that needs a design change stops and says so.
 

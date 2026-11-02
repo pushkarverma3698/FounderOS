@@ -1,5 +1,7 @@
 # Switchable coding CLI (Claude Code ⇄ Antigravity) — plan + handoff
 
+**Status:** Superseded by [2026-10-10-opendots-migration.md](2026-10-10-opendots-migration.md) (2026-10-27).
+
 Status 2026-10-03: designed, not built. Branch `claude/feat-switchable-coding-cli` (off `origin/beta`
 at `abce46ee`). Written as a handoff: the session that designed it compacted twice.
 

@@ -5,14 +5,6 @@ after."** This applies to the automated dispatcher, to Antigravity's laptop-side
 Claude's own work in this repo — the same discipline, everywhere, not one rule for agents and
 another for humans.
 
-**Why this exists:** by 2026-08-11 this repo's working tree had accumulated uncommitted, unrelated
-changes from three different pieces of work sitting on `main` at once (a live Antigravity
-laptop conversation editing `mac-client/` + jobhunt files, plus two untracked `docs/decisions/`
-files from yet another session) — none of it conflicting, but all of it invisible to `git status`
-as belonging to anything in particular. That's not a git problem, it's a branching-discipline
-problem: none of that work had a branch of its own, so there was nothing to separate it from
-whatever came next. A real engineering team doesn't let this happen — every task gets its own
-branch before the first edit, not after.
 
 ## Branch types
 
@@ -128,7 +120,7 @@ check is a stop, not a speed bump — including on a sync PR.
    already exists for the mechanical half of this — run it periodically.
 5. **Delete on merge.** `gh pr merge --delete-branch`, not a manual follow-up someone forgets.
 6. **Before creating a branch or switching one, check whether Antigravity is live on this
-   checkout** (`~/Projects/scripts/ai-tools/agy-guard`). A branch switch is non-destructive to
+   checkout** (`~/Projects/claude-agent-setup/agy-guard`). A branch switch is non-destructive to
    uncommitted work (git carries it forward), but never `git add -A`, `git stash`, or anything
    broad while `agy-guard` reports BUSY — stage only the files your own task touched, by name.
 7. **The dispatcher already does 1–5 mechanically** for issue-driven work (`git checkout -B

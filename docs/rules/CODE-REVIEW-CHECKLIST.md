@@ -1,6 +1,6 @@
 # FounderOS — Code Review Checklist
 
-Adapted to FounderOS reality (single-tenant Telegram bot, seam-traced run-loop,
+Adapted to FounderOS reality (single-tenant Telegram bot, jobs pipeline with a Telegram front end,
 DB-backed HITL). Run through this before merging any PR. Pairs with
 [`TESTING-RULES.md`](TESTING-RULES.md) and [`PROGRAMMING-RULES.md`](PROGRAMMING-RULES.md).
 
@@ -20,10 +20,9 @@ DB-backed HITL). Run through this before merging any PR. Pairs with
 ## Observability
 
 - [ ] No `console.log` in `src/` (process-boot `console.error` in `index.ts`/`mcp` is
-      the only allowed exception). Use the `logger` child + `trace.event()`.
-- [ ] New run-loop branches emit a seam (`trace.event(...)`) so a turn is greppable by
-      `turnId`.
-- [ ] New seam name added to the `Seam` union in `src/infra/trace.ts` if introduced.
+      the only allowed exception). Use the `logger` child.
+- [ ] New job-pipeline branches log through the `logger` child with a run or job id so a
+      run is greppable. (The kernel `trace.event()` seam layer was removed 2026-10-10.)
 
 ## Security
 

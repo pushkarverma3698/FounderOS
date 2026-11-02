@@ -1,5 +1,7 @@
 # Audit: reply latency, Telegram UX, RAG/context, goals, OmniRouter (2026-09-28)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 Evidence-only audit. No code changed. Every number below comes from a command run on 2026-09-28
 against prod (`ssh founderos-vps`): the `founderos.service` journal (`"module":"trace"` lines,
 30 days) and the prod Postgres (`founderos-postgres`). Fix plans that act on it:

@@ -145,4 +145,36 @@ describe("hybridRagSearch", () => {
     expect(res.hits).toEqual([]);
     expect(res.mode).toBe("hybrid");
   });
+
+  describe("brain_memories: one doc does not fill the whole top-k", () => {
+    const chunk = (source: string, content: string): RagHit => ({ content, metadata: {}, score: 0.5, source });
+
+    it("lists each source doc once before repeating any, keeping rank order", async () => {
+      // 2026-10-27 recall check: two chunks of ADR-018 pushed the one-click-apply plan to rank 4 of top 3.
+      const res = await hybridRagSearch("brain_memories", "q", 3, deps({
+        vectorSearch: async () => [chunk("adr-018.md", "A1"), chunk("adr-018.md", "A2"), chunk("plan.md", "P1")],
+        keywordSearch: async () => [],
+      }));
+      if (!("hits" in res)) throw new Error("expected hits");
+      expect(res.hits.map((h) => h.content)).toEqual(["A1", "P1", "A2"]);
+    });
+
+    it("still returns top_k hits when only one doc matches", async () => {
+      const res = await hybridRagSearch("brain_memories", "q", 2, deps({
+        vectorSearch: async () => [chunk("a.md", "A1"), chunk("a.md", "A2"), chunk("a.md", "A3")],
+        keywordSearch: async () => [],
+      }));
+      if (!("hits" in res)) throw new Error("expected hits");
+      expect(res.hits.map((h) => h.content)).toEqual(["A1", "A2"]);
+    });
+
+    it("treats each agent-written (ide_mcp) row as its own doc", async () => {
+      const res = await hybridRagSearch("brain_memories", "q", 2, deps({
+        vectorSearch: async () => [chunk("ide_mcp", "N1"), chunk("ide_mcp", "N2")],
+        keywordSearch: async () => [],
+      }));
+      if (!("hits" in res)) throw new Error("expected hits");
+      expect(res.hits.map((h) => h.content)).toEqual(["N1", "N2"]);
+    });
+  });
 });

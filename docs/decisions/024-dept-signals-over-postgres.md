@@ -1,5 +1,7 @@
 # ADR-024 — Durable cross-department signals over Postgres (Phase 4)
 
+**Status:** Archived — dept signals deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-14
 - **Status:** Accepted
 - **Branch:** `feat/phase4-dept-signals` (stacked on `feat/phase2-typed-contracts`)

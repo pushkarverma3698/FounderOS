@@ -4,7 +4,7 @@
 FounderOS answer like it has no memory, compared with Claude Code; should there be one central layer for tools,
 workflows, automations and APIs.
 
-**Status:** findings and recommendations. Nothing built. Evidence was read from `origin/beta` @ `6284f8f4` and from prod
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
 (`/opt/founderos` @ `10e2d9f7`, read-only queries).
 
 ## 1. Verdicts

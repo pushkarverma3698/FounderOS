@@ -1,5 +1,7 @@
 # 2026-09-29 — Daily-use fixes rolled to prod; a tool schema took down the engineering worker
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 - Audited 90 production chat turns (09-15 → 09-28), every tool call, all 10 Antigravity tasks and pr-brain's token use. Findings are in the brain (`project: founderos`).
 - Shipped the fixes through beta → main:

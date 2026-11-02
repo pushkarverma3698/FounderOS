@@ -1,5 +1,7 @@
 # FounderOS — Developer Guide
 
+**Status:** Archived — 21 of 23 referenced paths no longer exist; see tag archive/founderos-v3 (2026-10-27).
+
 > **Start here before touching the codebase.** This document is the step-by-step
 > companion to `docs/rules/PROGRAMMING-RULES.md` — it explains the *why* and shows
 > concrete examples of every extension point.
