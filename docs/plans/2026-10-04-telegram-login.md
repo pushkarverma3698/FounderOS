@@ -1,5 +1,7 @@
 # /login — renew every credential from Telegram
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Outcome:** when a login expires (Google, Claude Code, agy, or whatever replaces them), the founder renews it from his phone in under a minute, with no SSH and no `.env` edit.
 
 **Binding constraint:** the VPS has no browser. Each tool's own `login` opens one, so the flow has to be link-out, paste-back.

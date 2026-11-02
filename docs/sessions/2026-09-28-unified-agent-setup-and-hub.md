@@ -1,5 +1,7 @@
 # 2026-09-28 — One setup for every agent: rules, brain, hub, and on-demand Claude
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 - **One rulebook on the VPS.** `~/Projects/scripts/ai-tools/sync-agent-rules` (laptop) copies
   `~/.agents/AGENTS.md`, the `production-ready` and `pr-adversary` skills and the local Oplify rules

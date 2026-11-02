@@ -1,5 +1,7 @@
 # 2026-09-17 — CV/PDF fix, senior-role backfill, kernel-timeout fix, Antigravity branch triage
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 Founder asked for five things in one message: (1) reproduce and fix the CV-as-PDF failure for

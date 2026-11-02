@@ -66,6 +66,23 @@ async function typeIntoField(page: Page, selector: string, value: string): Promi
   return (await locator.inputValue().catch(() => "")) === value;
 }
 
+/** Tick a checkbox/radio. Styled forms draw a 0px input behind its <label for>, which check() refuses. */
+async function tickInput(input: Locator): Promise<boolean> {
+  // allow-failopen: unreadable checked state reports false.
+  const checked = (): Promise<boolean> => input.isChecked().catch(() => false);
+  // allow-failopen: a zero-size input falls through to its label below.
+  await input.check({ timeout: 3_000 }).catch(() => undefined);
+  if (await checked()) return true;
+  // allow-failopen: no id means no label[for]; the wrapping label is tried instead.
+  const id = await input.getAttribute("id").catch(() => null);
+  const label = id ? input.page().locator(`label[for="${id.replace(/["\\]/g, "\\$&")}"]`) : input.locator("xpath=ancestor::label[1]");
+  // allow-failopen: no clickable label; the DOM click below still fires the change event.
+  await label.first().click({ timeout: 3_000 }).catch(() => undefined);
+  // allow-failopen: a detached input reports unchecked below.
+  if (!(await checked())) await input.evaluate((el) => (el as unknown as { click(): void }).click()).catch(() => undefined);
+  return checked();
+}
+
 async function chooseInField(
   page: Page,
   selector: string,
@@ -96,11 +113,7 @@ async function chooseInField(
     return (await button.getAttribute("aria-pressed")) === "true";
   }
   if (count === 1 && fieldType === "checkbox") {
-    const single = inputs.first();
-    // allow-failopen: styled checkbox fallback to .click() when .check() actionability fails.
-    await single.check({ timeout: 5_000 }).catch(() => single.click({ timeout: 5_000, force: true }));
-    // allow-failopen: unreadable checked state reports false.
-    return single.isChecked().catch(() => false);
+    return tickInput(inputs.first());
   }
 
   for (let i = 0; i < count; i++) {
@@ -128,10 +141,7 @@ async function chooseInField(
       .catch(() => "");
 
     if (text.toLowerCase() === optionText.toLowerCase() || text.includes(optionText)) {
-      // allow-failopen: styled radio/checkbox fallback to .click().
-      await input.check({ timeout: 5_000 }).catch(() => input.click({ timeout: 5_000, force: true }));
-      // allow-failopen: unreadable checked state reports false.
-      return input.isChecked().catch(() => false);
+      return tickInput(input);
     }
   }
   return false;
@@ -182,16 +192,19 @@ async function findSubmitControl(page: Page): Promise<Locator | null> {
   return null;
 }
 
-async function checkFormValidity(page: Page): Promise<{ valid: boolean; invalidField?: string }> {
+export async function checkFormValidity(page: Page): Promise<{ valid: boolean; invalidField?: string }> {
   return page
     .evaluate(() => {
       const dom = globalThis as unknown as DomGlobal;
       const forms = Array.from(dom.document.querySelectorAll("form"));
       for (const form of forms) {
         if (form.checkValidity && !form.checkValidity()) {
-          const invalid = form.querySelector(":invalid");
+          // ":invalid" alone matches the enclosing <fieldset> first, which has no name (Recruitee, 2026-10-20).
+          const invalid = form.querySelector("input:invalid, select:invalid, textarea:invalid");
+          const labelledBy = (invalid?.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean)[0];
           const label =
             (invalid?.id ? dom.document.querySelector(`label[for="${dom.CSS.escape(invalid.id)}"]`)?.textContent : null) ||
+            (labelledBy ? dom.document.querySelector(`#${dom.CSS.escape(labelledBy)}`)?.textContent : null) ||
             invalid?.getAttribute("aria-label") ||
             invalid?.getAttribute("name") ||
             invalid?.id ||
@@ -288,6 +301,8 @@ export async function submitApplicationForm(
   row: RowApplicationFacts,
   dossier?: CandidateDossier,
   rowId?: string,
+  /** Fill and run every pre-submit check, then stop before the click (readiness checks; never sends). */
+  dryRun = false,
 ): Promise<SubmittedFormResult | FormFailureResult> {
   const check = classifyFormUrl(url);
   if (!check.supported) return { ok: false, reason: check.reason, platform: null };
@@ -348,6 +363,10 @@ export async function submitApplicationForm(
       return { ok: false, reason: "could not locate the submit button on this form", platform: check.platform };
     }
 
+    if (dryRun) {
+      const png = await page.screenshot({ fullPage: true, type: "png" });
+      return { ok: true, platform: check.platform, clicked: false, confirmed: false, evidence: "dry run: every check passed, Submit not clicked", afterScreenshotPng: png };
+    }
     const urlBefore = page.url();
     await button.click({ timeout: 10_000 });
 

@@ -1,6 +1,7 @@
 # ADR-039: Weekly Release Train + Enforced Quality Gates
 
-**Status:** Accepted · 2026-06-25 · **partially superseded by ADR-045** (the `stable`
+**Status:** Superseded by [CLAUDE-RULES-RATIONALE.md](../rules/CLAUDE-RULES-RATIONALE.md) § "Git: why Claude may merge to `main`" (founder directive, 2026-08-01): promotions go out on green CI any day, not on a Friday train.
+Accepted 2026-06-25 · **partially superseded by ADR-045** (the `stable`
 tier was retired; the release train now promotes `beta → main` directly — everywhere
 below that reads `beta → stable → main`, read `beta → main`).
 **Builds on:** ADR-021 (main IS production), BRANCH-MODEL.md (feat → beta → main)

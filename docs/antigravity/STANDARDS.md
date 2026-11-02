@@ -29,7 +29,7 @@ incident that produced them.
 |---|---|
 | No file over **400 lines** | `pnpm verify:arch` — `loc-budget` |
 | No `any`. Use `unknown` and narrow | `pnpm lint` (`tsc --noEmit`, strict) |
-| Import direction: `contracts ← kernel ← gateway`. The kernel may import only `kernel/core/db/infra/tools` | `verify:arch` — `kernel-purity`, `gateway-imports` |
+| Only `src/gateway` and `src/jobs` import `src/gateway` | `verify:arch` — `gateway-imports` |
 | No routing or parsing by regex on user text | `verify:arch` — `regex-routing` |
 | A fail-open `catch` needs an `// allow-failopen: <reason>` tag | `verify:arch` — `fail-open-catch` |
 | Killed modules must not be re-created (tombstones) | `verify:arch` |
@@ -173,7 +173,7 @@ on the first line; the founder reads top-down.
 
 ## 11. Never, without an explicit instruction in the brief
 
-- Commit, push, rebase, force-push, change branch, or open a PR.
+- Commit, push, rebase, force-push, change branch, or open a PR. (A brief that says "open a draft PR" is that instruction.)
 - Edit CI config, `.env`, secrets, or credentials.
 - Delete a file not named in the brief.
 - Run a destructive command (`rm -rf`, a database drop).

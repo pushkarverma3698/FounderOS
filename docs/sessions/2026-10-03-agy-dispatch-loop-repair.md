@@ -1,5 +1,7 @@
 # 2026-10-03 — the Telegram `/task` loop repaired end to end, with agy as executor and as reviewer
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 The founder moved the loop from Claude to Antigravity (agy) for both roles, and `/task` stopped working. We audited the VPS logs, his Telegram transcript and the code, fixed every defect in one PR (#794, promoted by #795), deployed, and then ran the real loop through real Telegram.

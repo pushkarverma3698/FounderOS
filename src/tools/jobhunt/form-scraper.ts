@@ -76,6 +76,20 @@ export async function revealPlatformForm(page: Page, platform: FormPlatform): Pr
   // allow-failopen: networkidle is best-effort before checking inputs.
   await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
 
+  // Recruitee on the employer's own domain (tsg.careers, 2026-10-20): the job page /o/<slug> holds the form hidden
+  // behind a tab, and only /o/<slug>/c/new shows it.
+  const here = new URL(page.url());
+  const recruiteeForm = page.locator("form#offer-application-form");
+  // allow-failopen: an unreadable form state leaves the page as it is.
+  const hiddenForm = (await recruiteeForm.count().catch(() => 0)) > 0 && !(await recruiteeForm.first().isVisible().catch(() => true));
+  if (/^\/o\/[^/]+\/?$/.test(here.pathname) && hiddenForm) {
+    here.pathname = `${here.pathname.replace(/\/$/, "")}/c/new`;
+    await page.goto(here.toString(), { waitUntil: "domcontentloaded", timeout: 30_000 });
+    // allow-failopen: scrapePageFields runs next and reports what it finds.
+    await page.locator('input[name="candidate.name"]').first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => undefined);
+    return;
+  }
+
   const visibleInputs = await page
     .locator('input[type="email"]:visible, input[type="text"]:visible, input[type="file"]')
     .count()
