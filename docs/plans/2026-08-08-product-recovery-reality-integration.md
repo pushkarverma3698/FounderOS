@@ -1,5 +1,7 @@
 # FounderOS Product Recovery: Positive Path & P5 Recovery Integration Plan
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 ## Goal Description
 Complete the final missing half of **Phase 4 (Deliverable Verification)** by proving the end-to-end positive path for file deliverables (CSV / report export) and executing the 7-scenario deliverable test matrix. Advance into **Phase 5 (Recovery and Objective Ownership)** with verified in-band and boot-time crash recovery.
 

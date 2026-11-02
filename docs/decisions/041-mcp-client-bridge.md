@@ -2,6 +2,8 @@
 
 **Status:** Accepted · **Date:** 2026-06-26 · **Phase:** D→E (Revenue / Portfolio)
 
+> Update 2026-10-27: the agent kernel was removed 2026-10-10. Still in the tree: `src/mcp/client.ts`, `bridge-manifest.ts`, `bridge-classify.ts`, `src/agents/agent-tools/external-mcp.ts`, `mcp-bridge.json`. Removed or renamed, so the paths below are history: `src/mcp/server.ts` (now `src/mcp/hub-server.ts` and `hub.ts`), `src/mcp/registry.ts`, `src/mcp/manifest-store.ts`, the `/connect` command in `src/gateway/commands.ts`, `scripts/mcp-bridge-probe.ts` and `scripts/probe-mcp-bridge.ts` (`pnpm mcp:probe` is gone), and `src/infra/providers/index.ts` (the flag dispatcher; `src/infra/providers/` now holds only `google-direct.ts`, `google-gws.ts`, `linkedin-direct.ts`, `types.ts`).
+
 ## Context
 FounderOS was an MCP **server** only (`src/mcp/server.ts` — 6 read-only tools exposed to
 external clients like Claude Code). Agents had **no** way to *consume* external MCP servers.

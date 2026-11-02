@@ -1,5 +1,7 @@
 # Self-Improvement Audit — can FounderOS improve itself?
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Date:** 2026-08-12 · **Branch:** `claude/production-logs-audit-8tkzw0` · **HEAD:** `0716424`
 **Question asked:** *"How can we say we are a self-improving system when it cannot improve itself?"*
 

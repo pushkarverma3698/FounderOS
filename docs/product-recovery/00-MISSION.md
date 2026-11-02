@@ -1,6 +1,6 @@
 # FounderOS Product Convergence — Mission
 
-**Status:** Audit complete 2026-08-08. Plan is the contract. No implementation performed this session.
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
 **Audited against:** prod VPS `f7ea923` (= `origin/main`), live journalctl, live Postgres `agents` schema.
 
 ---

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { evaluatePrScope, frozenTouches, parseMoves } from "../../../scripts/verify-pr-scope.js";
+import { evaluatePrScope, frozenTouches, newBuildFiles, parseCheckedFirst, parseMoves } from "../../../scripts/verify-pr-scope.js";
 
 const BODY_A = "## What changed\nx\n\nMoves: A\n";
 
@@ -71,4 +71,31 @@ describe("promotion-branch exemption is narrow", () => {
   it("does not exempt an ordinary chore/ branch", () => {
     expect(evaluatePrScope({ files: ["src/tools/video-brief.ts"], body: "", labels: [], headRef: "chore/tidy" }).ok).toBe(false);
   });
+});
+
+// Founder 2026-10-13: agents built team-shift, chief-run and a host cron scheduler that OpenDots already had natively
+// (scheduled tasks, computers), and days went into them. A new code file now needs a `Checked first:` line.
+describe("Checked first", () => {
+  const CHECKED = `${BODY_A}Checked first: grep -rn scheduler src/ and the OpenDots docs; native scheduled tasks exist, so none built.\n`;
+  it("reads the line, ignoring the template's HTML-comment placeholder", () => {
+    expect(parseCheckedFirst("Checked first: grep found nothing")).toBe("grep found nothing");
+    expect(parseCheckedFirst("Checked first: <!-- what you searched -->")).toBe("");
+    expect(parseCheckedFirst("no line")).toBe("");
+  });
+  it("counts new code and scripts, never tests, docs or markdown", () =>
+    expect(newBuildFiles(["src/a.ts", "deploy/x/run", "tests/unit/a.test.ts", "docs/plans/p.md", "README.md"])).toEqual(["src/a.ts", "deploy/x/run"]));
+  it("fails a PR that adds a script with no Checked first line, and names the file", () => {
+    const r = evaluatePrScope({ files: ["deploy/opendots/team-shift"], added: ["deploy/opendots/team-shift"], body: BODY_A, labels: [], headRef: "feat/x" });
+    expect(r.ok).toBe(false);
+    expect(r.problems.join("\n")).toContain("deploy/opendots/team-shift");
+    expect(r.problems.join("\n")).toContain("Checked first:");
+  });
+  it("fails a one-word Checked first line", () =>
+    expect(evaluatePrScope({ files: ["src/a.ts"], added: ["src/a.ts"], body: `${BODY_A}Checked first: yes\n`, labels: [], headRef: "feat/x" }).ok).toBe(false));
+  it("passes with a real Checked first line, or when only existing files and tests change", () => {
+    expect(evaluatePrScope({ files: ["src/a.ts"], added: ["src/a.ts"], body: CHECKED, labels: [], headRef: "feat/x" }).ok).toBe(true);
+    expect(evaluatePrScope({ files: ["src/a.ts", "tests/unit/a.test.ts"], added: ["tests/unit/a.test.ts"], body: BODY_A, labels: [], headRef: "fix/x" }).ok).toBe(true);
+  });
+  it("exempts promotions", () =>
+    expect(evaluatePrScope({ files: ["src/a.ts"], added: ["src/a.ts"], body: BODY_A, labels: [], headRef: "chore/promote-x" }).ok).toBe(true));
 });

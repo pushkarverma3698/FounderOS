@@ -48,10 +48,29 @@ Rejected as the sole mechanism. This is the exact defect this ADR closes: zero v
 
 This ADR stays ACCEPTED as long as `mac-client pytest` keeps the two failure-path tests green and the two original success-path tests (`test_submit_presses_the_employers_own_button`, `test_lever_submit_also_reaches_the_real_button`) also green — a change to `overlay.js` that breaks either side regresses one of the two failure modes this document exists to prevent.
 
+## Amendment 2026-10-18: what counts as the founder's confirmed Submit in the Telegram auto-apply flow
+
+The rule above is unchanged: the machine presses the employer's real button only after a deliberate founder decision, and records `applied` only after positive confirmation. The Telegram auto-apply flow (`src/gateway/auto-apply.ts`, `apply-submit.ts`) has two surfaces for that decision. Both run the same function (`runSubmit`), under the same per-row lock, with the same guards (already applied, earlier unconfirmed click, already audited):
+
+1. **The Telegram Submit button** (`jh:s:<rowId>`): a tap by the founder in the chat is the decision.
+2. **The Mini App Submit** (`POST /apply/<token>/submit` on the answer page): counts as the decision only when all of these hold:
+   - the HMAC link token is valid for that row and not expired;
+   - the `X-Telegram-Init-Data` header passes Telegram WebApp verification against the jobs bot token (HMAC-SHA256 with the `WebAppData` key), with `auth_date` at most one hour old;
+   - the verified Telegram user id maps to the same profile that owns the application row: an entry in `JOBHUNT_SENDER_PROFILES` wins, otherwise the id equal to `TELEGRAM_CHAT_ID` (the founder's private chat) maps to the default profile, and any other user is refused;
+   - the founder pressed the MainButton **and** then confirmed in the page itself ("Send your application to X now?"), and the page's stamp equals the stored snapshot (a stale page cannot submit a changed form).
+
+Anything short of that is a plain 404 and sends nothing. The URL token alone can save answers, as before, but it can never submit: the link is not proof of who holds it.
+
+A confirmed send, from either surface, writes an `agents.action_log` row (`job_application_submitted`, idempotency key `apply-submit:<rowId>`); the key is checked first and a row already audited is refused. The "earlier click with no confirmation" guard now persists in the answer-page snapshot (`unconfirmedAt`), so it survives a gateway restart.
+
+Greenhouse sometimes answers the Submit click with an emailed 8-character "confirm you are a human" code instead of a confirmation. That is not a confirmation and not an unconfirmed click: the application is not recorded, and the browser page is kept open for up to 10 minutes (`src/tools/jobhunt/held-submit.ts`). The founder reads the email himself and types the code into the answer page (`POST /apply/<token>/code`, same initData auth and per-row lock as Submit); the bot never reads email, never fetches the code and never guesses one. After the code the same confirmation check runs: a confirmed page is recorded exactly like a confirmed send (applied, `apply-submit:<rowId>` audit row), a wrong code leaves the page open for another try until the 10 minutes pass, and a timeout or an unconfirmed result takes the unconfirmed path (no second send). Cancel closes the held page.
+
+Deploy requirement: none beyond `TELEGRAM_CHAT_ID`; `JOBHUNT_SENDER_PROFILES` is only needed to sign in other users or to override the founder's profile.
+
 ## References
 
 - `mac-client/mac_client/overlay.js`, `mac-client/mac_client/apply.py`
 - `mac-client/tests/test_apply_browser.py`
 - `docs/superpowers/specs/2026-08-08-jobhunt-apply-pipeline-audit-fix-design.md` (Finding 2 — the original audit that found this)
 - Commit `70212f6` (the reverted fix attempt), commit `e53dacf` (the revert, findings D1-D4)
-- `src/agents/prompts/jobhunt.ts` (hard limits — cites this ADR)
+- `src/agents/prompts/jobhunt.ts` (hard limits; removed 2026-10-10 with the kernel. The rule is now enforced in `src/tools/jobhunt/form-runner.ts` and `held-submit.ts`, which cite this ADR)

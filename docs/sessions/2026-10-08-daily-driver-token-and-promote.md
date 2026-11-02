@@ -1,5 +1,7 @@
 # 2026-10-08 — one token, one repo list, /promote from Telegram
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 - Landed on beta: #1011 (AG-039, one bot token for every daemon), #1008 (install/deploy `APP_DIR`, founder seed skip), #1009 (AG-041, `/promote`).
 - Promoted to main as #1019 (`d3fb5304`, merge commit). Deploy green; prod HEAD `d3fb5304`, `founderos` active, `promote-run` installed in `~founderos/bin`.

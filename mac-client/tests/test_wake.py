@@ -45,3 +45,29 @@ def test_defaults_to_pushkar_when_the_local_file_is_unparseable(monkeypatch):
     monkeypatch.setattr(wake, "load_profile", raises)
 
     assert wake._current_profile_id() == "pushkar-nl-tech"
+
+
+def _run_main(monkeypatch, profile_id):
+    """Drive wake.main() with every network edge faked; return what notify.send was given."""
+    sent = []
+    monkeypatch.setattr(wake, "_current_profile_id", lambda: profile_id)
+    monkeypatch.setattr(wake, "sync_profile", lambda profile_id=None: False)
+    monkeypatch.setattr(wake, "load_profile", lambda: type("P", (), {"profile_id": profile_id})())
+    job = type("J", (), {"company": "Adyen", "title": "SRE"})()
+    monkeypatch.setattr(wake, "fetch_queue", lambda pid: [job])
+    monkeypatch.setattr(wake, "save_queue", lambda jobs: [])
+    monkeypatch.setattr(wake.notify, "send", lambda text, reply_markup=None: sent.append((text, reply_markup)))
+    assert wake.main() == 0
+    return sent
+
+
+def test_the_pushkar_queue_message_carries_the_top_roles_button(monkeypatch):
+    (text, markup), = _run_main(monkeypatch, "pushkar-nl-tech")
+    assert "mac_client" not in text
+    assert markup["inline_keyboard"][0][0]["callback_data"] == "now:jobs"
+
+
+def test_another_candidates_queue_message_has_no_button_that_would_open_pushkars_roles(monkeypatch):
+    # The bot's now:jobs button opens the DEFAULT profile's brief; offering it for Tashi's queue would show his roles.
+    (text, markup), = _run_main(monkeypatch, "wife-nl-finance")
+    assert markup is None

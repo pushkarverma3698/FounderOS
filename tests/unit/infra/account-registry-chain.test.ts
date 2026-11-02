@@ -26,13 +26,13 @@ describe("account registry chain (centralized routing)", () => {
     expect(creds.gws_profile_dir).toContain("/accounts/personal/gws");
   });
 
-  it("sales google resolves to turicks gws profile path", () => {
+  it("sales google resolves to the personal gws profile path", () => {
     const key = resolveAccountKey("google", { department: "sales" });
-    expect(key).toBe("turicks");
+    expect(key).toBe("personal");
 
     const refs = defaultCredentialRefs("google", key, "gws");
     const creds = resolveGoogleCredentials(refs);
-    expect(creds.gws_profile_dir).toContain("/accounts/turicks/gws");
+    expect(creds.gws_profile_dir).toContain("/accounts/personal/gws");
   });
 
   it("jobhunt linkedin uses personal env var names (not turicks legacy)", () => {
@@ -73,6 +73,6 @@ describe("account registry chain (centralized routing)", () => {
       expect(DEPARTMENT_ACCOUNT_DEFAULTS[dept]?.google).toBeDefined();
     }
     expect(DEPARTMENT_ACCOUNT_DEFAULTS["jobhunt"]?.google).toBe("personal");
-    expect(DEPARTMENT_ACCOUNT_DEFAULTS["sales"]?.google).toBe("turicks");
+    expect(DEPARTMENT_ACCOUNT_DEFAULTS["sales"]?.google).toBe("personal");
   });
 });

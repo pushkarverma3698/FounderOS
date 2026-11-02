@@ -8,8 +8,8 @@
  * lower the pin (raising it by hand is the one thing reviewers must reject).
  *
  * Rules (see JARVIS-ARCHITECTURE.md + the approved v3 plan):
- *   R1 gateway-imports   nothing outside src/gateway + src/index.ts imports gateway
- *   R2 kernel-purity     src/kernel imports only kernel/core/db/infra/tools
+ *   R1 gateway-imports   nothing outside src/gateway + src/jobs (the composition root) imports gateway
+ *   R2 kernel-purity     retired 2026-10-10 with the kernel; src/kernel is now a tombstone (R6)
  *   R3 fail-open-catch   `.catch(() =>` swallows require an `allow-failopen:` tag
  *   R4 loc-budget        no src file over 400 lines
  *   R5 regex-routing     exported *_RE control-flow regexes outside the kernel
@@ -73,7 +73,31 @@ export const TOMBSTONES: string[] = [
   "src/infra/composio.ts",
   "src/infra/providers/google-composio.ts",
   "src/infra/providers/linkedin-composio.ts",
+  // The OpenDots GitHub-label pipeline (founder 2026-10-13, "simplify the setup"): a hand-built scheduler, queue and
+  // dispatcher over features OpenDots already has (scheduled tasks, each Dot's computer). Dots lead claude/agy
+  // directly through run-bg; recurring work is an OpenDots scheduled task.
+  "deploy/opendots/team-shift",
+  "deploy/opendots/chief-run",
+  "deploy/opendots/team-lib.sh",
+  "deploy/opendots/team-stream",
+  "deploy/opendots/team",
+  "deploy/opendots/shift-cron",
+  "deploy/opendots/shift-notify",
+  "deploy/opendots/add-dot.sh",
+  "deploy/opendots/seed-cli-logins.sh",
   "src/types/composio.d.ts",
+  // The jobs-only cut (founder decision 2026-10-10, docs/plans/2026-10-10-opendots-migration.md
+  // Phase 3): prod runs src/jobs/main.ts and nothing else. The kernel, the planner, the coding
+  // pipeline and the general-purpose gateway live on only at tag archive/founderos-v3.
+  "src/index.ts",
+  "src/kernel",
+  "src/goals",
+  "src/eval",
+  "src/proof",
+  "src/gateway/telegram.ts",
+  "src/gateway/kernel-boot.ts",
+  "src/gateway/kernel-run.ts",
+  "src/infra/scheduler.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */
@@ -153,7 +177,7 @@ export function resolveImport(fromRel: string, spec: string): string | null {
 export function ruleGatewayImports(files: Array<{ rel: string; text: string }>): RuleResult {
   const violations: Violation[] = [];
   for (const { rel, text } of files) {
-    if (rel.startsWith("src/gateway/") || rel === "src/index.ts") continue;
+    if (rel.startsWith("src/gateway/") || rel.startsWith("src/jobs/")) continue;
     for (const spec of importsOf(text)) {
       const resolved = resolveImport(rel, spec);
       if (resolved?.startsWith("src/gateway/")) {
@@ -162,22 +186,6 @@ export function ruleGatewayImports(files: Array<{ rel: string; text: string }>):
     }
   }
   return { rule: "gateway-imports", violations };
-}
-
-const KERNEL_ALLOWED = ["src/kernel/", "src/core/", "src/db/", "src/infra/", "src/tools/"];
-
-export function ruleKernelPurity(files: Array<{ rel: string; text: string }>): RuleResult {
-  const violations: Violation[] = [];
-  for (const { rel, text } of files) {
-    if (!rel.startsWith("src/kernel/")) continue;
-    for (const spec of importsOf(text)) {
-      const resolved = resolveImport(rel, spec);
-      if (resolved && resolved.startsWith("src/") && !KERNEL_ALLOWED.some((p) => resolved.startsWith(p))) {
-        violations.push({ rule: "kernel-purity", file: rel, detail: `imports ${resolved}` });
-      }
-    }
-  }
-  return { rule: "kernel-purity", violations };
 }
 
 /** `.catch(() =>` — the swallow signature. Tag the line (or the one above) with `allow-failopen: <reason>`. */
@@ -210,7 +218,7 @@ export function ruleLocBudget(files: Array<{ rel: string; text: string }>): Rule
   return { rule: "loc-budget", violations };
 }
 
-/** Exported SCREAMING_CASE *_RE regex consts outside src/kernel — routing/claim regexes are kernel-only (and even there, discouraged). */
+/** Exported SCREAMING_CASE *_RE regex consts outside src/kernel — routing/claim regexes are kernel-only, and since 2026-10-10 there is no kernel. */
 export function ruleRegexRouting(files: Array<{ rel: string; text: string }>): RuleResult {
   const violations: Violation[] = [];
   for (const { rel, text } of files) {
@@ -265,6 +273,10 @@ export function checkRatchet(results: RuleResult[], baseline: Baseline): { ok: b
  * src/eval dead — both are live via `pnpm proof:*` and `pnpm eval` — and a CI
  * gate that publishes live subsystems as deletable is worse than no gate.
  *
+ * A subsystem that holds a process entrypoint (`entrypoints`, read from
+ * package.json) is reachable by definition: src/jobs is started by `pnpm start`,
+ * and nothing imports a process's own main file.
+ *
  * Directories are derived from `files`, so a directory holding only ambient
  * .d.ts declarations (src/types) is not a subsystem: nothing imports a global
  * declaration, and deleting it breaks the build.
@@ -272,6 +284,7 @@ export function checkRatchet(results: RuleResult[], baseline: Baseline): { ok: b
 export function ruleOrphanSubsystem(
   files: Array<{ rel: string; text: string }>,
   roots: Array<{ rel: string; text: string }> = [],
+  entrypoints: readonly string[] = [],
 ): RuleResult {
   const subsystems = new Set<string>();
   for (const { rel } of files) {
@@ -283,6 +296,7 @@ export function ruleOrphanSubsystem(
   const violations: Violation[] = [];
   for (const dir of subsystems) {
     const prefix = `src/${dir}/`;
+    if (entrypoints.some((e) => e.startsWith(prefix))) continue;
     const isReachable = [...files, ...roots].some(
       ({ rel, text }) =>
         !rel.startsWith(prefix) && // ignore internal references
@@ -301,17 +315,26 @@ export function ruleOrphanSubsystem(
   return { rule: "orphan-subsystem", violations };
 }
 
+/** src/ files package.json runs directly (`dist/src/x.js` and `src/x.ts` both name src/x.ts). */
+export function packageEntrypoints(packageJson: string): string[] {
+  const scripts = Object.values((JSON.parse(packageJson) as { scripts?: Record<string, string> }).scripts ?? {});
+  const found = new Set<string>();
+  for (const cmd of scripts) {
+    for (const m of cmd.matchAll(/(?:dist\/)?(src\/[\w./-]+?)\.(?:ts|js)\b/g)) found.add(`${m[1]}.ts`);
+  }
+  return [...found];
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export function runAllRules(): RuleResult[] {
   const files = srcFiles();
   return [
     ruleGatewayImports(files),
-    ruleKernelPurity(files),
     ruleFailOpenCatch(files),
     ruleLocBudget(files),
     ruleRegexRouting(files),
-    ruleOrphanSubsystem(files, scriptFiles()),
+    ruleOrphanSubsystem(files, scriptFiles(), packageEntrypoints(readFileSync(join(ROOT, "package.json"), "utf8"))),
   ];
 }
 

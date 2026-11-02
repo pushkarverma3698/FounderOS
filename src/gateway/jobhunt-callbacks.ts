@@ -13,7 +13,8 @@ import type { Context } from "grammy";
 import { getApplicationById } from "../db/apply-queries.js";
 import { getProfile, listProfiles } from "../tools/jobhunt/profile-config.js";
 import { childLogger } from "../infra/logger.js";
-import { draftRow, type JobhuntCommandDeps } from "./jobhunt-commands.js";
+import { draftRow } from "./jobhunt-commands.js";
+import { handleAutoApplyCallback } from "./auto-apply.js";
 import { markRowApplied, parseJobCallback, JOB_CALLBACK_PREFIX } from "./jobhunt-buttons.js";
 import { draftButtonsFor, parseViewCallback, type ViewCallback } from "./jobhunt-compact.js";
 import { gapAddReply, parseGapCallback } from "./jobhunt-gap-buttons.js";
@@ -24,11 +25,7 @@ import { InputFile } from "grammy";
 const log = childLogger({ module: "gateway:jobhunt-callbacks" });
 
 /** False when the payload is not ours, so the next callback handler gets it. */
-export async function handleJobCallback(
-  ctx: Context,
-  deps: JobhuntCommandDeps,
-  jobs?: JobsViewDeps,
-): Promise<boolean> {
+export async function handleJobCallback(ctx: Context, jobs?: JobsViewDeps): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(JOB_CALLBACK_PREFIX)) return false;
 
@@ -41,6 +38,8 @@ export async function handleJobCallback(
 
   const view = parseViewCallback(data);
   if (view) return handleViewTap(ctx, view, jobs);
+
+  if (await handleAutoApplyCallback(ctx, data)) return true;
 
   const parsed = parseJobCallback(data);
   if (!parsed) {
@@ -73,7 +72,7 @@ export async function handleJobCallback(
 
   await ctx.answerCallbackQuery({ text: "Tailoring…" });
   const profile = getProfile(row.profile_id);
-  await draftRow(ctx, row, deps, "", profile);
+  await draftRow(ctx, row, "", profile);
   return true;
 }
 

@@ -66,10 +66,10 @@ describe("hub — scope", () => {
 
   it("serves the brain only in brain scope, everything in all scope", async () => {
     const brain = (await (await connected("brain")).listTools()).tools.map((t) => t.name);
-    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug"]);
+    expect(brain).toEqual(["search_memory", "get_memory", "remember", "save_decision", "save_bug", "recent_memories"]);
     const all = (await (await connected("all")).listTools()).tools.map((t) => t.name);
     expect(all).toEqual([...brain, "gmail_search", "calendar_events", "list_connected_tools", "call_connected_tool"]);
-    expect(hubTools("all")).toHaveLength(9);
+    expect(hubTools("all")).toHaveLength(10);
   });
 
   it("enforces scope on calls, not only on the list", async () => {
@@ -177,7 +177,7 @@ describe("hub — Google reads never alert on Telegram", () => {
   });
 
   it("the bot's read path alerts (so the mock would see a send)", async () => {
-    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "turicks" });
+    const r = await gwsReadEmails({ query: "x", max_results: 1, account_key: "personal" });
     expect(r.success).toBe(false);
     expect(r.error).toContain("re-authorization");
     expect(sendToChat).toHaveBeenCalledTimes(1);
@@ -186,8 +186,8 @@ describe("hub — Google reads never alert on Telegram", () => {
   it("the hub returns the same re-authorization error for mail and calendar, and sends nothing", async () => {
     const mail = await callGoogleTool("gmail_search", { query: "x" });
     expect(isError(mail)).toBe(true);
-    expect(text(mail)).toContain("## naggar\nError: Google account needs re-authorization");
-    const cal = await callGoogleTool("calendar_events", { account: "turicks" });
+    expect(text(mail)).toContain("Error: Google account needs re-authorization");
+    const cal = await callGoogleTool("calendar_events", { account: "personal" });
     expect(text(cal)).toContain("needs re-authorization");
     expect(sendToChat).not.toHaveBeenCalled();
   });
@@ -359,18 +359,8 @@ describe("hub — stdio entry points", () => {
   }
 
   it("hub.ts serves everything by default and the brain in HUB_SCOPE=brain", async () => {
-    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(9);
-    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(5);
-  }, 60_000);
-
-  it("turicks-brain.ts still serves the five brain tools for configs that start it", async () => {
-    expect(await toolsOf("src/mcp/turicks-brain.ts")).toEqual([
-      "search_memory",
-      "get_memory",
-      "remember",
-      "save_decision",
-      "save_bug",
-    ]);
+    expect(await toolsOf("src/mcp/hub.ts")).toHaveLength(10);
+    expect(await toolsOf("src/mcp/hub.ts", { HUB_SCOPE: "brain" })).toHaveLength(6);
   }, 60_000);
 
   // A hub with an open bridge child never noticed its stdin close, so it outlived the

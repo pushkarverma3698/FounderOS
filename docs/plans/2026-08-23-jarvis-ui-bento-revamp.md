@@ -1,5 +1,7 @@
 # Jarvis UI / FounderOS UI Deep Audit & "Ultraton" Revamp Plan
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 The user requested a deep audit of the current Jarvis UI and a strategy to upgrade it into a "crazyy ui like today people are showing crazy ultraton on instagram deep research" — treating it as a premium portfolio product.
 
 ## 1. Deep Audit: What's Missing?

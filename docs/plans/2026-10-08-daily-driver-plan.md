@@ -1,5 +1,7 @@
 # Daily-driver plan (2026-10-08)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Founder ask (2026-10-08):** FounderOS replaces the laptop for daily work, answers with the right context every time, uses the VPS fully as one tool layer under every client, and is ready for developer friends to test. Keep it a simple harness.
 
 **Approval:** the founder approved this plan in chat on 2026-10-08 ("go … dispatch parallel agents … promote everything to main"). That approval is the `unfreeze` authority for the briefs below that need it.

@@ -19,8 +19,8 @@ Moved verbatim from `CLAUDE.md` on 2026-09-28 (PR docs/claude-md-trim). `CLAUDE.
     the jobhunt/gateway path, drive it through Telegram before calling it
     done.** `scripts/lib/mtproto.ts` sends as the founder and reads the bot's
     real reply (one-time setup: `TELEGRAM_TESTER_API_ID`/`_API_HASH`/`_SESSION`
-    in `.env` — absent as of 2026-09-07; see `scripts/telegram-tester.ts
-    login`). Until that exists, SSH tool-level execution is a fallback, not a
+    in `.env`; present on the VPS and proven working 2026-10-27. The `telegram-tester.ts login`
+    helper was removed 2026-10-10; mint steps are in the `scripts/lib/mtproto.ts` header). If it fails, SSH tool-level execution is a fallback, not a
     substitute — say so explicitly, and ask the founder to send the real
     message himself when the gap matters.
 - **Fix the schema, not the code**: if a task fails on ambiguous requirements,
@@ -33,6 +33,12 @@ Moved verbatim from `CLAUDE.md` on 2026-09-28 (PR docs/claude-md-trim). `CLAUDE.
      module was written from scratch while `nextRecurrence` already sat in
      `src/core/time.ts` — and the existing one was *better*, with real IANA
      timezone handling instead of a fixed offset.)
+     (2026-10-10 → 10-13: about 3,000 lines of team-shift, chief-run, shift-cron and
+     shift-notify re-built a scheduler, queue and dispatcher that OpenDots already had
+     as scheduled tasks and per-Dot computers. The founder: "we do not want claude to
+     drive us 5-6 days of coding and then we get to know it was already there". Since
+     2026-10-13 `scripts/verify-pr-scope.ts` fails a PR that adds a code or script file
+     without a `Checked first:` line naming what was searched and what was found.)
   2. **What is the binding constraint?** Optimising a downstream variable while an
      upstream one is unverified is the most expensive mistake available. Name the
      constraint before choosing the work.
@@ -79,7 +85,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-28 (PR docs/claude-md-trim). `CLAUDE.
   | Live verification (PR-ready only) | real Gemini / MTProto QA | once per PR |
 
   1. A unit or integration test that makes a real LLM call is a **bug**. Tests use mocks, always.
-  2. `scripts/probe-*.ts` and `scripts/e2e-telegram-qa.ts` spend Gemini tokens — never run them
+  2. `scripts/probe-*.ts` and `scripts/telegram-probe.ts` spend Gemini tokens — never run them
      iteratively. Write a failing unit test, fix it, then run the probe ONCE to confirm.
   3. While iterating set `AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free`
      (fallback `openrouter:deepseek/deepseek-r1:free`). Never a `google-genai:*` model in the loop.
@@ -152,7 +158,7 @@ unenforced, and is expected to decay.
 ## Git: why Claude may merge to `main` (founder directive, 2026-08-01)
 The earlier "founder merges only" rule and its CI ladder (`.github/workflows/branch-policy.yml`, deleted) were removed. Finished
 work sat undeployed for days waiting on a human click, and prod ran stale code while its fix was already green on `beta`. Waiting
-was the larger risk. What still gates a merge: branch protection on `main` requires both CI checks ("Type check + lint + wiring",
+was the larger risk. That also ended the weekly release train (ADR-039): a `beta → main` promotion goes out on green CI any day, with no Friday batch. What still gates a merge: branch protection on `main` requires both CI checks ("Type check + lint + wiring",
 "Unit + regression tests"). After the merge, watch the deploy: CD once failed silently and prod stayed on `a966e9a` for a full day.
 
 ## History
