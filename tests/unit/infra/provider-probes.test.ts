@@ -9,6 +9,14 @@ vi.mock("../../../src/infra/gws-runner.js", () => ({
   runGws: mockRunGws,
 }));
 
+const mockGetGoogleAccount = vi.fn(async () => ({
+  ctx: { account_key: "personal" },
+  credentials: { gws_profile_dir: "/profiles/personal" },
+}));
+vi.mock("../../../src/infra/account-registry.js", () => ({
+  getGoogleAccount: mockGetGoogleAccount,
+}));
+
 vi.mock("../../../src/infra/providers/google-direct.js", () => ({
   googleapisConfigured: vi.fn(async () => false),
   directReadEmails: vi.fn(),
@@ -25,6 +33,36 @@ describe("provider-probes", () => {
     const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
     const r = await probeGwsGmail(5_000);
     expect(r.status).toBe("up");
+  });
+
+  // Prod 2026-10-09: the probe ran gws with the host's default login (a dead grant) while every
+  // read used the default account's own profile, so each deploy sent a false "sign-in expired".
+  it("probeGwsGmail probes the account a plain read uses, not the host's default login", async () => {
+    mockRunGws.mockResolvedValue({ ok: true, stdout: "{}", parsed: {} });
+    const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
+    await probeGwsGmail(5_000);
+    expect(mockRunGws).toHaveBeenCalledTimes(2);
+    for (const call of mockRunGws.mock.calls) {
+      expect(call[2]).toEqual({ gwsProfileDir: "/profiles/personal" });
+    }
+  });
+
+  it("probeGwsGmail names the account when its grant is dead", async () => {
+    mockRunGws.mockResolvedValueOnce({ ok: true, stdout: "{}", parsed: {} });
+    mockRunGws.mockResolvedValueOnce({ ok: false, error: "invalid_grant: Bad Request" });
+    const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
+    const r = await probeGwsGmail(5_000);
+    expect(r.status).toBe("down");
+    expect(r.detail).toContain("personal");
+  });
+
+  it("probeGwsGmail still probes (host login) when the account cannot be resolved", async () => {
+    mockGetGoogleAccount.mockRejectedValueOnce(new Error("db down"));
+    mockRunGws.mockResolvedValue({ ok: true, stdout: "{}", parsed: {} });
+    const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
+    const r = await probeGwsGmail(5_000);
+    expect(r.status).toBe("up");
+    expect(mockRunGws.mock.calls[0]?.[2]).toEqual({ gwsProfileDir: undefined });
   });
 
   it("probeGwsGmail returns unconfigured (not down) when the gws CLI is not installed", async () => {

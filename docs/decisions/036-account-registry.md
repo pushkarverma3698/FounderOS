@@ -1,6 +1,8 @@
 # ADR-036: Integration Account Registry
 
 **Status:** Accepted · **Implemented** 2026-06-21  
+
+> Update 2026-10-27: `capabilities.ts` and `createSendEmailTool("dept")` were removed 2026-10-10 with the kernel, and `src/infra/composio.ts` was removed 2026-10-05. `src/core/accounts.ts` and `pnpm accounts:seed` remain; the per-department routing rows describe the kernel era.
 **Supersedes:** partial ADR-006 (Composio-as-universal-OAuth for internal phase)  
 **Builds on:** ADR-029 (provider abstraction layer)
 

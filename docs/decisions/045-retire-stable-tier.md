@@ -1,6 +1,8 @@
 # ADR-045: Retire the `stable` tier — two-stage production promotion
 
-**Status:** Accepted · 2026-07-16
+**Status:** Superseded by [CLAUDE-RULES-RATIONALE.md](../rules/CLAUDE-RULES-RATIONALE.md) § "Git: why Claude may merge to `main`" (founder directive, 2026-08-01) and [BRANCH-MODEL.md](../process/BRANCH-MODEL.md).
+The `stable` retirement still stands; the "only the founder merges `beta → main`" step does not.
+Accepted 2026-07-16.
 **Supersedes (in part):** ADR-039 (weekly release train), the `stable` references in
 CLAUDE.md and `.github/CODEOWNERS`.
 **Builds on:** ADR-021 (main IS production), `docs/process/BRANCH-MODEL.md`,

@@ -18,8 +18,8 @@
  * founder has already walked away from. Silence is a result too: zero replies is
  * reported as a FAILURE with the elapsed wait, never as a clean exit.
  *
- * Requires TELEGRAM_TESTER_API_ID / _API_HASH / _SESSION (see
- * `scripts/telegram-tester.ts login`). Costs one real turn of model spend, so it
+ * Requires TELEGRAM_TESTER_API_ID / _API_HASH / _SESSION (mint steps: header of
+ * `scripts/lib/mtproto.ts`). Costs one real turn of model spend, so it
  * belongs in the live-verification zone — after the unit tests are green, not
  * during the loop (CLAUDE.md § "Zero paid calls in the dev loop").
  *

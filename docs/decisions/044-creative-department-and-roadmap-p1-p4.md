@@ -1,6 +1,6 @@
 # ADR-044 — Creative Department + Roadmap P1–P4 Execution
 
-**Status:** Accepted · **Date:** 2026-06-29 · **Branch:** `claude/founderos-roadmap-uhod8d`
+**Status:** Archived — creative department deleted; see tag archive/founderos-v3 (2026-10-27).
 
 Companion to ADR-043 (P0). This ADR covers the rest of the Honest Improvement
 Roadmap (P1–P4), what was built vs already-present, and the guardrails (P4).

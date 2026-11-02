@@ -113,7 +113,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   "gemini-2.5-flash-lite":            { inputPerM: 0.0375, outputPerM: 0.15 },
   "gemini-2.5-pro":                   { inputPerM: 1.25,   outputPerM: 10.0 },
   "gemini-1.5-flash":                 { inputPerM: 0.075,  outputPerM: 0.30 },
-  "gemini-3.6-flash":                 { inputPerM: 0.75,   outputPerM: 3.75 },
+  "gemini-3.8-flash":                 { inputPerM: 0.75,   outputPerM: 3.75 },
   // Anthropic Claude
   "claude-sonnet-4-5":                { inputPerM: 3.0,    outputPerM: 15.0 },
   "claude-sonnet-4-6":                { inputPerM: 3.0,    outputPerM: 15.0 },

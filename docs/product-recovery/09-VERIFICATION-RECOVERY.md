@@ -1,5 +1,7 @@
 # Verification, Observation & Recovery
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 ## Current state — measured
 
 ### What exists and works

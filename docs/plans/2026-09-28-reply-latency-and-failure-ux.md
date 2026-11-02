@@ -1,5 +1,7 @@
 # Plan: reply latency + failure UX (items 1 and 2 of the 2026-09-28 audit)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 - **Branch:** `claude/fix-gemini-thinking-and-failure-ux` (already exists on origin, base `beta`). PR → `beta`.
 - **Evidence:** `docs/plans/2026-09-28-perf-ux-rag-audit.md`. Read it first.
 - **Depth: Full.** It changes third-party API call parameters (Gemini), the budget/cost ledger,

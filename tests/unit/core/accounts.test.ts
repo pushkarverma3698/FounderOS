@@ -12,8 +12,8 @@ describe("resolveAccountKey", () => {
     expect(resolveAccountKey("google", { account_key: "personal" })).toBe("personal");
   });
 
-  it("routes sales email to turicks", () => {
-    expect(resolveAccountKey("google", { department: "sales" })).toBe("turicks");
+  it("routes sales email to personal, the only built-in Google account", () => {
+    expect(resolveAccountKey("google", { department: "sales" })).toBe("personal");
   });
 
   it("routes jobhunt email to personal", () => {
@@ -24,12 +24,13 @@ describe("resolveAccountKey", () => {
     expect(resolveAccountKey("linkedin", { department: "marketing" })).toBe("turicks");
   });
 
-  it("falls back to turicks when department unknown", () => {
-    expect(resolveAccountKey("google", { department: "unknown_dept" })).toBe(DEFAULT_ACCOUNT_KEY);
+  it("falls back to personal for Google and turicks for other platforms when the department is unknown", () => {
+    expect(resolveAccountKey("google", { department: "unknown_dept" })).toBe("personal");
+    expect(resolveAccountKey("linkedin", { department: "unknown_dept" })).toBe(DEFAULT_ACCOUNT_KEY);
   });
 
   it("department defaults cover all outbound departments", () => {
-    expect(DEPARTMENT_ACCOUNT_DEFAULTS["sales"]?.google).toBe("turicks");
+    expect(DEPARTMENT_ACCOUNT_DEFAULTS["sales"]?.google).toBe("personal");
     expect(DEPARTMENT_ACCOUNT_DEFAULTS["jobhunt"]?.google).toBe("personal");
     expect(DEPARTMENT_ACCOUNT_DEFAULTS["marketing"]?.instagram).toBe("turicks");
   });

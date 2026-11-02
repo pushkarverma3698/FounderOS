@@ -94,7 +94,9 @@ await writeAuditEntry({ ... }); // THEN write audit, ONLY on confirmed success
 
 ---
 
-### ✅ 5. LangChain wrapper in `src/agents/agent-tools.ts`
+### ✅ 5. LangChain wrapper in `src/agents/agent-tools/`
+
+> Update 2026-10-27: the kernel wrapper barrel `src/agents/agent-tools.ts` was removed 2026-10-10. `src/agents/agent-tools/` now holds only `hitl.ts` and `external-mcp.ts`. The pattern below applies to any tool that needs a HITL gate; the jobs pipeline's own tools live in `src/tools/`.
 
 Every write/send/mutate tool needs a HITL gate:
 
@@ -128,9 +130,9 @@ Read-only tools (search, list, read) do NOT need `hitlGate`.
 
 ---
 
-### ✅ 6. Wire into the correct department in `src/agents/capabilities.ts`
+### ✅ 6. Wire the tool into its caller
 
-Add the exported tool to the right entry of `DEPARTMENT_TOOLS`.
+`src/agents/capabilities.ts` and `DEPARTMENT_TOOLS` were removed 2026-10-10 with the kernel. Import the tool from the jobs code that calls it (`src/jobs/` or `src/gateway/`).
 **Do not add to `src/tools/index.ts`** — that registry is dead code and is not used by the agent.
 
 ---

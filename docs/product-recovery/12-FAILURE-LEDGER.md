@@ -1,5 +1,7 @@
 # Failure Ledger
 
+**Status:** Archived — audit of the pre-jobs-only kernel system; see tag archive/founderos-v3 (2026-10-27).
+
 Every defect found during the 2026-08-08 audit. **None fixed this session, by design.**
 Each entry: evidence, impact, and the phase that owns it.
 

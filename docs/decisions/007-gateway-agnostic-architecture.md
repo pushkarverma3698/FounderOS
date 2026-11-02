@@ -1,7 +1,7 @@
 # ADR-007: Gateway-Agnostic Architecture
 
 **Date**: 2026-06-01
-**Status**: Accepted
+**Status:** Archived — gateway layer deleted; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 
