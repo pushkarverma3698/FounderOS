@@ -1,7 +1,7 @@
 # ADR-008: Ship Website-Builder + Gumroad Packs; Defer LinkedIn
 
 **Date**: 2026-06-01
-**Status**: Accepted
+**Status:** Archived — website builder abandoned; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

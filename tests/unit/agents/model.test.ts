@@ -115,6 +115,15 @@ describe("model id parsing", () => {
     );
   });
 
+  it("normalizes deepseek-flash and deepseek-v4.1-flash to deepseek/deepseek-v4.1-flash", () => {
+    expect(normalizeModelId("openrouter:deepseek-flash")).toBe(
+      "openrouter:deepseek/deepseek-v4.1-flash",
+    );
+    expect(normalizeModelId("openrouter:deepseek-v4.1-flash")).toBe(
+      "openrouter:deepseek/deepseek-v4.1-flash",
+    );
+  });
+
   // 2026-08-27: DEPRECATED_MODEL_ALIASES used to redirect dead OpenRouter
   // free-tier slugs to a literal "openrouter/free" — never a real model id
   // (verified against the live OpenRouter catalog). That laundered a

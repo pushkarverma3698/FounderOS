@@ -22,6 +22,7 @@
 #   LANGCHAIN_API_KEY    — LangSmith tracing (optional; sets LANGCHAIN_TRACING_V2=true when present)
 set -euo pipefail
 
+OVERRIDES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-/opt/founderos}"
 cd "$APP_DIR"
 
@@ -48,9 +49,12 @@ cd "$APP_DIR"
 #   unset on prod until 2026-09-29, so #762 waited for the next 15-minute cron tick.
 #   2026-10-06: AGENT_PIPELINE_V2 (coding pipeline switch) and ORACLE_ALLOWED_HOSTS are founder-set on the box;
 #   the #941 deploy dropped both. Unset, the pipeline is off.
+#   2026-10-16: APPLY_LINK_BASE_URL / APPLY_LINK_SECRET are created on the box (block at the end of this file).
+#   The PROD_DOTENV snapshot never carries them, so without this a render would drop the secret and every
+#   apply link already sent to the founder would stop verifying.
 #   2026-10-05: COMPOSIO_API_KEY stays here only until the founder approves removing the COMPOSIO_* lines
 #   from prod .env (Composio code is gone); delete it from this list in the same step.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH GEMINI_THINKING_LEVEL TELEGRAM_ALLOWED_CHAT_IDS TELEGRAM_ANSWER_ALL_CHAT_IDS TELEGRAM_OWNER_USER_ID JOBHUNT_CHAT_ID AGENT_DISPATCH_BIN AGENT_PIPELINE_V2 ORACLE_ALLOWED_HOSTS"
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH GEMINI_THINKING_LEVEL TELEGRAM_ALLOWED_CHAT_IDS TELEGRAM_ANSWER_ALL_CHAT_IDS TELEGRAM_OWNER_USER_ID JOBHUNT_CHAT_ID AGENT_DISPATCH_BIN AGENT_PIPELINE_V2 ORACLE_ALLOWED_HOSTS APPLY_LINK_BASE_URL APPLY_LINK_SECRET"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -306,5 +310,38 @@ fi
 if ! grep -q '^STATIC_SITE_HOME_ROOT=' .env; then
   printf 'STATIC_SITE_HOME_ROOT=/var/www\n' >> .env
   echo "==> Patched .env: STATIC_SITE_HOME_ROOT default"
+fi
+
+# Apply link (2026-10-16): the jobs bot serves /apply/<token>, and the founder opens it from a phone over
+# public Tailscale Funnel (scripts/infra/apply-link-funnel.sh, run by deploy/deploy.sh).
+# Both values are created on the box ONCE and never overwritten: a present, non-empty value always wins
+# (a present-but-empty line counts as missing, like PRESERVE_IF_MISSING). Neither failure aborts the render;
+# the app refuses to mint links while either value is unset, which is the loud direction.
+#   APPLY_LINK_BASE_URL  https://<this node's MagicDNS name>, read from `tailscale status --json`.
+#   APPLY_LINK_SECRET    random signing key. It is generated into a variable and appended with printf
+#                        (a builtin, so it never reaches argv or a log); the echo line below does not print it.
+if ! grep -qE '^APPLY_LINK_BASE_URL=.' .env; then
+  if APPLY_LINK_BASE_URL_NEW="$(bash "$OVERRIDES_DIR/infra/apply-link-funnel.sh" --print-base-url)" && [ -n "$APPLY_LINK_BASE_URL_NEW" ]; then
+    (umask 077; grep -v -E '^APPLY_LINK_BASE_URL=' .env > .env.patched || true)
+    printf 'APPLY_LINK_BASE_URL=%s\n' "$APPLY_LINK_BASE_URL_NEW" >> .env.patched
+    mv .env.patched .env
+    chmod 600 .env
+    echo "==> Patched .env: APPLY_LINK_BASE_URL=$APPLY_LINK_BASE_URL_NEW"
+  else
+    echo "!! APPLY_LINK_BASE_URL not set (could not read the tailscale DNS name, reason above); apply links stay off" >&2
+  fi
+  unset APPLY_LINK_BASE_URL_NEW
+fi
+if ! grep -qE '^APPLY_LINK_SECRET=.' .env; then
+  if command -v openssl >/dev/null 2>&1 && APPLY_LINK_SECRET_NEW="$(openssl rand -hex 32)" && [ -n "$APPLY_LINK_SECRET_NEW" ]; then
+    (umask 077; grep -v -E '^APPLY_LINK_SECRET=' .env > .env.patched || true)
+    printf 'APPLY_LINK_SECRET=%s\n' "$APPLY_LINK_SECRET_NEW" >> .env.patched
+    mv .env.patched .env
+    chmod 600 .env
+    echo "==> Patched .env: APPLY_LINK_SECRET generated (value not shown)"
+  else
+    echo "!! APPLY_LINK_SECRET not generated (openssl missing or failed); apply links stay off" >&2
+  fi
+  unset APPLY_LINK_SECRET_NEW
 fi
 chmod 600 .env

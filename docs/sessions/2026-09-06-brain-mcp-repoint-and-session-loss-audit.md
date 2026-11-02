@@ -1,5 +1,7 @@
 # 2026-09-06 — the brain MCP repointed, and why sessions keep dying mid-task
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Continuation of [2026-09-05-branch-consolidation-audit.md](2026-09-05-branch-consolidation-audit.md).
 That session was cut off by a usage limit at **10:34:37 UTC**, mid-sentence, on its
 own last line: *"Verifying the replacement server actually works before repointing

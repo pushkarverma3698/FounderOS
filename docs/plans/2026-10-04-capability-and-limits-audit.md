@@ -1,5 +1,7 @@
 # FounderOS capability and limits audit — 2026-10-04
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Companion to:** [2026-10-04 Telegram UX audit](2026-10-04-telegram-ux-audit.md) (PR #827). That
 audit covers what the founder *reads*. This one covers what the system *can do for him*, and what
 stops a small input from producing a large result.

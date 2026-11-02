@@ -1,5 +1,7 @@
 # 2026-09-05 — wife_* Telegram commands + three missed-profile bugs
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 ## What we did
 
 - Audited every Telegram-facing message in the gateway (~78 `ctx.reply` call

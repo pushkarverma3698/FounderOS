@@ -28,7 +28,7 @@ fail() {
   echo "  Legal shapes (docs/antigravity/BRANCHING-STRATEGY.md § Naming grammar):"
   echo "    <type>/<slug>              type = $TYPES"
   echo "    <agent>/<type>-<slug>      agent = $AGENTS"
-  echo "    task/issue-<N>-<slug>      VPS dispatcher only"
+  echo "    task/issue-<N>[-<slug>]    VPS dispatcher only (Pipeline V2 runs on task/issue-<N>)"
   echo
   echo "  Rename before pushing:  git branch -m fix/short-subject-slug"
   exit 1
@@ -42,7 +42,7 @@ if printf '%s' "$branch" | grep -qE '[^a-z0-9/-]'; then
   fail "only lowercase letters, digits, '-' and one '/' are allowed."
 fi
 
-if printf '%s' "$branch" | grep -qE "^task/issue-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$"; then
+if printf '%s' "$branch" | grep -qE "^task/issue-[0-9]+(-[a-z0-9]+)*$"; then
   exec_ok=1
 elif printf '%s' "$branch" | grep -qE "^($TYPES)/[a-z0-9]+(-[a-z0-9]+)+$"; then
   exec_ok=1

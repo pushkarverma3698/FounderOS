@@ -1,5 +1,7 @@
 # 2026-09-08 — deep audit of the whole job pipeline, post board expansion
 
+**Status:** Archived (2026-10-27). Session log from before 2026-10-10, when FounderOS became jobs-only (fd58a2f5, tag `archive/founderos-v3`); its facts may describe retired code. Current state: [CLAUDE.md](../../CLAUDE.md) and the brain's decisions/bugs.
+
 Audit only. **No source file was changed in this session** — everything below is read from the
 production box (`journalctl`, `agents.*` tables) and from the tree at `main` (`da219474`), plus one
 reproduction run of the real classifier. Fixes are specified but not applied; see Outstanding.

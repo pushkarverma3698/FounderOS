@@ -1,5 +1,7 @@
 # Plan: FounderOS understands what the founder means (60 → 85)
 
+**Status:** Archived (2026-10-27). Describes the kernel-era FounderOS, retired 2026-10-10 in fd58a2f5 (tag archive/founderos-v3).
+
 **Source:** [2026-10-07-queue-context-tools-audit.md](2026-10-07-queue-context-tools-audit.md) §3–§4. 189 founder turns
 graded by hand: 72% OK overall, 67% OK on follow-ups, 82% OK on standalone asks.
 **Goal:** at least 85% of the golden understanding cases pass on the live model, and follow-ups score no worse than

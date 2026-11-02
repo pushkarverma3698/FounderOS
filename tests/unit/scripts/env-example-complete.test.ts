@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const RUNTIME_ONLY = new Set([
-  "HOME", "PATH", "PWD", "TMPDIR", "RANDOM", "BASH_SOURCE", "BASH_REMATCH", "VITEST",
+  "HOME", "PATH", "PWD", "TMPDIR", "RANDOM", "SECONDS", "BASH_SOURCE", "BASH_REMATCH", "VITEST",
   "LISTEN_FDS", "LISTEN_PID", // systemd socket activation (deploy/systemd/*.socket)
 ]);
 

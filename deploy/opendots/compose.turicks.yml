@@ -1,0 +1,7 @@
+# Overlay on OpenDots' own compose files: the supervisor starts our computer image
+# (OpenBot + claude + agy + gh) instead of the bare one. Order:
+#   -f compose.yml -f compose.computers.yml -f compose.computers-app.yml -f compose.turicks.yml
+services:
+  computer-supervisor:
+    environment:
+      COMPUTER_IMAGE: opendots-computer-turicks:1

@@ -1,6 +1,6 @@
 # ADR-027: Tool-count and handoff rules for the hierarchical company
 
-**Status:** Accepted (2026-06-15)
+**Status:** Archived — agent tool handoff deleted; see tag archive/founderos-v3 (2026-10-27).
 **Context:** Scaling to a hierarchical "company" raised two proposed rigid rules:
 "exactly 2 tools per sub-agent" and "no direct handoffs (async everything)".
 Researched against LangGraph hierarchical-teams + LangChain subagents docs.

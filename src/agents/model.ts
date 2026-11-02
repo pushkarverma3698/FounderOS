@@ -40,12 +40,11 @@ export const DEFAULT_AGENT_MODEL = "google-genai:gemini-3.8-flash";
 const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
   "google/gemini-2.5-flash-preview-05-20:free": "gemini-3.5-flash-lite",
-  "gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
-  "gemini-2.0-flash": "gemini-3.8-flash",
-  "google/gemini-2.5-flash": "gemini-3.8-flash",
-  "gemini-2.5-flash": "gemini-3.8-flash",
-  "google/gemini-flash-latest": "gemini-3.8-flash",
-  "gemini-flash-latest": "gemini-3.8-flash",
+  "gemini-2.5-flash-preview-05-20": "gemini-3.8-flash", "gemini-2.0-flash": "gemini-3.8-flash",
+  "google/gemini-2.5-flash": "gemini-3.8-flash", "gemini-2.5-flash": "gemini-3.8-flash",
+  "google/gemini-flash-latest": "gemini-3.8-flash", "gemini-flash-latest": "gemini-3.8-flash",
+  "deepseek-flash": "deepseek/deepseek-v4.1-flash", "deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+  "deepseek/deepseek-v1-4.1-flash": "deepseek/deepseek-v4.1-flash",
   // 2026-08-27: dropped the OpenRouter free-tier dead-slug entries that used
   // to live here (meta-llama/llama-3.3-70b-instruct:free,
   // qwen/qwen3-next-80b-a3b-instruct:free, etc.). They all pointed at

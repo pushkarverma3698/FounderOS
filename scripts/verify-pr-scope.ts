@@ -11,8 +11,12 @@
  * prod) or `unfreeze` (the change is named in the approved plan). Sync/promotion PRs
  * (head `main`, `beta`, `chore/promote-*` or `chore/sync-*`) are exempt — their content passed this check on the way in.
  *
+ * Checked first (founder 2026-10-13, permanent): a PR that adds a code or script file must say on a `Checked first:`
+ * line what existing code, framework or product feature was searched, and what was found. Agents kept building what
+ * already existed (OpenDots had scheduled tasks and computers before team-shift re-built them) and lost days to it.
+ *
  * Runs from .github/workflows/pr-scope.yml, which also fires on label and body edits.
- * Delete this file and that workflow when the freeze ends (2026-11-01).
+ * When the freeze ends (2026-11-01), delete the Moves and frozen-path checks; keep Checked first.
  */
 
 import { readFileSync } from "node:fs";
@@ -65,6 +69,17 @@ export function parseMoves(body: string): Move[] {
   return [...new Set(out)];
 }
 
+/** The text after `Checked first:`, HTML comments stripped so the template placeholder never counts. */
+export function parseCheckedFirst(body: string): string {
+  const text = body.replace(/<!--[\s\S]*?-->/g, "");
+  return /^\s*checked first\s*:\s*(.*)$/im.exec(text)?.[1]?.trim() ?? "";
+}
+
+/** Added files that are new code or scripts: tests, docs and markdown never need a Checked first line. */
+export function newBuildFiles(added: readonly string[]): string[] {
+  return added.filter((f) => !/^(tests|docs|governance)\//.test(f) && !f.endsWith(".md"));
+}
+
 export function frozenTouches(files: readonly string[]): string[] {
   return files.filter((f) => FROZEN_PREFIXES.some((p) => f.startsWith(p)));
 }
@@ -74,6 +89,8 @@ export interface PrScopeInput {
   body: string;
   labels: readonly string[];
   headRef: string;
+  /** Files the PR adds (git diff --diff-filter=A). */
+  added?: readonly string[];
 }
 
 export function evaluatePrScope(input: PrScopeInput): { ok: boolean; problems: string[] } {
@@ -86,6 +103,14 @@ export function evaluatePrScope(input: PrScopeInput): { ok: boolean; problems: s
     );
   } else if (parseMoves(input.body).includes("unfreeze") && !input.labels.includes("unfreeze")) {
     problems.push("`Moves: unfreeze` needs the `unfreeze` label: only the founder approves work outside outcomes A–D.");
+  }
+  const built = newBuildFiles(input.added ?? []);
+  if (built.length > 0 && parseCheckedFirst(input.body).length < 20) {
+    problems.push(
+      `This PR adds new files:\n${built.map((f) => `  - ${f}`).join("\n")}\n` +
+        "Add a `Checked first:` line: what you searched before building (repo grep, the framework or product's own " +
+        "features, open issues) and what you found, so nothing that already exists gets built again.",
+    );
   }
   const frozen = frozenTouches(input.files);
   if (frozen.length > 0 && !input.labels.some((l) => PASS_LABELS.includes(l))) {
@@ -112,8 +137,12 @@ if (isMain) {
   const files = execFileSync("git", ["diff", "--name-only", `${pr.base.sha}...HEAD`], { encoding: "utf8" })
     .split("\n")
     .filter(Boolean);
+  const added = execFileSync("git", ["diff", "--name-only", "--diff-filter=A", `${pr.base.sha}...HEAD`], { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
   const result = evaluatePrScope({
     files,
+    added,
     body: pr.body ?? "",
     labels: (pr.labels ?? []).map((l) => l.name),
     headRef: pr.head.ref,
