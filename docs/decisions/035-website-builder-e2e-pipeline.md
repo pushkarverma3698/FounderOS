@@ -1,7 +1,7 @@
 # ADR-035: Website Builder E2E Pipeline
 
 **Date:** 2026-06-19  
-**Status:** Accepted
+**Status:** Archived — website builder deleted; see tag archive/founderos-v3 (2026-10-27).
 
 ## Context
 

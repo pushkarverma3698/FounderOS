@@ -1,5 +1,7 @@
 # Safety & Quality Gates
 
+**Status:** Archived — describes kernel safety gates (HITL, budget, judge) deleted; see tag archive/founderos-v3 (2026-10-27).
+
 *All the mechanisms that prevent FounderOS from doing the wrong thing: sending twice,
 fabricating facts, leaking secrets, blowing the budget, or writing outside the home
 directory. Read this alongside `src/infra/` and `src/gateway/execution-guard.ts`.*

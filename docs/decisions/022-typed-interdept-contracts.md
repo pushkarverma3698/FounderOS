@@ -1,5 +1,7 @@
 # ADR-022 — Typed inter-department contracts (Phase 2)
 
+**Status:** Archived — interdept contracts deleted; see tag archive/founderos-v3 (2026-10-27).
+
 - **Date:** 2026-06-14
 - **Status:** Accepted
 - **Branch:** `feat/phase2-typed-contracts`

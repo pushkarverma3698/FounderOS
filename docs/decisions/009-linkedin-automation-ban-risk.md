@@ -55,7 +55,7 @@ During sprint planning (ADR-008), the decision was made to defer LinkedIn automa
 - **Scope:** Content posting only (Composio uses official OAuth scopes: `w_member_social`).
 - **Risk:** Low for posting. `w_member_social` does NOT include messaging or connection requests.
 - **Verdict:** Ship this. Content posting builds audience passively — zero ban risk.
-- **Status:** Already implemented in Phase 3A (`social_linkedin` agent + `composio_linkedin_post` tool).
+- **Status:** Already implemented in Phase 3A (`social_linkedin` agent + `composio_linkedin_post` tool; both removed 2026-10-05 and 2026-10-10).
 
 ### D: Defer entirely + manual outreach
 - **Verdict:** Current default. Manual LinkedIn DMs sent by Pushkar himself, using the ICP scoring output from the prospecting pod as a decision aid.

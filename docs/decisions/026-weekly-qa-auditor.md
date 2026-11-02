@@ -1,5 +1,7 @@
 # ADR-026: Weekly QA Auditor — deterministic funnel, Claude-judged, PR-only
 
+**Status:** Archived — QA auditor deleted; see tag archive/founderos-v3 (2026-10-27).
+
 ## Status
 Accepted — 2026-06-15
 
