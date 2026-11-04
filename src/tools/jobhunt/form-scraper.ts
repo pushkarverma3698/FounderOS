@@ -344,5 +344,24 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     });
   }
 
+  // Recruitee's hCaptcha (captcha-base.recruiteecdn.com, Payter 2026-10-20) puts no captcha class or name on any
+  // input, so the per-field check above misses it. Report it so the row goes to "Submit it yourself"; never solve it.
+  if (!fields.some((f) => f.isCaptcha)) {
+    // allow-failopen: a failed probe leaves the per-field result, which is what we had before this check.
+    const widget = await page.locator(CAPTCHA_WIDGET).count().catch(() => 0);
+    if (widget > 0) fields.push({ selector: CAPTCHA_WIDGET, type: "captcha", label: "CAPTCHA", required: false, isCaptcha: true });
+  }
+
   return fields;
 }
+
+/** A visible challenge widget, its loader, or its token field. Invisible reCAPTCHA (size=invisible) is left out: it shows no challenge. */
+const CAPTCHA_WIDGET = [
+  'iframe[title*="captcha" i]:not([src*="size=invisible"])',
+  'iframe[src*="hcaptcha" i]',
+  'iframe[src*="turnstile" i]',
+  "script#hcaptcha-api-script-id",
+  'script[src*="hcaptcha" i]',
+  '[id^="input-captchaToken"]',
+  'input[name="captchaToken"]',
+].join(", ");
