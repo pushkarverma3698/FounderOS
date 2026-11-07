@@ -36,7 +36,7 @@ A bad `TELEGRAM_BOT_TOKEN` makes the process exit about 1s after boot. `pnpm tes
 3. Only `src/gateway` and `src/jobs` import `src/gateway`; every src subsystem is imported by src or a script; no exported `*_RE` control-flow regexes.
 4. No src file over 400 lines.
 5. Fail-open catches carry `// allow-failopen: <reason>`.
-6. A PR adding a code or script file has a `Checked first:` line; every PR names a `Moves:` outcome — `scripts/verify-pr-scope.ts`.
+6. A PR adding a code or script file has a `Checked first:` line — `scripts/verify-pr-scope.ts`.
 7. Branch name grammar — `pnpm verify:branch`. Doc claims (test counts etc.) match generated `docs/PROOF.md` — `pnpm verify:doc-claims`.
 
 ## Hard limits (production)
