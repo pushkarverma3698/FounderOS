@@ -1,5 +1,5 @@
 /**
- * /health for the jobs process. The VPS watchdog (~/bin/founderos-watchdog.sh) curls
+ * /health for the jobs process. The VPS watchdog (deploy/watchdog.sh, founderos crontab) curls
  * http://127.0.0.1:3001/health every 2 minutes and restarts the unit after 3 failures,
  * so this answers 200 whenever the event loop is alive. The body says whether Postgres
  * answered, for a human reading it; a database blip is not a reason to kill the bot.
