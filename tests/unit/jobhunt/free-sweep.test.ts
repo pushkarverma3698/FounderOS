@@ -160,7 +160,7 @@ describe("runFreeSweep", () => {
     vi.setSystemTime(SLOT_OPEN);
     // The alive-ping clock is persisted state that survives between tests.
     // Without this reset the suite would be order-dependent: a test that runs
-    // after a simulated three-hour gap would inherit a due ping.
+    // after a simulated day-long gap would inherit a due ping.
     await resetHeartbeat(new Date());
     mockExportJobSheet.mockResolvedValue({
       ok: true as const,
@@ -371,9 +371,9 @@ describe("runFreeSweep", () => {
     expect(mockExportJobSheet).not.toHaveBeenCalled();
   });
 
-  it("proves it is alive in the founder DM after three quiet hours, naming the boards it checked", async () => {
+  it("proves it is alive in the founder DM after a quiet day, naming the boards it checked", async () => {
     await resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
-    vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
+    vi.setSystemTime(new Date("2026-08-07T00:30:00Z"));
     mockRunFreeIngest.mockResolvedValue(
       result({ lines: [line({ isNew: false })], boardsPolled: 285 }),
     );
@@ -389,7 +389,7 @@ describe("runFreeSweep", () => {
 
   it("names how many boards are retired and why in the same alive ping, in one line", async () => {
     await resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
-    vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
+    vi.setSystemTime(new Date("2026-08-07T00:30:00Z"));
     mockRunFreeIngest.mockResolvedValue(
       result({
         lines: [line({ isNew: false })],

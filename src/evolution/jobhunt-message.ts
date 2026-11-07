@@ -13,6 +13,10 @@
  *   Jobhunt check: nothing new
  *   Jobhunt check: check failed: <reason>
  *
+ * Since 2026-11-07 the first two are not both SENT: a clean "nothing new" (see `isQuietCleanCheck`)
+ * is logged, not messaged. A "nothing new" that carries a sensor warning, a finding, or a failure
+ * still goes out.
+ *
  * Findings are printed in full with their own evidence and a next step, split across
  * messages rather than truncated (CLAUDE.md #26). No GitHub issue is filed (2026-10-10).
  */
@@ -137,6 +141,26 @@ function headBlock(outcome: JobhuntCheckOutcome): string[] {
           "It runs again tomorrow at 09:30.",
       ];
   }
+}
+
+/**
+ * True when the check ran, told no finding, and its own coverage shows no warning: there is nothing for
+ * the founder to read or do, so the caller logs it instead of sending it.
+ *
+ * Added 2026-11-07 (audit: about 36 "nothing happened" messages in 7 days, this one daily). It is narrow
+ * on purpose. "Nothing new" is only a clean bill when the sensors behind it worked, so the two coverage
+ * warnings in `coverageBlock` (the sweep barely ran, no posting stored in 7 days) keep the message, as
+ * does a missing coverage record and every failed check. A decision already told inside its window is
+ * not a reason to send: it was delivered, and its next reminder date is in the notify state.
+ *
+ * Pure. The warning conditions are the two in `coverageBlock`; jobhunt-message.test.ts pins that this is true
+ * exactly when the rendered message carries no ⚠ line.
+ */
+export function isQuietCleanCheck(report: JobhuntCheckReport): boolean {
+  if (report.outcome.state !== "checked" || report.outcome.told > 0 || report.due.length > 0) return false;
+  const { coverage } = report;
+  if (!coverage) return false;
+  return coverage.newPostings7d > 0 && coverage.sweepRuns24h >= ADAPTER_SILENT_MIN_SWEEP_RUNS;
 }
 
 /** The whole message, already split into Telegram-sized parts. Never truncates: a row is moved, not dropped. */
