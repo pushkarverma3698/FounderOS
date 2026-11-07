@@ -1,12 +1,12 @@
 name: PR scope
 
-# 30-day hard freeze (plan 2026-10-02 → 11-01): every PR names the outcome it moves, and
-# frozen modules change only with a `crash-fix` or `unfreeze` label. Separate from ci.yml
-# because it must re-run when a label or the PR body changes, which ci.yml does not.
-# Delete with scripts/verify-pr-scope.ts when the freeze ends.
+# A PR that adds a code or script file needs a `Checked first:` line (scripts/verify-pr-scope.ts).
+# Separate from ci.yml because it must re-run when the PR body changes, which ci.yml does not.
+# The job name keeps "(freeze + Moves)" because beta's branch protection requires that exact check;
+# the freeze itself ended 2026-11-01.
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+    types: [opened, edited, synchronize, reopened]
 
 concurrency:
   group: pr-scope-${{ github.event.pull_request.number }}

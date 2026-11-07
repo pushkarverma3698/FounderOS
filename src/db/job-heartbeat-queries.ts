@@ -100,7 +100,7 @@ export async function recordFreshView(profileId: string, at: Date): Promise<void
     .onConflictDoUpdate({
       target: jobLaneHeartbeats.profile_id,
       // ONLY these two columns. Touching the heartbeat's own fields here would
-      // reset the alive-ping clock from a read-only command and buy three hours
+      // reset the alive-ping clock from a read-only command and buy a day
       // of silence on a lane the founder just asked about.
       set: { fresh_viewed_at: at, updated_at: new Date() },
     });

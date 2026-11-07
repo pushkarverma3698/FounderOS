@@ -48,6 +48,17 @@ describe("afterQuietSweep", () => {
     expect(state.quietSweeps).toBe(5);
   });
 
+  it("proves life once a day, not every 3 hours (audit 2026-11-07: about 5 quiet pings a day)", () => {
+    const HOUR = 60 * 60 * 1000;
+    expect(ALIVE_PING_INTERVAL_MS).toBe(24 * HOUR);
+
+    const initial = initialHeartbeat(START);
+    for (const hours of [3, 6, 12, 23.5]) {
+      expect(afterQuietSweep(initial, 285, at(hours * HOUR), LINK).ping).toBeNull();
+    }
+    expect(afterQuietSweep(initial, 285, at(24 * HOUR), LINK).ping).toContain("Job lane alive");
+  });
+
   it("pings once the interval has passed, and counts every sweep since", () => {
     let state = initialHeartbeat(START);
     state = afterQuietSweep(state, 285, at(30 * 60 * 1000), LINK).next;
