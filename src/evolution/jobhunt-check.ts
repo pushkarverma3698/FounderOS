@@ -12,15 +12,16 @@
  * No model: every step is code over rows. `jobhunt-check.test.ts` injects models that
  * throw on any call.
  *
- * IT ALWAYS SENDS. A failed read produces its own first line; it cannot read as
- * "nothing new".
+ * A failed read produces its own first line; it cannot read as "nothing new". A clean "nothing new"
+ * (finished, no finding due, no coverage warning) is logged and NOT sent since 2026-11-07: the
+ * audit counted it among about 36 "nothing happened" messages in 7 days. Everything else sends.
  */
 
 import { childLogger } from "../infra/logger.js";
 import { sendToChat } from "../infra/telegram-send.js";
 import { analyzeJobhunt } from "./analyzers/jobhunt.js";
 import type { JobhuntAnalysis, JobhuntSnapshot } from "./analyzers/jobhunt.js";
-import { renderJobhuntCheck } from "./jobhunt-message.js";
+import { isQuietCleanCheck, renderJobhuntCheck } from "./jobhunt-message.js";
 import type { JobhuntCheckOutcome, JobhuntCheckReport } from "./jobhunt-message.js";
 import {
   EMPTY_NOTIFY_STATE,
@@ -48,11 +49,11 @@ export interface JobhuntCheckDeps {
 
 export interface JobhuntCheckResult {
   readonly outcome: JobhuntCheckOutcome;
-  /** The Telegram parts that were (or would have been) sent. */
+  /** The Telegram parts that were (or would have been) sent. Empty when the check was clean and nothing was sent. */
   readonly parts: readonly string[];
   /** Findings told in full this run. */
   readonly notified: readonly Finding[];
-  /** False when Telegram refused the message: the decisions were then NOT marked as told. */
+  /** False when Telegram refused the message (the decisions were then NOT marked as told) or when a clean check sent nothing. */
   readonly delivered: boolean;
 }
 
@@ -100,6 +101,10 @@ async function deliver(
   report: JobhuntCheckReport,
   state: NotifyState,
 ): Promise<JobhuntCheckResult> {
+  if (isQuietCleanCheck(report)) {
+    log.info({ coverage: report.coverage, quiet: report.quiet.length }, "Jobhunt check: nothing new, no message sent");
+    return { outcome: report.outcome, parts: [], notified: [], delivered: false };
+  }
   const parts = renderJobhuntCheck(report);
   let delivered = false;
   try {

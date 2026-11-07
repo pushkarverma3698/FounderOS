@@ -180,8 +180,9 @@ describe("Phase 1 — funnelClosingStage & zero-pass streak alert", () => {
     const alerts: string[] = [];
     const pings: string[] = [];
 
-    // 48 half-hourly quiet sweeps = a full day of a lane that passes nothing.
-    for (let i = 0; i < 48; i++) {
+    // 96 half-hourly quiet sweeps = two days of a lane that passes nothing. The alive ping is once a
+    // day (2026-11-07) and the funnel alert at sweep 6 restarts its clock, so a day is not enough to see one.
+    for (let i = 0; i < 96; i++) {
       clock += 30 * 60 * 1000;
       const res = afterQuietSweep(state, 10, funnel, new Date(clock));
       state = res.next;
@@ -196,7 +197,7 @@ describe("Phase 1 — funnelClosingStage & zero-pass streak alert", () => {
     // …but the closure is one event, so it is announced once.
     expect(alerts).toHaveLength(1);
     // And the streak keeps counting across the pings rather than restarting.
-    expect(state.zeroPassStreak).toBe(48);
+    expect(state.zeroPassStreak).toBe(96);
   });
 
   it("clears the zero-pass streak only when a sweep actually passes something", () => {

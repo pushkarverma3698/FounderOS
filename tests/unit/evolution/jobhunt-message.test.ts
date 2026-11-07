@@ -1,8 +1,10 @@
 /**
  * Unit tests — the daily jobhunt check's Telegram message.
  * ========================================================
- * ALWAYS SENT, one of: "Jobhunt check: N finding(s) for you", "Jobhunt check: nothing new",
- * "Jobhunt check: check failed: <reason>". Silence is indistinguishable from "nothing to report".
+ * One of: "Jobhunt check: N finding(s) for you", "Jobhunt check: nothing new",
+ * "Jobhunt check: check failed: <reason>". Since 2026-11-07 a CLEAN "nothing new" is not sent at all
+ * (`isQuietCleanCheck`); a failure, a finding or a coverage warning always is, because silence is
+ * indistinguishable from "nothing to report".
  * Since 2026-10-10 the check is report-only: it files no GitHub issue.
  *
  * Founder-facing rules (CLAUDE.md #26): every reason printed with its own result,
@@ -11,6 +13,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  isQuietCleanCheck,
   renderJobhuntCheck,
   type JobhuntCheckReport,
 } from "../../../src/evolution/jobhunt-message.js";
@@ -117,6 +120,42 @@ describe("what was checked is printed, so 'nothing new' is not an unfalsifiable 
 
   it("says when no platform had enough volume to judge", () => {
     expect(text(report({ coverage: { ...COVERAGE, platformsJudged: [] } }))).toContain("0 of 10 platforms");
+  });
+});
+
+describe("a clean 'nothing new' is not sent (audit 2026-11-07), anything else is", () => {
+  it("a finished check with no finding and healthy coverage is quiet", () => {
+    expect(isQuietCleanCheck(report())).toBe(true);
+  });
+
+  it("a decision already told inside its window does not make it worth sending", () => {
+    expect(isQuietCleanCheck(report({ quiet: [{ finding: notActing, nextReminderAt: new Date("2026-10-06T04:00:00Z") }] }))).toBe(true);
+  });
+
+  it("a finding due is sent", () => {
+    expect(isQuietCleanCheck(report({ outcome: { state: "checked", told: 1 }, due: [notActing] }))).toBe(false);
+  });
+
+  it("a failed check is sent, never read as clean", () => {
+    expect(isQuietCleanCheck(report({ outcome: { state: "failed", reason: "db down" }, coverage: null }))).toBe(false);
+  });
+
+  it("a checked run with no coverage record is sent: nobody can say what was looked at", () => {
+    expect(isQuietCleanCheck(report({ coverage: null }))).toBe(false);
+  });
+
+  it("the sweep barely running, or no posting stored in 7 days, is sent: a blind sensor is not a quiet market", () => {
+    expect(isQuietCleanCheck(report({ coverage: { ...COVERAGE, sweepRuns24h: ADAPTER_SILENT_MIN_SWEEP_RUNS - 1 } }))).toBe(false);
+    expect(isQuietCleanCheck(report({ coverage: { ...COVERAGE, newPostings7d: 0 } }))).toBe(false);
+  });
+
+  it("is true exactly when the rendered message carries no ⚠ coverage warning (the two cannot drift)", () => {
+    for (const sweepRuns24h of [0, ADAPTER_SILENT_MIN_SWEEP_RUNS - 1, ADAPTER_SILENT_MIN_SWEEP_RUNS, 96]) {
+      for (const newPostings7d of [0, 1, 1204]) {
+        const r = report({ coverage: { ...COVERAGE, sweepRuns24h, newPostings7d } });
+        expect(isQuietCleanCheck(r), `sweepRuns24h=${sweepRuns24h} newPostings7d=${newPostings7d}`).toBe(!text(r).includes("⚠"));
+      }
+    }
   });
 });
 

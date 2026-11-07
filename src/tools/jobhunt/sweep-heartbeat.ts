@@ -25,8 +25,9 @@ import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import type { FreeFunnel } from "./free-ingest.js";
 
-/** How long a quiet lane may go without saying anything at all. */
-export const ALIVE_PING_INTERVAL_MS = 3 * 60 * 60 * 1000;
+/** How long a quiet lane may go without saying anything at all. 24 h since 2026-11-07 (was 3 h): the audit found
+ * about 5 quiet pings a day. A stopped lane still shows within a day; the funnel alert still fires at once. */
+export const ALIVE_PING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Rows named individually in a new-roles alert before it summarises the rest. */
 export const NEW_ROWS_NAMED = 3;

@@ -6,7 +6,8 @@
  * filed (agent-dispatch is retired), so every finding is told to the founder.
  *
  * THE FAILURES THESE GUARD AGAINST.
- *  · SILENCE. Every ending, including the loop itself breaking, must send.
+ *  · SILENCE. Every ending that is not a clean "nothing new" must send, including the loop itself
+ *    breaking. A clean "nothing new" is logged, not sent (audit 2026-11-07).
  *  · A CLEAN-LOOKING FAILURE. A failed data read must say "check failed", never
  *    "nothing new", and must file nothing.
  *  · SPEND. The check is deterministic code. An injected model that throws on any
@@ -34,15 +35,16 @@ vi.mock("../../../src/agents/worker-invoke.js", () => ({
 
 const logError = vi.fn();
 const logWarn = vi.fn();
+const logInfo = vi.fn();
 vi.mock("../../../src/infra/logger.js", () => ({
-  logger: { child: () => ({ info: vi.fn(), warn: logWarn, error: logError, debug: vi.fn() }) },
-  childLogger: () => ({ info: vi.fn(), warn: logWarn, error: logError, debug: vi.fn() }),
+  logger: { child: () => ({ info: logInfo, warn: logWarn, error: logError, debug: vi.fn() }) },
+  childLogger: () => ({ info: logInfo, warn: logWarn, error: logError, debug: vi.fn() }),
 }));
 
 const { runJobhuntFindingsCheck } = await import("../../../src/evolution/jobhunt-check.js");
 const { EMPTY_NOTIFY_STATE, DECISION_RENOTIFY_DAYS } = await import("../../../src/evolution/jobhunt-notify-state.js");
 const { analyzeJobhunt } = await import("../../../src/evolution/analyzers/jobhunt.js");
-const { NOW, DAY, healthy, withSilent } = await import("../../helpers/jobhunt-fixtures.js");
+const { NOW, DAY, healthy, withSilent, sweepRuns, postings } = await import("../../helpers/jobhunt-fixtures.js");
 
 import type { NotifyState } from "../../../src/evolution/jobhunt-notify-state.js";
 import type { JobhuntSnapshot } from "../../../src/evolution/analyzers/jobhunt.js";
@@ -75,7 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("it ALWAYS sends, exactly once, whatever happens", () => {
+describe("it sends exactly once, except for a clean 'nothing new'", () => {
   it("a code finding (silent adapter) is told to the founder with the file to fix, and nothing is filed", async () => {
     const h = harness({ snapshot: withSilent("ashby") });
 
@@ -90,14 +92,26 @@ describe("it ALWAYS sends, exactly once, whatever happens", () => {
     expect(text).not.toMatch(/agent-dispatch|issue/i);
   });
 
-  it("nothing new: a healthy lane says so, with what was checked", async () => {
+  it("nothing new: a healthy lane sends NOTHING and logs it instead (audit 2026-11-07)", async () => {
     const h = harness();
+
+    const result = await runJobhuntFindingsCheck(h.deps);
+
+    expect(h.deps.send).not.toHaveBeenCalled();
+    expect(result.outcome).toEqual({ state: "checked", told: 0 });
+    expect(result.parts).toEqual([]);
+    expect(result.delivered).toBe(false);
+    expect(JSON.stringify(logInfo.mock.calls)).toContain("nothing new, no message sent");
+  });
+
+  it("nothing new, but the sweep barely ran: still sent, with the warning, because a blind sensor is not a quiet market", async () => {
+    const h = harness({ snapshot: healthy({ ingestRuns: sweepRuns(3) }) });
 
     await runJobhuntFindingsCheck(h.deps);
 
     expect(h.deps.send).toHaveBeenCalledTimes(1);
     expect(head(h.sent)).toBe("Jobhunt check: nothing new");
-    expect(h.sent[0]![0]).toContain("Checked:");
+    expect(h.sent[0]![0]).toContain("Only 3 free-sweep runs");
   });
 
   it("both kinds present: each is told once", async () => {
@@ -170,23 +184,28 @@ describe("findings are told once, then weekly (founder-lesson addition)", () => 
     expect(Object.keys(h.stored().decisions)).toHaveLength(1);
   });
 
-  it("the next six mornings: 'nothing new', not the same finding again", async () => {
+  it("the next six mornings: nothing is sent, not the same finding again", async () => {
     const h = harness({ snapshot: notActingSnapshot() });
     await runJobhuntFindingsCheck(h.deps);
     h.sent.length = 0;
 
+    // A healthy lane on each later morning: the fixture's postings and sweep runs are dated relative to NOW,
+    // so they are rebuilt for the shifted clock or the check would (rightly) warn that the sweep stopped.
     for (let day = 1; day < DECISION_RENOTIFY_DAYS; day++) {
-      h.deps.now = () => new Date(NOW.getTime() + day * DAY);
+      const later = new Date(NOW.getTime() + day * DAY);
+      h.deps.now = () => later;
+      h.deps.read.mockResolvedValueOnce({
+        ...notActingSnapshot(),
+        ingestRuns: sweepRuns(96, null, later),
+        newPostings: ["ashby", "greenhouse", "lever"].flatMap((platform) => [
+          ...postings(platform, 100, { fromHoursAgo: 190, toHoursAgo: 26 }, { from: later }),
+          ...postings(platform, 14, { fromHoursAgo: 23, toHoursAgo: 1 }, { from: later }),
+        ]),
+      });
       await runJobhuntFindingsCheck(h.deps);
     }
 
-    expect(h.sent).toHaveLength(DECISION_RENOTIFY_DAYS - 1); // still sent every day: always sends
-    for (const parts of h.sent) {
-      const text = parts.join("\n");
-      expect(text.split("\n")[0]).toContain("Jobhunt check: nothing new");
-      expect(text).not.toContain("62 actionable roles");
-      expect(text).toContain("next reminder");
-    }
+    expect(h.sent).toHaveLength(0); // a decision told inside its window is not worth a "nothing new" message
   });
 
   it("day 7: told again in full", async () => {
