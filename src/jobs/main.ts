@@ -18,6 +18,7 @@ import { logger } from "../infra/logger.js";
 import { startJobsHealthServer } from "./health.js";
 import { startJobsBot, stopJobsBot } from "./bot.js";
 import { startJobsScheduler } from "./scheduler.js";
+import { reportSheetExportConfig } from "../tools/jobhunt/sheet-export.js";
 
 const log = logger.child({ module: "jobs-main" });
 
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
   healthServer = startJobsHealthServer();
   if (TELEGRAM_POLLING_ENABLED) await startJobsBot();
   else log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false); crons still send");
+  reportSheetExportConfig();
   startJobsScheduler();
   log.info("FounderOS jobs running");
 }
