@@ -50,14 +50,23 @@ export async function jobIdsByDedupeKey(
   return new Map(rows.map((r) => [r.key, shortJobId(r.id)] as [string, string]));
 }
 
-/** The stored rows (full id, company) for a set of postings, keyed by dedupe identity: what a 📝 Draft button needs. */
+/**
+ * The stored rows (full id, company, brief section, fit) for a set of postings, keyed by dedupe identity: what the
+ * digest's buttons need. ALWAYS filtered to the one profile, so a button can only name that candidate's own row.
+ */
 export async function jobRowsByDedupeKey(
   keys: readonly string[],
   opts: { tenantId?: string; profileId: string },
-): Promise<{ key: string; id: string; company: string }[]> {
+): Promise<{ key: string; id: string; company: string; section: string | null; fit: string | null }[]> {
   if (keys.length === 0) return [];
   return getDb()
-    .select({ key: jobApplications.dedupe_key, id: jobApplications.id, company: jobApplications.company })
+    .select({
+      key: jobApplications.dedupe_key,
+      id: jobApplications.id,
+      company: jobApplications.company,
+      section: jobApplications.brief_section,
+      fit: jobApplications.fit_score,
+    })
     .from(jobApplications)
     .where(
       and(
