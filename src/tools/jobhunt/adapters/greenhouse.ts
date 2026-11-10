@@ -50,7 +50,11 @@ export const greenhouseAdapter: AtsAdapter = {
           url,
           location: asText(asRecord(job["location"])?.["name"]),
           postedAt: parsePostedAt(job["first_published"]),
-          description: null, // Greenhouse does not return descriptions in the list payload
+          // Bodies come from the per-posting detail fetch, deliberately. The list
+          // endpoint inlines them with `?content=true`, but that is ~12x the bytes
+          // (stripe, 2026-11-10: 6.0 MB vs 0.48 MB) on every board every sweep,
+          // while hydration only fetches the few postings that pass the filters.
+          description: null,
         },
       ];
     });
