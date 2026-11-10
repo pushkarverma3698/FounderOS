@@ -12,7 +12,7 @@
  * discovers boards that every future ATS sweep polls directly, forever.
  *
  * WHY SEQUENTIAL. Each aggregator has its own rate limit policy. Arbeitnow is
- * polite-use, Remotive is 2 req/min, Himalayas returns 429 on bursts. Running
+ * polite-use, Himalayas returns 429 on bursts. Running
  * them one after another is both simpler and safer than concurrent requests
  * against hosts with very different tolerance thresholds.
  */
@@ -73,8 +73,10 @@ export interface AggregatorSweepResult {
   readonly candidates: readonly FreeCandidate[];
   /** Board tokens harvested from aggregator job URLs. */
   readonly harvestedTokens: readonly ExtractedBoardToken[];
-  /** Per-source job counts, for logging. */
+  /** Per-source job counts for sources that actually fetched (skips excluded). */
   readonly sourceCounts: ReadonlyMap<string, number>;
+  /** Sources skipped because they are cooling down (nothing fetched, not zero jobs). */
+  readonly skipped: readonly string[];
   /** Sources that failed (returned 0 jobs due to errors). */
   readonly failures: readonly string[];
 }
@@ -93,10 +95,11 @@ export async function sweepAggregators(): Promise<AggregatorSweepResult> {
   const allTokens: ExtractedBoardToken[] = [];
   const sourceCounts = new Map<string, number>();
   const failures: string[] = [];
+  const skipped: string[] = [];
   const seenTokens = new Set<string>();
 
   for (const source of sources) {
-    let jobs: readonly AggregatorJob[];
+    let jobs: readonly AggregatorJob[] | null;
     try {
       jobs = await source.fetchJobs();
     } catch (err) {
@@ -104,6 +107,11 @@ export async function sweepAggregators(): Promise<AggregatorSweepResult> {
       const msg = err instanceof Error ? err.message : String(err);
       log.warn({ source: source.name, err: msg }, "Aggregator source failed");
       failures.push(`${source.name}: ${msg}`);
+      continue;
+    }
+
+    if (jobs === null) {
+      skipped.push(source.name);
       continue;
     }
 
@@ -130,6 +138,7 @@ export async function sweepAggregators(): Promise<AggregatorSweepResult> {
       candidates: allCandidates.length,
       tokens: allTokens.length,
       counts: Object.fromEntries(sourceCounts),
+      skipped,
     },
     "Aggregator sweep complete",
   );
@@ -138,6 +147,7 @@ export async function sweepAggregators(): Promise<AggregatorSweepResult> {
     candidates: allCandidates,
     harvestedTokens: allTokens,
     sourceCounts,
+    skipped,
     failures,
   };
 }

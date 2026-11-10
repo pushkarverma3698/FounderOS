@@ -1,8 +1,7 @@
 /**
  * FounderOS — aggregator source types
  * ====================================
- * The contract for free job aggregator APIs (Arbeitnow, Remotive, Himalayas,
- * Jobicy). These differ from ATS board adapters: they return fully-formed job
+ * The contract for free job aggregator APIs (Arbeitnow, Himalayas, Jobicy). These differ from ATS board adapters: they return fully-formed job
  * listings, not raw board payloads, so they do not need the AtsAdapter interface.
  *
  * Aggregators serve two purposes:
@@ -13,7 +12,7 @@
  *      which compounds: one aggregator sweep discovers boards that every future
  *      ATS sweep polls directly, for free, forever.
  *
- * Everything here is a type. The adapters (arbeitnow.ts, remotive.ts, etc.)
+ * Everything here is a type. The adapters (arbeitnow.ts, himalayas.ts, etc.)
  * implement the fetch, and aggregator-source.ts orchestrates the sweep.
  */
 
@@ -38,6 +37,10 @@ export interface AggregatorJob {
 export interface AggregatorSource {
   /** Human-readable name, used in logs and ledger entries. */
   readonly name: string;
-  /** Fetch all available jobs. Never throws — returns an empty array on failure. */
-  fetchJobs(): Promise<readonly AggregatorJob[]>;
+  /**
+   * Fetch all available jobs. Never throws — returns an empty array on failure.
+   * Returns `null` when the source was skipped (cooling down): nothing was
+   * fetched, which is not the same as a fetch that found zero jobs.
+   */
+  fetchJobs(): Promise<readonly AggregatorJob[] | null>;
 }

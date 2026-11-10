@@ -13,6 +13,9 @@
  */
 
 import type { AggregatorJob, AggregatorSource } from "./types.js";
+import { childLogger } from "../../../infra/logger.js";
+
+const log = childLogger({ module: "jobhunt:aggregator:arbeitnow" });
 
 /** Maximum pages to fetch per sweep. Each page is ~20–25 jobs. */
 const MAX_PAGES = 10;
@@ -79,13 +82,14 @@ async function fetchPage(page: number): Promise<ArbeitnowResponse | null> {
         return (await response.json()) as ArbeitnowResponse;
       }
       if (response.status === 429 || response.status >= 500) {
-        console.warn(`arbeitnow: page ${page} HTTP ${response.status}, attempt ${attempt}/3`);
+        log.warn({ source: "arbeitnow", status: response.status, attempt }, "Aggregator HTTP error, retrying");
         await sleep(process.env.NODE_ENV === "test" ? 1 : PAGE_DELAY_MS * attempt * 2);
         continue;
       }
       return null; // Not retryable (e.g. 404)
     } catch (err) {
-      console.warn(`arbeitnow: page ${page} network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+      // allow-failopen: retried, then the source returns empty
+      log.warn({ source: "arbeitnow", err: err instanceof Error ? err.message : String(err), attempt }, "Aggregator network error, retrying");
       await sleep(process.env.NODE_ENV === "test" ? 1 : PAGE_DELAY_MS * attempt * 2);
     }
   }
@@ -95,10 +99,10 @@ async function fetchPage(page: number): Promise<ArbeitnowResponse | null> {
 export function createArbeitnowSource(): AggregatorSource {
   return {
     name: "arbeitnow",
-    async fetchJobs(): Promise<readonly AggregatorJob[]> {
+    async fetchJobs(): Promise<readonly AggregatorJob[] | null> {
       const now = Date.now();
       if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
-        return [];
+        return null; // skipped: cooling down
       }
       lastFetchTime = now;
 
