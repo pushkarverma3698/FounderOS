@@ -12,6 +12,9 @@
  */
 
 import type { AggregatorJob, AggregatorSource } from "./types.js";
+import { childLogger } from "../../../infra/logger.js";
+
+const log = childLogger({ module: "jobhunt:aggregator:himalayas" });
 
 /** Maximum pages to fetch. At 20/page, 10 pages = 200 jobs. */
 const MAX_PAGES = 10;
@@ -99,13 +102,14 @@ async function fetchPage(cursor: string | null): Promise<HimalayasResponse | nul
         return (await response.json()) as HimalayasResponse;
       }
       if (response.status === 429 || response.status >= 500) {
-        console.warn(`himalayas: HTTP ${response.status}, attempt ${attempt}/3`);
+        log.warn({ source: "himalayas", status: response.status, attempt }, "Aggregator HTTP error, retrying");
         await sleep(PAGE_DELAY_MS * attempt * 2);
         continue;
       }
       return null;
     } catch (err) {
-      console.warn(`himalayas: network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+      // allow-failopen: retried, then the source returns empty
+      log.warn({ source: "himalayas", err: err instanceof Error ? err.message : String(err), attempt }, "Aggregator network error, retrying");
       await sleep(PAGE_DELAY_MS * attempt * 2);
     }
   }
@@ -115,10 +119,10 @@ async function fetchPage(cursor: string | null): Promise<HimalayasResponse | nul
 export function createHimalayasSource(): AggregatorSource {
   return {
     name: "himalayas",
-    async fetchJobs(): Promise<readonly AggregatorJob[]> {
+    async fetchJobs(): Promise<readonly AggregatorJob[] | null> {
       const now = Date.now();
       if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
-        return [];
+        return null; // skipped: cooling down
       }
       lastFetchTime = now;
 
