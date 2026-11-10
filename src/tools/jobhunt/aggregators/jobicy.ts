@@ -13,6 +13,9 @@
  */
 
 import type { AggregatorJob, AggregatorSource } from "./types.js";
+import { childLogger } from "../../../infra/logger.js";
+
+const log = childLogger({ module: "jobhunt:aggregator:jobicy" });
 
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT = "founderos-aggregator/1.0 (+jobhunt)";
@@ -73,10 +76,10 @@ let lastFetchTime = 0;
 export function createJobicySource(): AggregatorSource {
   return {
     name: "jobicy",
-    async fetchJobs(): Promise<readonly AggregatorJob[]> {
+    async fetchJobs(): Promise<readonly AggregatorJob[] | null> {
       const now = Date.now();
       if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
-        return [];
+        return null; // skipped: cooling down
       }
       lastFetchTime = now;
 
@@ -99,13 +102,14 @@ export function createJobicySource(): AggregatorSource {
             return jobs;
           }
           if (response.status === 429 || response.status >= 500) {
-            console.warn(`jobicy: HTTP ${response.status}, attempt ${attempt}/3`);
+            log.warn({ source: "jobicy", status: response.status, attempt }, "Aggregator HTTP error, retrying");
             await new Promise(r => setTimeout(r, process.env.NODE_ENV === "test" ? 1 : attempt * 2000));
             continue;
           }
           return [];
         } catch (err) {
-          console.warn(`jobicy: network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+          // allow-failopen: retried, then the source returns empty
+      log.warn({ source: "jobicy", err: err instanceof Error ? err.message : String(err), attempt }, "Aggregator network error, retrying");
           await new Promise(r => setTimeout(r, process.env.NODE_ENV === "test" ? 1 : attempt * 2000));
         }
       }
