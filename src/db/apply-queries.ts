@@ -137,17 +137,20 @@ export async function markApplied(
   return stampQueueRows(ids, tenantId, "applied");
 }
 
+/** `clearBrief` also drops the brief slot, so a role skipped from Telegram leaves /jobs (an applied one does the same). */
 export async function markSkipped(
   ids: readonly string[],
   tenantId: string = DEFAULT_TENANT,
+  opts: { clearBrief?: boolean } = {},
 ): Promise<number> {
-  return stampQueueRows(ids, tenantId, "skipped");
+  return stampQueueRows(ids, tenantId, "skipped", opts.clearBrief === true);
 }
 
 async function stampQueueRows(
   ids: readonly string[],
   tenantId: string,
   outcome: "applied" | "skipped",
+  clearBrief = false,
 ): Promise<number> {
   if (ids.length === 0) return 0;
   const db = getDb();
@@ -159,6 +162,7 @@ async function stampQueueRows(
       // `stage` tracks the human-visible funnel and must follow an application.
       // A skip leaves it alone: the row was never in the funnel.
       ...(outcome === "applied" ? { stage: "applied" as const } : {}),
+      ...(clearBrief ? { brief_section: null, brief_rank: null } : {}),
       updated_at: new Date(),
     })
     .where(

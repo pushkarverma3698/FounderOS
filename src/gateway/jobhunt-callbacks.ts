@@ -15,7 +15,7 @@ import { getProfile, listProfiles } from "../tools/jobhunt/profile-config.js";
 import { childLogger } from "../infra/logger.js";
 import { draftRow } from "./jobhunt-commands.js";
 import { handleAutoApplyCallback } from "./auto-apply.js";
-import { markRowApplied, parseJobCallback, JOB_CALLBACK_PREFIX } from "./jobhunt-buttons.js";
+import { isMultiRoleKeyboard, keyboardAfterTap, markRowApplied, markRowSkipped, parseJobCallback, JOB_CALLBACK_PREFIX } from "./jobhunt-buttons.js";
 import { draftButtonsFor, parseViewCallback, type ViewCallback } from "./jobhunt-compact.js";
 import { gapAddReply, parseGapCallback } from "./jobhunt-gap-buttons.js";
 import { buildJobsCsv, type JobsViewDeps } from "./jobhunt-view.js";
@@ -23,6 +23,16 @@ import { parseBriefRequest, scopeFor } from "../tools/jobhunt/brief-resolver.js"
 import { InputFile } from "grammy";
 
 const log = childLogger({ module: "gateway:jobhunt-callbacks" });
+
+/** First name of the candidate a row belongs to, for toasts. */
+function ownerName(profileId: string): string {
+  try {
+    return getProfile(profileId).candidateName.trim().split(/\s+/)[0] ?? profileId;
+  } catch {
+    // allow-failopen: a toast label only; the row is already resolved.
+    return profileId;
+  }
+}
 
 /** False when the payload is not ours, so the next callback handler gets it. */
 export async function handleJobCallback(ctx: Context, jobs?: JobsViewDeps): Promise<boolean> {
@@ -53,20 +63,40 @@ export async function handleJobCallback(ctx: Context, jobs?: JobsViewDeps): Prom
     return true;
   }
 
-  if (parsed.action === "applied") {
-    const result = await markRowApplied(row);
+  // Whose role it is comes off THE ROW, so one group chat can carry both candidates' buttons safely.
+  const owner = ownerName(row.profile_id);
+  const markup = (ctx.callbackQuery?.message as { reply_markup?: { inline_keyboard?: Parameters<typeof isMultiRoleKeyboard>[0] } } | undefined)
+    ?.reply_markup?.inline_keyboard;
+  const inDigest = markup !== undefined && isMultiRoleKeyboard(markup);
+
+  if (parsed.action === "applied" || parsed.action === "skipped") {
+    const applied = parsed.action === "applied";
+    const result = applied ? await markRowApplied(row) : await markRowSkipped(row);
     if (!result.ok) {
       await ctx.answerCallbackQuery({ text: "Couldn't save that. Nothing changed." });
       return true;
     }
-    log.info({ command: "applied", id: row.id, company: row.company, button: true }, "Application marked applied");
-    await ctx.answerCallbackQuery({ text: result.already ? "Already marked applied" : "✅ Marked applied" });
+    log.info({ command: parsed.action, id: row.id, profile: row.profile_id, company: row.company, button: true }, "Application outcome recorded");
+    // What was already on file: a tap on a settled role changes nothing and says so.
+    const already: "applied" | "skipped" | null = "already" in result && result.already ? (result.already === true ? "applied" : result.already) : null;
+    const toast = already === null
+      ? `${applied ? "✅ Marked applied" : "⏭ Skipped"} — ${row.company} (${owner})`
+      : `Already ${already === "applied" ? "marked applied" : "skipped"} (${owner})`;
+    await ctx.answerCallbackQuery({ text: toast });
+    const action = already ?? parsed.action;
+    if (inDigest) {
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: keyboardAfterTap(markup, row.id, action, row.company) } }).catch(
+        // allow-failopen: cosmetic; the state is already written and the toast said so.
+        () => undefined,
+      );
+      return true;
+    }
     // Spend the button so a second tap cannot look like a second application.
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(
       // allow-failopen: cosmetic; the state is already written.
       () => undefined,
     );
-    await ctx.reply(`✅ Marked applied — ${row.company} (${row.title}). It's off today's queue.`);
+    if (applied) await ctx.reply(`✅ Marked applied — ${row.company} (${row.title}). It's off today's queue.`);
     return true;
   }
 

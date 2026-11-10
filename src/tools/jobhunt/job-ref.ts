@@ -63,9 +63,12 @@ export function idPrefixRange(hexPrefix: string): { readonly lo: string; readonl
 /** Callback prefix of every job button. Short: Telegram caps callback_data at 64 bytes and a uuid is 36. */
 export const JOB_CALLBACK_PREFIX = "jh:";
 
-export type JobAction = "draft" | "applied";
+export type JobAction = "draft" | "applied" | "skipped";
 
-/** The payload a 📝 Draft / ✅ I applied button carries. Lives here so the digest (tools) and the handler (gateway) share one format. */
+/** `jh:s:` is already Submit (auto-apply), so "not for me" is `n`. */
+const ACTION_CODE: Record<JobAction, string> = { draft: "d", applied: "a", skipped: "n" };
+
+/** The payload a 📝 Draft / ✅ Applied / ⏭ Skip button carries. Lives here so the digest (tools) and the handler (gateway) share one format. */
 export function jobCallbackData(action: JobAction, rowId: string): string {
-  return `${JOB_CALLBACK_PREFIX}${action === "draft" ? "d" : "a"}:${rowId}`;
+  return `${JOB_CALLBACK_PREFIX}${ACTION_CODE[action]}:${rowId}`;
 }
