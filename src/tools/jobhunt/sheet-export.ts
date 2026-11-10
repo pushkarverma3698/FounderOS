@@ -59,6 +59,23 @@ export function sheetTargetFrom(
 }
 
 /**
+ * Say once, at boot, whether the Sheet export is on. The env cannot change
+ * without a restart, so per-sweep logging of the same answer was pure noise.
+ * Info, not warn: running without the Sheet is a supported setup.
+ */
+export function reportSheetExportConfig(
+  source: { JOBHUNT_SHEET_ID?: string; GOOGLE_SHEETS_CREDENTIALS_PATH?: string } = env,
+): boolean {
+  const target = sheetTargetFrom(source);
+  if ("missing" in target) {
+    log.info({ reason: target.missing }, "Job sheet export off; sweeps skip it silently");
+    return false;
+  }
+  log.info("Job sheet export on");
+  return true;
+}
+
+/**
  * Rebuild both tabs from the database.
  *
  * Queue first, Log second, on purpose. If the second write fails the founder is
@@ -67,10 +84,9 @@ export function sheetTargetFrom(
  */
 export async function exportJobSheet(now: Date = new Date()): Promise<ExportResult> {
   const target = sheetTargetFrom();
-  if ("missing" in target) {
-    log.info({ reason: target.missing }, "Sheet export skipped — not configured");
-    return { ok: false, skipped: true, reason: target.missing };
-  }
+  // Silent on purpose: an unset Sheet is a valid config, stated once at boot by
+  // reportSheetExportConfig. Logging it here wrote ~200 identical lines a day.
+  if ("missing" in target) return { ok: false, skipped: true, reason: target.missing };
 
   try {
     const [queue, screened] = await Promise.all([listApplyQueue(), listRecentlyScreened()]);
