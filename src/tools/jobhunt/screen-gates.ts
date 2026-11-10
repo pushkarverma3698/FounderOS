@@ -23,6 +23,7 @@ import type { PostingRoute } from "./extract.js";
 import type { GateProfile } from "./permit-routes.js";
 import type { ScreenStatus } from "./filters.js";
 import type { Gate } from "./gates.js";
+import type { RemoteScope } from "./remote-scope.js";
 
 /**
  * The gates one permit basis is judged on, in the order the brief prints them.
@@ -127,7 +128,11 @@ export function basisGate(profile: GateProfile): Gate {
  * TODAY. Discarding it would be worse — a filtered-out row and an empty market
  * look identical from outside.
  */
-export function locationGate(country: PostingCountry, postingRoute: PostingRoute): Gate | null {
+export function locationGate(
+  country: PostingCountry,
+  postingRoute: PostingRoute,
+  scope: RemoteScope = "unscoped",
+): Gate | null {
   // The two markets the campaign runs in. The feed told us which, so there is no
   // question left to ask and no bullet worth printing.
   if (country === "NL" || country === "IN") return null;
@@ -152,26 +157,45 @@ export function locationGate(country: PostingCountry, postingRoute: PostingRoute
     };
   }
 
-  if (postingRoute === "unclear") {
+  // `unknown` country. Only an ad that itself implies the Netherlands ("kennismigrant",
+  // "visa sponsorship" -> hsm) has answered the question. A remote-contract route read
+  // from "contractor" or "remote-first" has not: those words name no place, and a
+  // US-only role passed on them (prod audit, 2026-11-10). Flag, never reject.
+  if (postingRoute === "hsm" || (scope === "contract" && postingRoute === "remote-contract")) return null;
+  // Another configured target country (e.g. "DE") was fetched, so it is a fact; only an
+  // unreadable route still raises the question there.
+  if (country !== "unknown" && postingRoute !== "unclear") return null;
+
+  if (country === "unknown" && scope === "us-only") {
     return {
       gate: "Location",
       status: "flag",
       evidence:
-        "The posting never says where the work is based, so every permit basis below " +
-        "is an assumption rather than a finding. Ask where the role sits before " +
-        "applying — the answer decides whether it is reachable at all.",
+        "No country is stated, and the ad reads as US-only (US residents or US work " +
+        "authorization). It works only if the employer will contract someone in India — " +
+        "ask before applying.",
     };
   }
 
-  // No country was fetched, but the ad itself named something that implies one —
-  // "kennismigrant", "visa sponsorship", "fully remote". That is real evidence
-  // about the kind of role this is, so there is no open question to raise.
-  //
-  // What may NOT reach here is a desk arrangement. "Hybrid" and "on-site" name
-  // no country, and route.ts no longer lets them settle a market for exactly
-  // that reason; a posting carrying only those words comes through as `unclear`
-  // and takes the branch above.
-  return null;
+  if (country === "unknown" && scope === "eu-region") {
+    return {
+      gate: "Location",
+      status: "flag",
+      evidence:
+        "The location is a European region (EU/EMEA), not a country. It works only as a " +
+        "remote contract billed from India, and many such roles require EU residence — " +
+        "confirm before applying.",
+    };
+  }
+
+  return {
+    gate: "Location",
+    status: "flag",
+    evidence:
+      "The posting never says where the work is based, so every permit basis below " +
+      "is an assumption rather than a finding. Ask where the role sits before " +
+      "applying — the answer decides whether it is reachable at all.",
+  };
 }
 
 export function sponsorGate(match: SponsorMatch, stale: ReturnType<typeof registerStaleness>): Gate {

@@ -37,6 +37,8 @@ import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { intEnv } from "../../core/config.js";
 import { findApplicationByDedupeKey } from "../../db/job-queries.js";
+import { findKnownPostingRefs } from "../../db/job-known-queries.js";
+import { buildKnownIndex, isKnownPosting } from "./known-postings.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import type { RawPosting } from "./ats-source.js";
 import { FREE_PRICING } from "./cost.js";
@@ -143,7 +145,7 @@ export interface FreeIngestResult {
  * minutes — and refreshing verdicts on known rows is already the metered sweep's
  * job. Keeping it here would be the same work done twice, less well.
  */
-async function keepUnseen(
+export async function keepUnseen(
   candidates: readonly FreeCandidate[],
   profile: JobSearchProfile = getProfile(),
 ): Promise<{ unseen: FreeCandidate[]; known: number }> {
@@ -168,7 +170,17 @@ async function keepUnseen(
     return existing !== null;
   });
 
-  const unseen = deduped.filter((_, i) => flags[i] === false);
+  // A renamed posting keeps its URL and board id: one batched read, not one per job.
+  const refs = await findKnownPostingRefs(
+    deduped.map((c) => c.url),
+    deduped.map((c) => c.externalId),
+    profile.tenantId,
+    profile.id,
+  );
+  const index = buildKnownIndex(refs);
+  const unseen = deduped.filter(
+    (c, i) => flags[i] === false && !isKnownPosting({ company: c.board.name, url: c.url, externalId: c.externalId }, index),
+  );
   return { unseen, known: candidates.length - unseen.length };
 }
 

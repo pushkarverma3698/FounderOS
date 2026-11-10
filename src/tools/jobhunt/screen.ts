@@ -28,6 +28,7 @@ import { extractPostingFacts, type PostingRoute } from "./extract.js";
 import { countryFromLocation, type PostingCountry } from "./country.js";
 import { screenIndianPay, inrFloorFor } from "./pay-india.js";
 import { basesForPosting, gateProfile, isLiveBasis, nonLiveBasisRejectGate } from "./permit-routes.js";
+import { remoteScope, routeForScope } from "./remote-scope.js";
 import { THIN_BODY_CHARS, postingGate, gatesForRoute, locationGate } from "./screen-gates.js";
 import {
   dedupeKey,
@@ -54,7 +55,6 @@ import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:screen_job" });
-
 // Re-exported so callers keep one import site for the screening vocabulary.
 export { combineVerdict } from "./gates.js";
 export { formatScreenOutcome } from "./screen-format.js";
@@ -199,7 +199,8 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // Dutch ones on the strength of the word "hybrid".
   const country = input.country ?? countryFromLocation(input.location ?? "", profile);
   const facts = extractPostingFacts(description, country);
-
+  const scope = remoteScope(input.location ?? "", description);
+  const postingRoute = routeForScope(facts.route, country, scope);
   let register: ReturnType<typeof getSponsorRegister>;
   try {
     register = getSponsorRegister();
@@ -219,7 +220,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const experience = experienceGate(description, title, profile);
   const level = levelGate(title, profile);
   const posting = postingGate(description);
-  const location = locationGate(country, facts.route);
+  const location = locationGate(country, postingRoute, scope);
 
   // The IND recognised-sponsor register is Dutch-immigration-specific. A basis
   // marked sponsorRequired (currently only "hsm") is only meaningful for a
@@ -230,7 +231,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // seam that stops it from running for a market it has no data for.
   const targetsNetherlands = profile.targetCountries.some((c) => c.code === "NL");
 
-  const outcomes = routesToScreen(facts.route, profile).map((route) => {
+  const outcomes = routesToScreen(postingRoute, profile).map((route) => {
     // A non-live basis here means a DEFINITE route matched nothing this
     // profile holds (see nonLiveBasisRejectGate) — found live, 2026-09-04,
     // carrying a Bangalore posting under a Dutch permit.
@@ -331,7 +332,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       route: chosen.route,
       track,
       verdict: chosen.verdict.status,
-      detectedRoute: facts.route,
+      detectedRoute: postingRoute,
     },
     "Job screened",
   );

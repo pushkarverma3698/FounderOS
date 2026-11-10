@@ -24,6 +24,7 @@
  * React + Node + Postgres, shipped.
  */
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
+import { isOffDisciplineTitle } from "./track-off-discipline.js";
 
 /**
  * RoleTrack — string track identifier e.g. "ai", "fullstack", "backend", "frontend", "fpa", "compliance-kyc".
@@ -198,6 +199,10 @@ export function classifyTrack(
   // job is not one of her tracks whatever finance phrase it also carries. Same matcher as the
   // vocabulary, so "stage" cannot hit "backstage".
   if (profile.rejectTitleTerms?.some((term) => matchesAsWholeWord(normalised, term))) return null;
+
+  // A mechanical / SAP / kernel / designer seat is not a software track whatever generic
+  // word it also carries. Tech profiles only: "SAP" is a finance skill for the other one.
+  if (profile.skillsDictionaryName === "tech" && isOffDisciplineTitle(title)) return null;
 
   const trackPriority = profile.trackPriority;
   const tracks = profile.tracks;
