@@ -710,14 +710,14 @@ export async function recordBriefRanks(
  * `screenPosting` would re-read a CV file per posting to store the same number.
  */
 export async function recordFitScores(
-  entries: ReadonlyArray<{ id: string; score: number; evidence: string }>,
+  entries: ReadonlyArray<{ id: string; score: number | null; evidence: string }>,
 ): Promise<void> {
   const db = getDb();
   for (const entry of entries) {
     await db
       .update(jobApplications)
       .set({
-        fit_score: entry.score.toFixed(4),
+        fit_score: entry.score === null ? null : entry.score.toFixed(4),
         fit_evidence: entry.evidence.slice(0, 1000),
         updated_at: new Date(),
       })

@@ -150,14 +150,20 @@ export async function persistFitScores(
 ): Promise<void> {
   try {
     await recordFitScores(
-      scored.map(({ row, overlap }) => ({
-        id: row.id,
-        score: overlap.ratio,
-        evidence:
-          `${formatOverlap(overlap)} matched. ` +
-          `Have: ${overlap.matched.join(", ") || "none"}. ` +
-          `Missing: ${overlap.missing.join(", ") || "none"}.`,
-      })),
+      scored.map(({ row, overlap }) =>
+        // asked = 0 means the body named no dictionary term (empty, thin, prose only):
+        // nothing was measured, so store NULL rather than a 0.0 that reads as a verdict.
+        overlap.asked === 0
+          ? { id: row.id, score: null, evidence: "Not measured: the posting names no recognised skill terms (empty or thin body)." }
+          : {
+              id: row.id,
+              score: overlap.ratio,
+              evidence:
+                `${formatOverlap(overlap)} matched. ` +
+                `Have: ${overlap.matched.join(", ") || "none"}. ` +
+                `Missing: ${overlap.missing.join(", ") || "none"}.`,
+            },
+      ),
     );
   } catch (err) {
     // allow-failopen: the score is history, the brief is the deliverable.

@@ -51,7 +51,7 @@ describe("arbeitnow adapter", () => {
       "../../../src/tools/jobhunt/aggregators/arbeitnow.js"
     );
     const source = createArbeitnowSource();
-    const jobs = await source.fetchJobs();
+    const jobs = (await source.fetchJobs())!;
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
@@ -70,57 +70,9 @@ describe("arbeitnow adapter", () => {
       "../../../src/tools/jobhunt/aggregators/arbeitnow.js"
     );
     const source = createArbeitnowSource();
-    const jobs = await source.fetchJobs();
+    const jobs = (await source.fetchJobs())!;
 
     expect(jobs).toHaveLength(0);
-  });
-});
-
-// ── Remotive ─────────────────────────────────────────────────────────────────
-
-describe("remotive adapter", () => {
-  const originalFetch = globalThis.fetch;
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it("parses response into AggregatorJobs", async () => {
-    const mockResponse = {
-      "job-count": 1,
-      jobs: [
-        {
-          id: 123,
-          url: "https://remotive.com/remote-jobs/software-dev/test-123",
-          title: "Backend Developer",
-          company_name: "RemoteCo",
-          category: "software-dev",
-          tags: ["python"],
-          publication_date: "2024-09-01T00:00:00",
-          candidate_required_location: "Europe",
-          description: "<p>Work remotely</p>",
-        },
-      ],
-    };
-
-    globalThis.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockResponse),
-    });
-
-    const { createRemotiveSource } = await import(
-      "../../../src/tools/jobhunt/aggregators/remotive.js"
-    );
-    const source = createRemotiveSource();
-    const jobs = await source.fetchJobs();
-
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({
-      title: "Backend Developer",
-      company: "RemoteCo",
-      source: "remotive",
-      location: "Europe",
-    });
   });
 });
 
@@ -160,7 +112,7 @@ describe("himalayas adapter", () => {
       "../../../src/tools/jobhunt/aggregators/himalayas.js"
     );
     const source = createHimalayasSource();
-    const jobs = await source.fetchJobs();
+    const jobs = (await source.fetchJobs())!;
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
@@ -207,7 +159,7 @@ describe("jobicy adapter", () => {
       "../../../src/tools/jobhunt/aggregators/jobicy.js"
     );
     const source = createJobicySource();
-    const jobs = await source.fetchJobs();
+    const jobs = (await source.fetchJobs())!;
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({

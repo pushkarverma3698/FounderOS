@@ -64,6 +64,7 @@ vi.mock("../../../src/db/job-digest-queries.js", () => ({
     mockDigestStore.set(profileId, { pending: null, lastDigestAt: at });
   },
 }));
+vi.mock("../../../src/db/job-apply-stats.js", () => ({ applyStatsFor: async () => ({ appliedWeek: 0, openDoToday: 0 }) }));
 vi.mock("../../../src/db/job-ref-queries.js", () => ({ jobIdsByDedupeKey: async () => new Map(), jobRowsByDedupeKey: async () => [] }));
 
 /** 09:30 in Asia/Kolkata: the first digest slot of the day has started. */
@@ -253,19 +254,16 @@ describe("runFreeSweep", () => {
     expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
-  it("names at most 8 roles in the batch and states the true total when more exist", async () => {
+  it("names every role in the batch, over as many messages as it takes", async () => {
     const lines = Array.from({ length: 12 }, (_, i) =>
       line({ company: `Company ${i}`, title: `Role ${i}` }),
     );
     mockRunFreeIngest.mockResolvedValue(result({ lines }));
     await runFreeSweep();
 
-    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
+    const text = (mockSendToJobsChat.mock.calls as unknown as [string][]).map((c) => c[0]).join("\n");
     expect(text).toContain("12 new role");
-    expect(text).toContain("Company 0");
-    expect(text).toContain("Company 7");
-    expect(text).not.toContain("Company 8");
-    expect(text).toContain("+ 4 more");
+    for (let i = 0; i < 12; i++) expect(text).toContain(`Company ${i}`);
   });
 
   it("does not invent /draft row numbers, and carries no sheet link in the group message", async () => {
