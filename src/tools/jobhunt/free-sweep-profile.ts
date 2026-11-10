@@ -75,10 +75,8 @@ export async function publishSheet(): Promise<{ link: string | null; notice: str
   const exported = await exportJobSheet();
   if (exported.ok) return { link: sheetLine(exported.url), notice: null };
 
-  if (exported.skipped) {
-    log.warn({ reason: exported.reason }, "Job sheet export skipped");
-    return { link: null, notice: null };
-  }
+  // Not configured: a valid setup, logged once at boot (reportSheetExportConfig).
+  if (exported.skipped) return { link: null, notice: null };
 
   return {
     link: null,
