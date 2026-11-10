@@ -29,6 +29,7 @@ vi.mock("../../../src/db/job-digest-queries.js", () => ({
     digestStore.set(profileId, { pending: null, lastDigestAt: at });
   },
 }));
+vi.mock("../../../src/db/job-apply-stats.js", () => ({ applyStatsFor: async () => ({ appliedWeek: 0, openDoToday: 0 }) }));
 vi.mock("../../../src/db/job-ref-queries.js", () => ({ jobIdsByDedupeKey: async () => new Map(), jobRowsByDedupeKey: async () => [] }));
 /** 09:30 in Asia/Kolkata: the first digest slot of the day has started. */
 const SLOT_OPEN = new Date("2026-09-04T04:00:00Z");
@@ -201,7 +202,8 @@ describe("runFreeSweep", () => {
     for (const { id } of listProfiles()) expect(digestStore.get(id)?.pending?.rows).toHaveLength(1);
 
     await runFreeSweep();
-    expect(sendToJobsChat).toHaveBeenCalledTimes(2);
+    // The failed attempt, then one message per candidate.
+    expect(sendToJobsChat).toHaveBeenCalledTimes(3);
     for (const { id } of listProfiles()) expect(digestStore.get(id)?.pending).toBeNull();
   });
 
@@ -226,26 +228,23 @@ describe("runFreeSweep", () => {
     expect(runFreeIngest).not.toHaveBeenCalled();
   });
 
-  it("sends ONE batched message that names every candidate", async () => {
-    // Both lanes share the daily cap: two candidates must not double the group's message count.
+  it("sends one batch with a message per candidate, each named", async () => {
+    // Both lanes share the daily slots: three batches a day, however many people are in it.
     await runFreeSweep();
-    expect(sendToJobsChat).toHaveBeenCalledTimes(1);
-    const text = String(sendToJobsChat.mock.calls[0]?.[0] ?? "");
-    expect(text).toContain("Tashi Goyal");
-    expect(text).toContain("Pushkar Verma");
-    expect(text).toMatch(/new roles? for/);
+    expect(sendToJobsChat).toHaveBeenCalledTimes(2);
+    const texts = sendToJobsChat.mock.calls.map((c) => String(c[0] ?? ""));
+    expect(texts.some((t) => t.includes("Tashi"))).toBe(true);
+    expect(texts.some((t) => t.includes("Pushkar"))).toBe(true);
+    expect(texts.every((t) => /new roles?/.test(t))).toBe(true);
   });
 
   it("prints a selector in the second candidate's commands and none in the default candidate's", async () => {
-    // Both alerts land in one group chat. A bare `/draft 2` acts on the default queue, so hers must say whose it is.
+    // Both candidates land in one group chat. A bare `/jobs` acts on the default queue, so hers must say whose it is.
     await runFreeSweep();
-    const text = String(sendToJobsChat.mock.calls[0]?.[0] ?? "");
-    const blocks = text.split(/(?=🆕)/);
-    const hers = blocks.find((block) => block.includes("Tashi Goyal")) ?? "";
-    const his = blocks.find((block) => block.includes("Pushkar Verma")) ?? "";
-    expect(hers).toContain("Tashi Goyal");
+    const texts = sendToJobsChat.mock.calls.map((c) => String(c[0] ?? ""));
+    const hers = texts.find((t) => t.includes("Tashi")) ?? "";
+    const his = texts.find((t) => t.includes("Pushkar")) ?? "";
     expect(hers).toContain("/jobs tashi for the ranked list");
-    expect(his).toContain("Pushkar Verma");
     expect(his).toContain("/jobs for the ranked list");
     expect(his).not.toContain("/jobs tashi");
   });

@@ -83,6 +83,7 @@ describe("mergePending", () => {
 function harness(profileIds: readonly string[]) {
   const store = new Map<string, DigestState>();
   const sent: string[] = [];
+  /** Messages per delivered batch (one entry per sendDueDigest call that sent anything). */
   const keyboards: (DigestKeyboard | undefined)[] = [];
   const failNext = { value: false };
   for (const id of profileIds) store.set(id, { pending: EMPTY_PENDING, lastDigestAt: null });
@@ -90,9 +91,9 @@ function harness(profileIds: readonly string[]) {
     profiles: profileIds.map((id) => getProfile(id)),
     tz: TZ,
     load: async () => new Map(store),
-    ids: async (_profile, keys) => new Map(keys.map((k) => [k, "j" + k.length.toString(16).padStart(7, "0")])),
     // A row's uuid is derived from its dedupe key so a test can name the button it expects.
-    drafts: async (_profile, keys) => keys.map((k) => ({ key: k, id: UUID_OF(k), company: (k.split("::")[0] ?? k).replace(/^./, (c) => c.toUpperCase()) })),
+    rows: async (_profile, keys) => keys.map((k) => ({ key: k, id: UUID_OF(k), company: (k.split("::")[0] ?? k).replace(/^./, (c) => c.toUpperCase()) })),
+    stats: async () => ({ appliedWeek: 2, openDoToday: 9 }),
     send: async (text, keyboard) => {
       if (failNext.value) {
         failNext.value = false;
@@ -113,7 +114,7 @@ function harness(profileIds: readonly string[]) {
 }
 
 describe("a whole day of sweeps", () => {
-  it("sends three group messages for 48 sweeps that each found a role for both candidates", async () => {
+  it("sends three batches for 48 sweeps that each found a role for both candidates", async () => {
     const h = harness([DEFAULT_PROFILE_ID, WIFE_ID]);
     const start = at("2026-10-05T00:00:00Z").getTime();
     for (let i = 0; i < 48; i++) {
@@ -122,11 +123,11 @@ describe("a whole day of sweeps", () => {
       h.buffer(WIFE_ID, [row("Beta" + i)]);
       await sendDueDigest(now, h.deps);
     }
-    expect(h.sent.length).toBe(3);
-    expect(h.sent.length).toBeLessThanOrEqual(5);
+    // Three slots, two candidates each: six "apply first" messages (plus the split-off remainder), nothing more.
+    expect(h.sent.filter((t) => t.includes("Apply to these first")).length).toBe(6);
 
     const delivered = h.sent
-      .flatMap((text) => [...text.matchAll(/(\d+) new roles? for/g)])
+      .flatMap((text) => [...text.matchAll(/(\d+) new roles?/g)])
       .reduce((sum, m) => sum + Number(m[1]), 0);
     const waiting = [...h.store.values()].reduce((sum, s) => sum + s.pending.rows.length + s.pending.overflow, 0);
     expect(delivered + waiting).toBe(96);
@@ -140,14 +141,18 @@ describe("a whole day of sweeps", () => {
     expect(h.sent).toEqual([]);
   });
 
-  it("puts both candidates in ONE message, so two lanes do not double the count", async () => {
+  it("gives each candidate her or his own message, so a button never sits under the other person's roles", async () => {
     const h = harness([DEFAULT_PROFILE_ID, WIFE_ID]);
     h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
     h.buffer(WIFE_ID, [row("Beta")]);
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
-    expect(h.sent.length).toBe(1);
+    expect(h.sent.length).toBe(2);
     expect(h.sent[0]).toContain("Alpha");
-    expect(h.sent[0]).toContain("Beta");
+    expect(h.sent[0]).not.toContain("Beta");
+    expect(h.sent[0]).toContain("Pushkar");
+    expect(h.sent[1]).toContain("Beta");
+    expect(h.sent[1]).not.toContain("Alpha");
+    expect(h.sent[1]).toContain("Tashi");
   });
 });
 
@@ -182,9 +187,9 @@ describe("delivery", () => {
 describe("what the digest says", () => {
   it("keeps the sender-profile selector in every command it prints", async () => {
     const h = harness([WIFE_ID]);
-    h.buffer(WIFE_ID, [row("Nexperia"), row("Bosch", "flag")], 4);
+    h.buffer(WIFE_ID, [...Array.from({ length: 6 }, (_, i) => row("Nexperia" + i)), row("Bosch", "flag")], 4);
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
-    const text = h.sent[0] ?? "";
+    const text = h.sent.join("\n");
     const commands = [...text.matchAll(/\/(?:draft|jobs|csv)\b[^<\n]*/g)].map((m) => m[0]);
     expect(commands.length).toBeGreaterThanOrEqual(3);
     for (const command of commands) expect(command).toContain("tashi");
@@ -192,9 +197,9 @@ describe("what the digest says", () => {
 
   it("prints no selector for the default candidate, as before", async () => {
     const h = harness([DEFAULT_PROFILE_ID]);
-    h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
+    h.buffer(DEFAULT_PROFILE_ID, Array.from({ length: 6 }, (_, i) => row("Alpha" + i)));
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
-    expect(h.sent[0]).toMatch(/<code>\/draft j[0-9a-f]{7}<\/code>/);
+    expect(h.sent.join("\n")).toMatch(/<code>\/draft j[0-9a-f]{7}<\/code>/);
   });
 
   it("carries no sheet line, linked or not", async () => {
@@ -204,13 +209,28 @@ describe("what the digest says", () => {
     expect(h.sent[0]?.toLowerCase()).not.toContain("sheet");
   });
 
-  it("names more roles than a per-sweep alert did, and counts the rest", async () => {
+  it("names every buffered role, splitting over messages, and shows the apply nudge", async () => {
     const h = harness([DEFAULT_PROFILE_ID]);
     h.buffer(DEFAULT_PROFILE_ID, Array.from({ length: 12 }, (_, i) => row("Company" + i)));
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
-    expect(h.sent[0]).toContain("12 new roles");
-    expect(h.sent[0]).toContain("Company4");
-    expect(h.sent[0]).toMatch(/\+ \d+ more/);
+    const all = h.sent.join("\n");
+    expect(all).toContain("12 new roles");
+    for (let i = 0; i < 12; i++) expect(all).toContain("Company" + i);
+    expect(all).not.toMatch(/\+ \d+ more\./);
+    expect(h.sent[0]).toContain("Applied this week: 2 · open do-today roles: 9");
+  });
+
+  it("sends the batch without the nudge line when the stats lookup fails", async () => {
+    const h = harness([DEFAULT_PROFILE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
+    await sendDueDigest(at("2026-10-05T04:00:00Z"), {
+      ...h.deps,
+      stats: async () => {
+        throw new Error("db down");
+      },
+    });
+    expect(h.sent[0]).toContain("Alpha");
+    expect(h.sent[0]).not.toContain("Applied this week");
   });
 
   it("reports a backfill-only buffer on its own line", async () => {
@@ -221,23 +241,47 @@ describe("what the digest says", () => {
   });
 });
 
-describe("the Draft buttons under the batch", () => {
+describe("the apply buttons under the batch", () => {
   const buttonsOf = (kb: DigestKeyboard | undefined) => (kb ?? []).flat();
 
-  it("carries a 📝 Draft button for the first three passing roles, so the apply loop starts with a tap", async () => {
+  it("gives the top five roles Draft, Applied and Skip buttons that carry each role's row id", async () => {
     const h = harness([DEFAULT_PROFILE_ID]);
-    h.buffer(DEFAULT_PROFILE_ID, ["Alpha", "Beta", "Gamma", "Delta"].map((c) => row(c)));
+    h.buffer(DEFAULT_PROFILE_ID, ["Alpha", "Beta", "Gamma", "Delta", "Eps", "Zeta"].map((c) => row(c)));
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
     const buttons = buttonsOf(h.keyboards[0]);
-    expect(buttons.map((b) => b.text)).toEqual(["📝 Draft — Alpha", "📝 Draft — Beta", "📝 Draft — Gamma"]);
+    expect(buttons.length).toBe(15);
     expect(buttons[0]?.callback_data).toBe(`jh:d:${UUID_OF("alpha::finance controller")}`);
+    expect(buttons[1]?.callback_data).toBe(`jh:a:${UUID_OF("alpha::finance controller")}`);
+    expect(buttons[2]?.callback_data).toBe(`jh:n:${UUID_OF("alpha::finance controller")}`);
+    expect(h.keyboards.slice(1).every((k) => k === undefined)).toBe(true);
   });
 
-  it("skips flagged roles and sends no keyboard when no role passed", async () => {
+  it("keeps each person's buttons on that person's message: no cross-profile row ids", async () => {
+    const h = harness([DEFAULT_PROFILE_ID, WIFE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
+    h.buffer(WIFE_ID, [row("Beta")]);
+    // Row lookups are profile-scoped: record which profile asked for which key.
+    const asked: [string, string][] = [];
+    await sendDueDigest(at("2026-10-05T04:00:00Z"), {
+      ...h.deps,
+      rows: async (profile, keys) => {
+        for (const k of keys) asked.push([profile.id, k]);
+        return h.deps.rows(profile, keys);
+      },
+    });
+    expect(asked).toEqual([
+      [DEFAULT_PROFILE_ID, "alpha::finance controller"],
+      [WIFE_ID, "beta::finance controller"],
+    ]);
+    const ids = (i: number) => buttonsOf(h.keyboards[i]).map((b) => b.callback_data.split(":")[2]);
+    expect(new Set(ids(0))).toEqual(new Set([UUID_OF("alpha::finance controller")]));
+    expect(new Set(ids(1))).toEqual(new Set([UUID_OF("beta::finance controller")]));
+  });
+
+  it("sends no keyboard when the buffer only has backfill", async () => {
     const h = harness([DEFAULT_PROFILE_ID]);
-    h.buffer(DEFAULT_PROFILE_ID, [row("Flagged", "flag")]);
+    h.buffer(DEFAULT_PROFILE_ID, [], 3);
     await sendDueDigest(at("2026-10-05T04:00:00Z"), h.deps);
-    expect(h.sent.length).toBe(1);
     expect(buttonsOf(h.keyboards[0])).toEqual([]);
   });
 
@@ -246,12 +290,31 @@ describe("the Draft buttons under the batch", () => {
     h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
     const failing: DigestDeps = {
       ...h.deps,
-      drafts: async () => {
+      rows: async () => {
         throw new Error("db down");
       },
     };
     await sendDueDigest(at("2026-10-05T04:00:00Z"), failing);
     expect(h.sent.length).toBe(1);
+    expect(h.sent[0]).toContain("Alpha");
     expect(buttonsOf(h.keyboards[0])).toEqual([]);
+  });
+
+  it("clears Pushkar's buffer once his messages went out even if Tashi's send fails", async () => {
+    const h = harness([DEFAULT_PROFILE_ID, WIFE_ID]);
+    h.buffer(DEFAULT_PROFILE_ID, [row("Alpha")]);
+    h.buffer(WIFE_ID, [row("Beta")]);
+    let calls = 0;
+    await expect(
+      sendDueDigest(at("2026-10-05T04:00:00Z"), {
+        ...h.deps,
+        send: async (t, k) => {
+          if (++calls === 2) throw new Error("telegram down");
+          await h.deps.send(t, k);
+        },
+      }),
+    ).rejects.toThrow("telegram down");
+    expect(h.store.get(DEFAULT_PROFILE_ID)?.pending.rows.length).toBe(0);
+    expect(h.store.get(WIFE_ID)?.pending.rows.length).toBe(1);
   });
 });

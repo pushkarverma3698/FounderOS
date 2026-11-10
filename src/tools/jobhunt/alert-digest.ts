@@ -20,20 +20,13 @@ import { childLogger } from "../../infra/logger.js";
 import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import { profileSelector, type JobSearchProfile } from "./profile-config.js";
-import { formatBackfillLine, formatNewRowsAlert } from "./sweep-heartbeat.js";
 import type { PendingAlertRow, PendingAlerts } from "../../db/job-digest-schema.js";
-import { jobCallbackData } from "./job-ref.js";
+import { buildPersonMessages, type ApplyStats, type DigestMessage, type DigestRole } from "./digest-format.js";
 
 const log = childLogger({ module: "scheduler" });
 
 /** Local hours (app timezone) at which a batch may go out. Three a day, so at most three group messages. */
 export const DIGEST_HOURS: readonly number[] = [9, 14, 19];
-
-/** A batch names more roles than the old per-sweep alert, because it replaces several of them. */
-export const DIGEST_NAMED = 8;
-
-/** 📝 Draft buttons under a batch: the first roles worth applying to, across both candidates. */
-export const DIGEST_DRAFT_BUTTONS = 3;
 
 /** Roles kept per candidate between batches; past this they are counted in `overflow`, never dropped silently. */
 export const PENDING_CAP = 50;
@@ -114,14 +107,23 @@ export async function bufferAlerts(profileId: string, fresh: readonly IngestLine
 /** Inline keyboard rows, in the shape Telegram's Bot API takes. */
 export type DigestKeyboard = readonly (readonly { readonly text: string; readonly callback_data: string }[])[];
 
+/** A stored row for a buffered role: what a button needs, plus what ranks it. */
+export interface DigestRowRef {
+  readonly key: string;
+  readonly id: string;
+  readonly company: string;
+  readonly section?: string | null;
+  readonly fit?: string | number | null;
+}
+
 export interface DigestDeps {
   readonly profiles: readonly JobSearchProfile[];
   readonly tz?: string;
   readonly load: (profileIds: readonly string[]) => Promise<Map<string, DigestState>>;
-  /** dedupeKey to short role id, for the roles the batch names. */
-  readonly ids: (profile: JobSearchProfile, keys: readonly string[]) => Promise<Map<string, string>>;
-  /** dedupeKey to the stored row (full id and company), for the roles that get a 📝 Draft button. */
-  readonly drafts: (profile: JobSearchProfile, keys: readonly string[]) => Promise<readonly { key: string; id: string; company: string }[]>;
+  /** dedupeKey to the stored row, looked up under THIS profile only. Fails soft: the batch goes out without buttons. */
+  readonly rows: (profile: JobSearchProfile, keys: readonly string[]) => Promise<readonly DigestRowRef[]>;
+  /** Applied this week and open do-today roles, from the database. Optional; the nudge line is left out without it. */
+  readonly stats?: (profile: JobSearchProfile, now: Date) => Promise<ApplyStats>;
   readonly send: (text: string, keyboard?: DigestKeyboard) => Promise<void>;
   readonly mark: (profileId: string, at: Date) => Promise<void>;
 }
@@ -131,85 +133,73 @@ async function realDeps(): Promise<DigestDeps> {
   const queries = await import("../../db/job-digest-queries.js");
   const { sendToJobsChat } = await import("../../infra/telegram-send.js");
   const { jobRowsByDedupeKey } = await import("../../db/job-ref-queries.js");
+  const { applyStatsFor } = await import("../../db/job-apply-stats.js");
   return {
     profiles: listProfiles(),
     load: async (profileIds) => {
       const stored = await queries.loadDigestStates(profileIds);
       return new Map([...stored].map(([id, s]) => [id, { pending: s.pending ?? EMPTY_PENDING, lastDigestAt: s.lastDigestAt }]));
     },
-    ids: async (profile, keys) => {
-      try {
-        const { jobIdsByDedupeKey } = await import("../../db/job-ref-queries.js");
-        return await jobIdsByDedupeKey([...keys], { tenantId: profile.tenantId, profileId: profile.id });
-      } catch (err) {
-        // allow-failopen: the batch is the deliverable and `/draft <id>` is the shortcut. A missing shortcut is
-        // visible on the line; a guessed one would not be.
-        log.warn({ err: (err as Error).message, profile: profile.id }, "Role ids unavailable for batch");
-        return new Map();
-      }
-    },
-    drafts: (profile, keys) => jobRowsByDedupeKey([...keys], { tenantId: profile.tenantId, profileId: profile.id }),
+    rows: (profile, keys) => jobRowsByDedupeKey([...keys], { tenantId: profile.tenantId, profileId: profile.id }),
+    stats: (profile, now) => applyStatsFor(profile.id, profile.tenantId, now),
     send: (text, keyboard) => sendToJobsChat(text, "HTML", keyboard),
     mark: queries.markDigestSent,
   };
 }
 
-/** One candidate block of the batch: the same text the per-sweep alert used, now over everything buffered. */
-async function sectionFor(profile: JobSearchProfile, pending: PendingAlerts, deps: DigestDeps): Promise<string> {
-  const selector = profileSelector(profile);
-  if (pending.rows.length === 0) return formatBackfillLine(pending.backfill, profile.candidateName, selector);
-  const lines: IngestLine[] = pending.rows.map((r) => ({
-    company: r.company,
-    title: r.title,
-    outcome: r.outcome,
-    detail: "",
-    isNew: true,
-    url: r.url,
-  }));
-  const ids = await deps.ids(profile, pending.rows.slice(0, DIGEST_NAMED).map((r) => r.key));
-  return formatNewRowsAlert(lines, null, profile.candidateName, {
+/** Join the buffered roles to their stored rows. A failed lookup costs the buttons and the `/draft` ids, never the batch. */
+async function rolesFor(profile: JobSearchProfile, pending: PendingAlerts, deps: DigestDeps): Promise<DigestRole[]> {
+  let byKey = new Map<string, DigestRowRef>();
+  try {
+    byKey = new Map((await deps.rows(profile, pending.rows.map((r) => r.key))).map((r) => [r.key, r]));
+  } catch (err) {
+    // allow-failopen: the batch is the deliverable; without the lookup the roles are still named with their links.
+    log.warn({ err: (err as Error).message, profile: profile.id }, "Row lookup failed for batch; sending without buttons");
+  }
+  return pending.rows.map((r) => {
+    const hit = byKey.get(r.key);
+    const fit = hit?.fit === undefined || hit.fit === null ? null : Number(hit.fit);
+    return {
+      key: r.key,
+      company: r.company,
+      title: r.title,
+      url: r.url,
+      outcome: r.outcome,
+      rowId: hit?.id ?? null,
+      section: hit?.section ?? null,
+      fit: fit !== null && Number.isFinite(fit) ? fit : null,
+    };
+  });
+}
+
+async function statsFor(profile: JobSearchProfile, now: Date, deps: DigestDeps): Promise<ApplyStats | null> {
+  if (!deps.stats) return null;
+  try {
+    return await deps.stats(profile, now);
+  } catch (err) {
+    // allow-failopen: the nudge is an extra line; the roles matter more than the count.
+    log.warn({ err: (err as Error).message, profile: profile.id }, "Apply stats unavailable for batch");
+    return null;
+  }
+}
+
+/** One candidate's messages: the same roles the buffer holds, now every one named. */
+async function messagesFor(profile: JobSearchProfile, pending: PendingAlerts, now: Date, deps: DigestDeps): Promise<DigestMessage[]> {
+  return buildPersonMessages({
+    name: profile.candidateName.trim().split(/\s+/)[0] ?? profile.candidateName,
+    selector: profileSelector(profile),
+    roles: pending.rows.length > 0 ? await rolesFor(profile, pending, deps) : [],
+    overflow: pending.overflow,
     backfill: pending.backfill,
-    ids,
-    selector,
-    named: DIGEST_NAMED,
-    extra: pending.overflow,
+    stats: await statsFor(profile, now, deps),
   });
 }
 
 /**
- * One 📝 Draft button per top passing role, so the apply loop starts with a tap. Without them the digest was
- * plain text and nobody typed `/draft`: 3,160 roles screened, no application since 08-06. A failed lookup
- * costs the buttons, never the batch.
- */
-async function draftKeyboardFor(
-  due: readonly { profile: JobSearchProfile; state: DigestState }[],
-  deps: DigestDeps,
-): Promise<DigestKeyboard | undefined> {
-  const picked: { id: string; company: string }[] = [];
-  try {
-    for (const { profile, state } of due) {
-      const keys = state.pending.rows.filter((r) => r.outcome === "pass").map((r) => r.key);
-      if (keys.length === 0) continue;
-      const byKey = new Map((await deps.drafts(profile, keys.slice(0, DIGEST_DRAFT_BUTTONS))).map((r) => [r.key, r]));
-      for (const key of keys) {
-        const hit = byKey.get(key);
-        if (hit && picked.length < DIGEST_DRAFT_BUTTONS) picked.push(hit);
-      }
-    }
-  } catch (err) {
-    // allow-failopen: the batch is the deliverable; a missing button leaves `/draft <id>` in the text.
-    log.warn({ err: (err as Error).message }, "Draft buttons not built for batch");
-    return undefined;
-  }
-  return picked.length === 0
-    ? undefined
-    : picked.map((r) => [{ text: `📝 Draft — ${r.company.slice(0, 40)}`, callback_data: jobCallbackData("draft", r.id) }]);
-}
-
-/**
- * Send the batch if a slot has started and anything is buffered. ONE message for every candidate that is due,
- * so two lanes do not double the count. Returns normally when there is nothing to send; throws when the send
- * fails, with every buffer left as it was.
+ * Send the batch if a slot has started and anything is buffered: each due candidate gets her or his own
+ * messages, so a button never sits under the other person's roles. SEND FIRST, CLEAR ON SUCCESS, per candidate:
+ * a candidate's buffer is cleared only after all of that candidate's messages were accepted. Returns normally
+ * when there is nothing to send; throws when a send fails, leaving that candidate's buffer as it was.
  */
 export async function sendDueDigest(now: Date, deps?: DigestDeps): Promise<void> {
   const d = deps ?? (await realDeps());
@@ -219,11 +209,9 @@ export async function sendDueDigest(now: Date, deps?: DigestDeps): Promise<void>
     .map((profile) => ({ profile, state: states.get(profile.id) ?? { pending: EMPTY_PENDING, lastDigestAt: null } }))
     .filter(({ state }) => state.pending.rows.length > 0 || state.pending.backfill > 0)
     .filter(({ state }) => digestDue(state.lastDigestAt, now, tz));
-  if (due.length === 0) return;
-
-  const sections: string[] = [];
-  for (const { profile, state } of due) sections.push(await sectionFor(profile, state.pending, d));
-  await d.send(sections.join("\n\n"), await draftKeyboardFor(due, d));
-  for (const { profile } of due) await d.mark(profile.id, now);
-  log.info({ profiles: due.map((x) => x.profile.id) }, "Batched new-role alert sent");
+  for (const { profile, state } of due) {
+    for (const m of await messagesFor(profile, state.pending, now, d)) await d.send(m.text, m.keyboard);
+    await d.mark(profile.id, now);
+  }
+  if (due.length > 0) log.info({ profiles: due.map((x) => x.profile.id) }, "Batched new-role alert sent");
 }
