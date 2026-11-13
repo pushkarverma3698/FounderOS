@@ -3,7 +3,7 @@
 FounderOS is a deterministic agent kernel with a Telegram gateway — Node 22 +
 TypeScript (strict) + LangGraph StateGraph + grammy + drizzle/Postgres. This
 guide gets you productive fast. **AI agents working on this repo must also read
-[`agent-rules.md`](agent-rules.md) — it is the binding contract.**
+[`AGENTS.md`](AGENTS.md) — it is the binding contract.**
 
 ## Setup
 
@@ -24,9 +24,9 @@ message → plan (LLM) → dispatch (pure) → agent ⇄ tools → collect (pure
 
 Contracts (`src/kernel/contracts.ts`) ARE the architecture: every boundary is
 Zod-validated; a mismatch is a terminal, typed FailureReport — never
-retry-and-hope. Read `JARVIS-ARCHITECTURE.md` before touching the kernel.
+retry-and-hope.
 
-## Ground rules (full list in `CLAUDE.md` + `agent-rules.md`)
+## Ground rules (full list in `AGENTS.md`)
 
 1. **Import direction** — contracts ← kernel ← gateway; kernel imports only
    kernel/core/db/infra/tools. CI-enforced (`pnpm verify:arch`).
