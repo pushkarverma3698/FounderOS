@@ -13,18 +13,7 @@ export interface EmailMessage {
   messageTimestamp?: string;
 }
 
-export function normalizeEmailMessage(raw: Record<string, unknown>): EmailMessage {
-  return {
-    messageId: String(raw["messageId"] ?? raw["id"] ?? raw["message_id"] ?? ""),
-    threadId: String(raw["threadId"] ?? raw["thread_id"] ?? ""),
-    sender: String(raw["sender"] ?? raw["from"] ?? raw["senderEmail"] ?? "unknown sender"),
-    subject: String(raw["subject"] ?? "(no subject)"),
-    messageText: String(raw["messageText"] ?? raw["snippet"] ?? raw["body"] ?? raw["preview"] ?? ""),
-    messageTimestamp: String(raw["messageTimestamp"] ?? raw["date"] ?? raw["internalDate"] ?? ""),
-  };
-}
-
-export function headerFromGwsPayload(payload: unknown, name: string): string | undefined {
+function headerFromGwsPayload(payload: unknown, name: string): string | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const headers = (payload as { headers?: Array<{ name?: string; value?: string }> }).headers;
   if (!Array.isArray(headers)) return undefined;
@@ -76,7 +65,7 @@ function findPartBody(part: GwsMimePart, mimeType: string): string | undefined {
  * anywhere in the MIME tree, fall back to tag-stripped text/html, else
  * undefined (caller falls back to the snippet — e.g. metadata-format payloads).
  */
-export function bodyFromGwsPayload(payload: unknown): string | undefined {
+function bodyFromGwsPayload(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const root = payload as GwsMimePart;
   const plain = findPartBody(root, "text/plain");
@@ -114,7 +103,7 @@ export function extractGwsMessageIds(parsed: unknown): string[] {
 
 /** Per-email body cap in the tool result — full bodies for normal emails, a
  *  hard ceiling so a newsletter blob can't flood the worker's context. */
-export const EMAIL_BODY_MAX_CHARS = 2000;
+const EMAIL_BODY_MAX_CHARS = 2000;
 
 export function formatEmailList(messages: EmailMessage[], query: string, maxResults: number): string {
   if (messages.length === 0) {

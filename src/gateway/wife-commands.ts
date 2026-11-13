@@ -17,7 +17,7 @@ import { esc } from "../tools/jobhunt/telegram-format.js";
 import { splitForTelegram } from "./format.js";
 
 /** The whole list as one HTML message (splitting, if ever needed, happens on send). */
-export function buildWifeCommandsHelp(): string {
+function buildWifeCommandsHelp(): string {
   const rows = COMMAND_MENU.filter((e) => e.hidden).map(
     (e) =>
       `🔸 <b>/${e.command}</b> — <i>${formatCommandDetail(e)}</i>` +

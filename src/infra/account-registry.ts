@@ -9,20 +9,15 @@
 
 import type { AccountKey, AuthBackend, CredentialRefs, Platform } from "../core/accounts.js";
 import {
-  isAccountKey,
-  isPlatform,
   resolveAccountKey,
 } from "../core/accounts.js";
 import { getIntegrationAccount } from "../db/account-queries.js";
 import { defaultCredentialRefs } from "./credential-resolver.js";
 import {
-  resolveGitHubCredentials,
   resolveGoogleCredentials,
-  resolveLinkedInCredentials,
-  resolveMetaCredentials,
 } from "./credential-resolver.js";
 
-export interface AccountContext {
+interface AccountContext {
   account_key: AccountKey;
   platform: Platform;
   auth_backend: AuthBackend;
@@ -32,7 +27,7 @@ export interface AccountContext {
   source: "db" | "default";
 }
 
-export interface ResolveAccountInput {
+interface ResolveAccountInput {
   platform: Platform;
   department?: string;
   account_key?: string;
@@ -114,34 +109,4 @@ function defaultAuthBackend(platform: Platform): AuthBackend {
 export async function getGoogleAccount(input: ResolveAccountInput) {
   const ctx = await resolveAccountContext({ ...input, platform: "google" });
   return { ctx, credentials: resolveGoogleCredentials(ctx.credential_refs) };
-}
-
-/** LinkedIn credentials for an account. */
-export async function getLinkedInAccount(input: ResolveAccountInput) {
-  const ctx = await resolveAccountContext({ ...input, platform: "linkedin" });
-  return { ctx, credentials: resolveLinkedInCredentials(ctx.credential_refs) };
-}
-
-/** GitHub PAT for an account. */
-export async function getGitHubAccount(input: ResolveAccountInput) {
-  const ctx = await resolveAccountContext({ ...input, platform: "github" });
-  return { ctx, credentials: resolveGitHubCredentials(ctx.credential_refs) };
-}
-
-/** Meta (Instagram/Facebook) credentials — for future marketing tools. */
-export async function getMetaAccount(platform: "instagram" | "facebook", input: ResolveAccountInput) {
-  const ctx = await resolveAccountContext({ ...input, platform });
-  return { ctx, credentials: resolveMetaCredentials(ctx.credential_refs) };
-}
-
-export function parseAccountKey(value: unknown): AccountKey | undefined {
-  if (typeof value !== "string") return undefined;
-  const v = value.trim().toLowerCase();
-  return isAccountKey(v) ? v : undefined;
-}
-
-export function parsePlatform(value: unknown): Platform | undefined {
-  if (typeof value !== "string") return undefined;
-  const v = value.trim().toLowerCase();
-  return isPlatform(v) ? v : undefined;
 }

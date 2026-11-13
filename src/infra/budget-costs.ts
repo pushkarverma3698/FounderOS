@@ -40,15 +40,6 @@ export interface CostAttribution {
 }
 
 /**
- * Actor recorded when a call carries no attribution — an LLM call the
- * kernel-boot model wrappers did not wrap. Deliberately NOT a real worker id, so
- * the gap stays visible in the ledger instead of being absorbed by a real spender.
- */
-export const UNATTRIBUTED_AGENT = "kernel";
-/** Stage recorded for the same case. */
-export const UNATTRIBUTED_STAGE = "unattributed";
-
-/**
  * Run-metadata keys the attribution travels under, correlated to an accrual by
  * runId. It must ride on the call as DATA: @langchain/core queues callback
  * handlers on a shared p-queue unless LANGCHAIN_CALLBACKS_BACKGROUND === "false"
@@ -62,7 +53,7 @@ export const COST_AGENT_METADATA_KEY = "cost_agent";
 /** @see COST_AGENT_METADATA_KEY */
 export const COST_STAGE_METADATA_KEY = "cost_stage";
 /** @see COST_AGENT_METADATA_KEY */
-export const COST_MODEL_METADATA_KEY = "cost_model";
+const COST_MODEL_METADATA_KEY = "cost_model";
 
 /** The three kernel nodes that can spend. Anything else is not a stage we wrote. */
 const COST_STAGES: readonly string[] = ["planner", "worker", "synthesizer"];
@@ -96,7 +87,7 @@ export function attributionFromMetadata(
 // ── Model pricing table ───────────────────────────────────────────────────────
 
 /** Cost per million tokens (USD). */
-export interface ModelCost {
+interface ModelCost {
   inputPerM: number;
   outputPerM: number;
 }
@@ -197,12 +188,12 @@ export function estimateCost(inputTokens: number, outputTokens: number, modelId:
 
 // ── BudgetTracker ─────────────────────────────────────────────────────────────
 
-export interface BudgetCaps {
+interface BudgetCaps {
   maxUsd: number;
   maxTokens: number;
 }
 
-export type BudgetCheckResult = { ok: true } | { ok: false; reason: string };
+type BudgetCheckResult = { ok: true } | { ok: false; reason: string };
 
 /**
  * Accumulates token and dollar cost across multiple LLM calls in a single run.

@@ -36,7 +36,7 @@
 
 import type { LLMResult } from "@langchain/core/outputs";
 
-export interface TokenCounts {
+interface TokenCounts {
   readonly inputTokens: number;
   /** Everything billed at the output rate, thought tokens included. */
   readonly outputTokens: number;

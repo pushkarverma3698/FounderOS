@@ -31,7 +31,7 @@ type AnyTool = any;
  *  server annotation). `gatedNames` is derived from the LOADED tools — so it
  *  never lists a tool that failed to connect (no dead gates) and it captures
  *  annotation-gated tools the manifest alone couldn't know about. */
-export interface BridgedTools {
+interface BridgedTools {
   byDept: Record<string, AnyTool[]>;
   gatedNames: string[];
 }
@@ -129,16 +129,3 @@ export async function buildBridgedTools(
 // ── Connect-once memoization ────────────────────────────────────────────────
 // Cache the in-flight PROMISE, not the resolved value, so two concurrent callers
 // at startup can never both spawn a full set of child-process connections (H2).
-let inflight: Promise<BridgedTools> | null = null;
-
-/** Memoized accessor — connects once, reuses thereafter (rule #2). */
-export async function getBridgedTools(manifest: BridgeManifest): Promise<BridgedTools> {
-  if (inflight) return inflight;
-  inflight = buildBridgedTools(manifest);
-  return inflight;
-}
-
-/** Test-only: reset the memoized cache. */
-export function __resetBridgeCache(): void {
-  inflight = null;
-}

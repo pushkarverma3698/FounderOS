@@ -5,7 +5,7 @@
  * set, the process falls back to TELEGRAM_BOT_TOKEN (the old FounderOS bot) so a
  * deploy never leaves the jobs group silent. The source is logged at boot.
  */
-export type JobsBotTokenSource = "JOBS_BOT_TOKEN" | "TELEGRAM_BOT_TOKEN";
+type JobsBotTokenSource = "JOBS_BOT_TOKEN" | "TELEGRAM_BOT_TOKEN";
 
 export function resolveJobsBotToken(
   vars: Readonly<Record<string, string | undefined>> = process.env,

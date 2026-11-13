@@ -74,7 +74,7 @@ export function buildChatAccessConfig(input: {
   return { primaryChatId: primary, allowedChatIds: allowed, answerAllChatIds: answerAll, ownerUserId };
 }
 
-export type ChatAccess = "primary" | "allowed" | "owner-in-group" | "denied";
+type ChatAccess = "primary" | "allowed" | "owner-in-group" | "denied";
 
 export function classifyChatAccess(
   who: { readonly chatId?: number | string; readonly chatType?: string; readonly fromId?: number | string },
@@ -132,14 +132,14 @@ export function commandName(text: string, botUsername: string): string | null {
   return match[1]!.toLowerCase();
 }
 
-export interface MessageEntityLike {
+interface MessageEntityLike {
   readonly type: string;
   readonly offset: number;
   readonly length: number;
   readonly user?: { readonly id: number };
 }
 
-export interface InboundMessage {
+interface InboundMessage {
   readonly chatType: string;
   readonly text?: string | undefined;
   readonly entities?: readonly MessageEntityLike[] | undefined;

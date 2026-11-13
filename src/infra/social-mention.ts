@@ -95,13 +95,8 @@ export function buildCommentary(text: string, mention?: MentionTarget): string {
 }
 
 /** Company display name for @mentions (env: LINKEDIN_ORG_NAME). */
-export function getCompanyPageName(): string {
+function getCompanyPageName(): string {
   return readEnvValue("LINKEDIN_ORG_NAME")?.trim() || DEFAULT_ORG_NAME;
-}
-
-/** Org URN for Turicks company page (env: LINKEDIN_ORG_URN) — used when posting as org. */
-export function getCompanyPageUrn(): string | undefined {
-  return readEnvValue("LINKEDIN_ORG_URN")?.trim() || undefined;
 }
 
 /**
