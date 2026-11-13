@@ -11,7 +11,7 @@ const log = childLogger({ module: "lib:embed" });
 /** TTL for a cached query embedding (spec §1.1 F3). 30 days — embeddings are
  *  deterministic, so a long TTL is safe; the model rarely changes and a model
  *  change gets a different cache key anyway. */
-export const EMBED_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
+const EMBED_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 interface OllamaEmbedResponse {
   embedding?: number[];

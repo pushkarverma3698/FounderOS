@@ -14,21 +14,21 @@ import { childLogger } from "./logger.js";
 const log = childLogger({ module: "gws-runner" });
 const execFileAsync = promisify(execFile);
 
-export interface GwsRunResult {
+interface GwsRunResult {
   ok: true;
   stdout: string;
   parsed: unknown;
 }
 
-export interface GwsRunError {
+interface GwsRunError {
   ok: false;
   error: string;
 }
 
-export type GwsRunOutcome = GwsRunResult | GwsRunError;
+type GwsRunOutcome = GwsRunResult | GwsRunError;
 
 /** Parse stdout as JSON; returns raw string on parse failure. */
-export function parseGwsStdout(stdout: string): unknown {
+function parseGwsStdout(stdout: string): unknown {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   try {

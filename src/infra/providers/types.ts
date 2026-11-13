@@ -7,8 +7,6 @@
  * See ADR-029 (direct platform integrations).
  */
 
-import type { ToolResult } from "../../tools/index.js";
-import type { MentionTarget } from "../social-mention.js";
 
 /** Which adapter executes a platform call. Env-selectable; default = direct/gws.
  *  - gws:        Google Workspace CLI on the host (interactive `gws auth login`).
@@ -44,18 +42,3 @@ export interface CreateCalendarEventInput {
   account_key?: string;
   department?: string;
 }
-
-export interface LinkedInPostInput {
-  text: string;
-  author_urn: string;
-  image_url?: string;
-  visibility: "PUBLIC" | "CONNECTIONS";
-  schedule_time?: string;
-  /** Optional org (Company Page) to @tag in the post body. */
-  mention?: MentionTarget;
-  account_key?: string;
-  department?: string;
-}
-
-/** Uniform provider outcome — maps 1:1 to ToolResult at the tool boundary. */
-export type ProviderOutcome = ToolResult;
