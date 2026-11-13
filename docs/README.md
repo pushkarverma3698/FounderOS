@@ -11,11 +11,8 @@
 3. **[FEATURES.md](FEATURES.md)** — Every feature and how it works, worker by worker
 4. **[CONCEPTS.md](CONCEPTS.md)** — Glossary of the domain vocabulary
 5. **[CLAUDE.md](../CLAUDE.md)** — The canonical contract-first design, file map, and non-negotiable rules
-6. **[JARVIS-ARCHITECTURE.md](../JARVIS-ARCHITECTURE.md)** — Why v2 failed within 3 steps and how the typed StateGraph fixes it
 7. **[guides/LOCAL-DEV.md](guides/LOCAL-DEV.md)** — Local setup + env vars
 8. **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
-
-New to the story? The **[case studies](turicks-case-studies/)** and **[blog](turicks-blog/)** tell the v1→v2→v3 journey; the **[diagrams](diagrams/)** show the whole system visually.
 
 ---
 
@@ -26,11 +23,7 @@ New to the story? The **[case studies](turicks-case-studies/)** and **[blog](tur
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **How the whole system works** — plain-English walkthrough + the five core ideas |
 | [FEATURES.md](FEATURES.md) | **What it does** — the 8 workers, their tools, and every cross-cutting feature E2E |
 | [CONCEPTS.md](CONCEPTS.md) | **Glossary** — kernel, TaskEnvelope, ToolReceipt, HITL, and the rest |
-| [diagrams/](diagrams/) | **10 Mermaid diagrams** — architecture, orchestration path, contracts, receipts, CI gates, v2↔v3, capability map |
 | [../CLAUDE.md](../CLAUDE.md) | The canonical rules — contract-first kernel, anti-slop CI invariants, model policy, file map |
-| [../JARVIS-ARCHITECTURE.md](../JARVIS-ARCHITECTURE.md) | The contract-first design in full — typed boundaries, StateGraph, resumability |
-| [../ZERO-BASE-AUDIT.md](../ZERO-BASE-AUDIT.md) | The v2 autopsy (4 traced live failures) that mandated v3 |
-| [../ARCHITECTURE_LEDGER.md](../ARCHITECTURE_LEDGER.md) | Running ledger of production-readiness passes (v2 and v3) |
 | [PROOF.md](PROOF.md) | **Living scoreboard** — deterministic suite, kernel guarantees, debt ratchet (`pnpm proof:scoreboard`) |
 | [EVAL-AUDIT-2026-08-28.md](EVAL-AUDIT-2026-08-28.md) | **Root-cause audit of the golden-set eval** — separating harness defects from agent defects, with a ranked fix list |
 
@@ -74,7 +67,6 @@ Client-facing video engine: [VIDEO-FACTORY.md](VIDEO-FACTORY.md) · [VIDEO-PIPEL
 | [TESTING-RULES.md](rules/TESTING-RULES.md) | Testing rules distilled from real bugs + test template |
 | [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API contracts before implementation |
 | [CODE-REVIEW-CHECKLIST.md](rules/CODE-REVIEW-CHECKLIST.md) | What every review must confirm |
-| [../agent-rules.md](../agent-rules.md) | The numbered engineering rules (rule #24 "done = evidence", etc.) |
 
 ---
 
@@ -95,8 +87,6 @@ chronologically.
 
 | Doc | What it covers |
 |-----|----------------|
-| [turicks-case-studies/](turicks-case-studies/) | **The v1→v2→v3 journey** — 5 candid case studies on where we fell for AI slop, what it cost us, and how we got out. Written for the Turicks community and website. |
-| [turicks-blog/](turicks-blog/) | **Opinion-led posts** riding the AI-slop moment + a ready-to-post [LinkedIn kit](turicks-blog/linkedin-kit.md) for every piece |
 | [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Append-only build-in-public log (milestones, decisions, metrics) |
 | [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug postmortem: eval tool-detection via `handleToolStart` |
 | **[study/](study/README.md#-hiring--market-study-2026-08)** | **2026 AI-engineering market study** — 911 real postings this system collected, mapped onto what the repo proves ([market](study/MARKET-2026-AI-ENGINEER.md) · [evidence map](study/EVIDENCE-MAP.md) · [actions](study/PORTFOLIO-GAPS-AND-ACTIONS.md) · [interview brief](study/INTERVIEW-BRIEF.md)) |
@@ -110,7 +100,6 @@ chronologically.
 | [decisions/](decisions/) | All ADRs — full decision history |
 | [ops/](ops/) | Env vars, prod stabilization memory, "never again" runbook |
 | [process/](process/) | Branch model + release process (branch → beta → main) |
-| [research/](research/) | Forward-looking research (RAG, MCP ecosystem, multi-model) |
 | [plans/](plans/) | Active plans (dated one-shot session plans are pruned) |
 | [sessions/](sessions/) | Episodic session records — what was done, fixed, and why |
 

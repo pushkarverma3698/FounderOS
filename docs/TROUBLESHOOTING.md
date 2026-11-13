@@ -32,8 +32,8 @@ a **fail-open catch** lost its `// allow-failopen:` tag, or an import violated t
 ### "Tombstone" CI failure
 You (or an agent) recreated a killed module (`pre-router`, `execution-guard`,
 `office.ts`, `office-run`, a domain subgraph). That's intentional — don't rebuild
-v2. Solve the problem inside the v3 pipeline instead. → [diagram
-08](diagrams/08-anti-slop-ci-gates.md).
+v2. Solve the problem inside the v3 pipeline instead. → diagram
+08.
 
 ### Bot won't start locally
 Check required env in `.env` (see [ops/ENV-VARS.md](ops/ENV-VARS.md)): at minimum

@@ -43,7 +43,7 @@ I shipped this system three times before I shipped it right.
 
 **v2** replaced it with framework primitives and claimed "~500 LOC." A zero-base audit found **27,819 LOC**, three competing routers (two regex piles + one LLM), and a 591-line "lie detector" that rewrote its own Postgres history when it got a false positive.
 
-**v3** deleted two of the three routers, replaced detection with prevention, and made CI enforce that the complexity can't creep back. The full autopsy — including where I fell for AI slop and how I dug out — lives in [the case studies](docs/turicks-case-studies/).
+**v3** deleted two of the three routers, replaced detection with prevention, and made CI enforce that the complexity can't creep back. 
 
 ### Architecture Overview
 
@@ -67,7 +67,6 @@ graph LR
     COLL -.-> PG
 ```
 
-Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architecture.mmd](docs/diagrams/01-system-architecture.mmd).
 
 ---
 
@@ -98,7 +97,6 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 
 **Why it stays fixed.** CI enforces **tombstones** — `pre-router.ts`, `execution-guard.ts`, and `office.ts` fail the build if recreated. An architecture-debt ratchet holds `regex-routing` at `0` and only lets it shrink. A 400-line-per-file budget kills god modules before they form.
 
-*Full story: [The Three-Router Trap](docs/turicks-case-studies/01-three-router-trap.md)*
 
 ---
 
@@ -110,7 +108,6 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 
 **The engineering principle.** Detection scales linearly with every incident (+1 regex per bug). Prevention is a one-time structural cost. If your safety mechanism gets bigger every sprint, it's the wrong mechanism.
 
-*Full story: [The Lie Detector We Built for Our Own AI](docs/turicks-case-studies/02-lie-detector-for-our-own-ai.md)*
 
 ---
 
@@ -125,7 +122,6 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 - `action_log` row → written AFTER successful execution
 - Idempotency key → checked BEFORE every external send
 
-*Full flow with edge cases: [HITL approval flow (diagram 03)](docs/diagrams/03-hitl-flow.md)*
 
 ---
 
@@ -175,7 +171,6 @@ different ways and the file count four.
 
 **The principle.** The v2 system decayed because nothing stopped complexity from creeping back. v3 makes architecture a thing CI can fail a PR over.
 
-*Full playbook: [Working With AI Agents Without Slop](docs/turicks-case-studies/05-working-with-ai-agents-without-slop.md)*
 
 ---
 
@@ -221,7 +216,6 @@ A successful tool result whose first line contained a keyword like "error" or "f
 
 Built a 591-line, 68-export regex guard to verify the AI actually performed actions. It grew by +1 regex per incident, its false positives cost 2× LLM spend, and it **rewrote Postgres history** on a regex verdict. Replaced with structural receipts that make lying impossible by construction. It's now a CI tombstone — recreating the file fails the build.
 
-*The full narrative: [case studies 01–04](docs/turicks-case-studies/)*
 
 ---
 
@@ -269,15 +263,10 @@ pnpm dev
 
 | Document | What you'll find |
 |----------|-----------------|
-| [Case Studies: v1→v2→v3](docs/turicks-case-studies/) | 5 engineering war stories, including the 77-regex lie detector and the empty-braces handoff |
 | [**How this system is evaluated**](docs/EVAL.md) | What is scored and what is not: determinism in CI, the golden set, retrieval recall@5/MRR, and why an infra error is never a routing miss |
 | [Seam Failures Log](docs/SEAM-FAILURES.md) | 6 production bugs with signature → evidence → fix → prevention |
-| [Architecture Diagrams (10)](docs/diagrams/) | Mermaid diagrams grounded in source, with file paths linked inline |
 | [Proof Scoreboard](docs/PROOF.md) | Regenerable evidence: kernel guarantees, debt ratchet, cost ledger |
 | [Limitations & Tech Debt](docs/LIMITATIONS.md) | Honest accounting of scaling ceilings, deferred work, and accepted risks |
-| [JARVIS Architecture](JARVIS-ARCHITECTURE.md) | The v3 contract-first kernel design spec |
-| [Zero-Base Audit](ZERO-BASE-AUDIT.md) | 4 live failure traces from the v2→v3 rebuild |
-| [Architecture Ledger](ARCHITECTURE_LEDGER.md) | Timestamped log of every major architecture decision |
 
 ---
 
