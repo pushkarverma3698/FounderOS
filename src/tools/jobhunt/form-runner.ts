@@ -28,6 +28,7 @@ import {
   type FormPlatform,
 } from "./form-scraper.js";
 
+import { fieldHoldsValue } from "./form-phone.js";
 import { awaitSubmitOutcome, holdForEmailCode, SUBMIT_CONFIRM_TIMEOUT_MS } from "./held-submit.js";
 
 const log = childLogger({ module: "jobhunt:form-runner" });
@@ -56,15 +57,13 @@ async function typeIntoField(page: Page, selector: string, value: string): Promi
 
   await locator.fill(value, { timeout: 5_000 });
   await page.waitForTimeout(CONTROLLED_INPUT_SETTLE_MS);
-  // allow-failopen: unreadable value returns "" and triggers sequential keystroke fallback.
-  if ((await locator.inputValue().catch(() => "")) === value) return true;
+  if (await fieldHoldsValue(locator, value)) return true;
 
   // allow-failopen: clearing before keystroke retry is best-effort.
   await locator.fill("", { timeout: 5_000 }).catch(() => undefined);
   await locator.pressSequentially(value, { delay: 20, timeout: 15_000 });
   await page.waitForTimeout(CONTROLLED_INPUT_SETTLE_MS);
-  // allow-failopen: unreadable value reports false so the caller records it as unverified.
-  return (await locator.inputValue().catch(() => "")) === value;
+  return fieldHoldsValue(locator, value);
 }
 
 /** Tick a checkbox/radio. Styled forms draw a 0px input behind its <label for>, which check() refuses. */
