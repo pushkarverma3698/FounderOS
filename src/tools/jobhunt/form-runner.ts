@@ -18,6 +18,7 @@ import {
   type RowApplicationFacts,
 } from "./form-brain.js";
 import { emptyStarredFields } from "./form-required-guard.js";
+import { noFieldsReason } from "./form-smartrecruiters.js";
 import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormUrl,
@@ -258,7 +259,7 @@ export async function prepareApplicationForm(
     if (fields.length === 0) {
       return {
         ok: false,
-        reason: "no fillable form fields were found on this page (the form may be behind a login or custom widget)",
+        reason: await noFieldsReason(page, check.platform),
         platform: check.platform,
       };
     }
@@ -324,7 +325,7 @@ export async function submitApplicationForm(
 
     const fields = await scrapePageFields(page, check.platform);
     if (fields.length === 0) {
-      return { ok: false, reason: "no fillable form fields found on page", platform: check.platform };
+      return { ok: false, reason: await noFieldsReason(page, check.platform), platform: check.platform };
     }
 
     const plan = buildFormFillPlan(fields, profile, row, dossier);
