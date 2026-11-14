@@ -16,12 +16,7 @@ import { logger } from "../infra/logger.js";
 type Warn = (obj: Record<string, unknown>, msg: string) => void;
 let log: { warn: Warn } | undefined; // resolved lazily: many suites mock the logger module
 
-/** Test seam: capture the one-time fallback line. */
-export function setModelTruthLogForTests(l: { warn: Warn }): void {
-  log = l;
-}
-
-export interface WorkerModelChoice {
+interface WorkerModelChoice {
   readonly requestedId: string;
   readonly effectiveId: string;
   /** Set only when the requested worker model could not be used. */
@@ -30,11 +25,6 @@ export interface WorkerModelChoice {
 
 let choice: WorkerModelChoice | undefined;
 const logged = new Set<string>();
-
-export function resetWorkerModelChoiceForTests(): void {
-  choice = undefined;
-  logged.clear();
-}
 
 /** Why `buildModel(..., { optional: true })` returned null for this provider. */
 export function missingCredentialReason(provider: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -74,17 +64,4 @@ export function noteWorkerModelChoice(next: WorkerModelChoice): void {
 /** The worker model actually in use, or undefined before getWorkerModel() has run. */
 export function getEffectiveWorkerModelId(): string | undefined {
   return choice?.effectiveId;
-}
-
-/** Effective model id per kernel stage, for the boot log. */
-export function describeStageModels(plannerId: string): { planner: string; worker: string; synthesizer: string } {
-  const worker = choice?.effectiveId ?? "unresolved";
-  return { planner: plannerId, worker, synthesizer: worker };
-}
-
-/** Best-effort id of a built chat model instance (fallbacks are built without their chain id). */
-export function modelNameOf(m: unknown): string | undefined {
-  const o = m as { model?: unknown; modelName?: unknown } | null;
-  const name = o?.model ?? o?.modelName;
-  return typeof name === "string" && name.length > 0 ? name : undefined;
 }

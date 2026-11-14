@@ -41,7 +41,7 @@ export function profileCondition(scope: ProfileScope | undefined) {
 const DEFAULT_TENANT = "turicks";
 
 /** Stages that represent a live application a human may still hear back from. */
-export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"] as const;
+const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"] as const;
 
 /**
  * How old a screened posting can be and still show in the apply queue.
@@ -402,7 +402,7 @@ export async function countPassingApplications(
  */
 export type QueueAxis = "posted" | "found";
 
-export interface ActionableScope {
+interface ActionableScope {
   verdicts?: readonly string[];
   tenantId?: string;
   profileId?: ProfileScope;
@@ -434,7 +434,7 @@ function windowCondition(opts: ActionableScope): SQL | null {
     : applyQueueFreshnessSql(cutoff);
 }
 
-export function actionableConditions(opts: ActionableScope): SQL[] {
+function actionableConditions(opts: ActionableScope): SQL[] {
   const conditions: SQL[] = [
     eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
     eq(jobApplications.stage, "screened"),
@@ -538,73 +538,6 @@ export async function countAgedOutApplications(opts: ActionableScope = {}): Prom
   return Number(row?.n ?? 0);
 }
 
-/**
- * How stale a `liveness_checked_at` may be and still back a STANDING row.
- *
- * A row enters the standing pool once it ages out of `listActionableApplications`
- * — it stops being re-verified from that point on, because the brief pipeline
- * only spends its liveness budget on the fresh window (`VERIFY_TOP_N`,
- * daily-brief.ts). A "live" value left unbound would get more confident-looking
- * with every day it sat unchecked, which is backwards. Seven days bounds the
- * claim: a row that hasn't been re-confirmed inside a week silently drops out
- * of standing rather than keep asserting a week-old fact as current.
- */
-export const STANDING_LIVENESS_MAX_HOURS = intEnv("STANDING_LIVENESS_MAX_HOURS", 168);
-
-/**
- * The reach fix for the 24h freshness window (2026-09-01).
- *
- * `APPLY_QUEUE_MAX_AGE_HOURS` exists so APPLY TODAY stays "today's fresh
- * finds" rather than draining a week of standing inventory (its own docblock).
- * That reasoning is sound for postings nobody has looked at again — but it also
- * hides every posting the pipeline has ALREADY confirmed, this week, is still
- * accepting applications. Measured 2026-09-01: 64 Netherlands recognised-sponsor
- * salary-pass rows in the table, 18 of them liveness-verified live, 1 inside the
- * 24h window. `liveness = 'live'` is a stronger "is this worth applying to"
- * signal than `posted_at` age — it is a direct, recent confirmation rather than
- * an inference from a timestamp — so this pool trades the age filter for that
- * stronger one instead of just widening the window and re-admitting postings
- * nobody has re-checked.
- *
- * Deliberately narrower than `listActionableApplications`: PASS only (no FLAG),
- * because these rows are meant to read as ready to send, same bar as
- * `isDoTodayRow` — a standing row that still needed a question would be the
- * confusing kind of "actionable."
- */
-export async function listStandingApplications(
-  opts: {
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-    livenessMaxHours?: number;
-    limit?: number;
-  } = {},
-): Promise<JobApplication[]> {
-  const db = getDb();
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
-  const livenessCutoff = new Date(
-    Date.now() - (opts.livenessMaxHours ?? STANDING_LIVENESS_MAX_HOURS) * 60 * 60 * 1000,
-  );
-  const conditions = [
-    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-    eq(jobApplications.stage, "screened"),
-    eq(jobApplications.salary_status, "pass"),
-    eq(jobApplications.liveness, "live"),
-    gte(jobApplications.liveness_checked_at, livenessCutoff),
-    sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
-  ];
-  const profileWhere = profileCondition(opts.profileId);
-  if (profileWhere) conditions.push(profileWhere);
-  return db
-    .select()
-    .from(jobApplications)
-    .where(
-      and(...conditions),
-    )
-    .orderBy(desc(jobApplications.liveness_checked_at))
-    .limit(opts.limit ?? 50);
-}
 
 /**
  * Record a liveness result.
@@ -762,22 +695,6 @@ export function untailoredPrioritySql() {
   return sql`CASE WHEN ${jobApplications.brief_section} IN ('do_today','stretch','standing') THEN 0 ELSE 1 END`;
 }
 
-/** List applications clearing gates that do not have a tailored CV yet. */
-export async function listUntailoredApplications(
-  opts: { limit?: number; tenantId?: string } = {},
-): Promise<JobApplication[]> {
-  return getDb().select().from(jobApplications).where(and(
-    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-    eq(jobApplications.stage, "screened"),
-    inArray(jobApplications.salary_status, ["pass", "flag"]),
-    sql`${jobApplications.tailor_status} IS NULL OR ${jobApplications.tailor_status} = 'pending'`,
-  )).orderBy(
-    untailoredPrioritySql(),
-    asc(jobApplications.brief_rank),
-    desc(jobApplications.created_at),
-  ).limit(opts.limit ?? 20);
-}
-
 /** Update CV tailoring status and S3 asset references for an application. */
 /**
  * Record how a CV tailoring attempt ended.
@@ -805,7 +722,7 @@ export async function recordTailoringResult(
 }
 
 
-export interface JobStateArgs {
+interface JobStateArgs {
   readonly stage?: string;
   readonly section?: string;
   /**
@@ -827,7 +744,7 @@ export interface JobStateArgs {
   readonly profileId?: ProfileScope;
 }
 
-export type CuratedJobRow = Pick<
+type CuratedJobRow = Pick<
   JobApplication,
   "id" | "company" | "title" | "stage" | "salary_status" | "applied_at" | "posted_at" | "created_at" | "url" | "track"
 > & { readonly gate_json?: unknown };

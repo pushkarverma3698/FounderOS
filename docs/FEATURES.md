@@ -6,7 +6,7 @@ marked 🔒 pause for founder approval (HITL) before they act. Read-only tools r
 without a gate.
 
 For *how* a request flows through the system, see [ARCHITECTURE.md](ARCHITECTURE.md).
-For the visual map, see [diagram 10](diagrams/10-capability-map.md).
+For the visual map, see diagram 10.
 
 ---
 
@@ -81,13 +81,13 @@ Every write/send/spend tool pauses at a LangGraph `interrupt()`. The gateway
 renders a Telegram card with the exact action (recipient, subject, body, diff,
 command) and Approve/Reject buttons. Because graph state is checkpointed in
 Postgres, a pending approval **survives a process restart**. The side effect runs
-only after an approved resume. → [diagram 03](diagrams/03-hitl-flow.md),
+only after an approved resume. → diagram 03,
 [HITL matrix](guides/HITL-MATRIX.md).
 
 ### Action claims grounded in receipts, not model output
 An action step must return a code-recorded `ToolReceipt` with `ok: true`, or the
 result is rejected as unproven. The synthesizer is fed only validated results, never
-raw tool output, so it cannot claim an action that didn't happen. → [diagram 07](diagrams/07-receipt-and-zero-hallucination.md).
+raw tool output, so it cannot claim an action that didn't happen. → diagram 07.
 
 ### Idempotent sends
 Before any external send, a deterministic, tenant-scoped, content-addressed

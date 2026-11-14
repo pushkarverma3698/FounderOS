@@ -1,7 +1,7 @@
 {
   "gateway-imports": 0,
   "fail-open-catch": 0,
-  "loc-budget": 3,
+  "loc-budget": 2,
   "regex-routing": 0,
   "orphan-subsystem": 0
 }

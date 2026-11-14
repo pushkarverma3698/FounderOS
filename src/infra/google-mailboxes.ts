@@ -43,7 +43,7 @@ export function mailboxNameProblem(name: string): string | undefined {
 }
 
 /** Same folder layout as defaultGwsProfileDir, so a built-in account and an added one look alike. */
-export function mailboxProfileDir(name: string, fs: MailboxFs = realFs): string {
+function mailboxProfileDir(name: string, fs: MailboxFs = realFs): string {
   return `${fs.home()}/.founderos/accounts/${name}/gws`;
 }
 

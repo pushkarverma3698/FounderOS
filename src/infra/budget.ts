@@ -171,7 +171,7 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
  * Aborting is the same mechanism the turn timeout already uses, and unlike a
  * thrown callback it is one the framework honours.
  */
-export interface RunBudgetEnforcement {
+interface RunBudgetEnforcement {
   readonly callback: BudgetGuardCallback;
   readonly signal: AbortSignal;
   /** True once the caps were breached (not merely aborted for another reason). */

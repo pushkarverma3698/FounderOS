@@ -21,23 +21,19 @@
 
 /** founder_context key holding the per-key dates. Bookkeeping: never rendered as context. */
 export const CONTEXT_META_KEY = "context_meta";
-
-/** The mark read_context puts on a value that may be stale; the planner rule refers to it by this name. */
-export const CONTEXT_STALE_MARKER = "⚠";
-
 /** Who can write a value: the founder, the deploy seed, or code that owns the value. */
 export const CONTEXT_SOURCES = ["founder", "seed", "system"] as const;
 export type ContextSource = (typeof CONTEXT_SOURCES)[number];
 
-export interface ContextMetaEntry {
+interface ContextMetaEntry {
   /** ISO timestamp the value was last written or confirmed. */
   readonly at: string;
   readonly source: ContextSource;
 }
 
-export type ContextMetaEntries = Readonly<Record<string, ContextMetaEntry>>;
+type ContextMetaEntries = Readonly<Record<string, ContextMetaEntry>>;
 
-export interface ReadContextMeta {
+interface ReadContextMeta {
   /** Every well-formed entry, by key. */
   readonly entries: ContextMetaEntries;
   /** Why some or all of the stored meta was ignored; empty when it was healthy or absent. */

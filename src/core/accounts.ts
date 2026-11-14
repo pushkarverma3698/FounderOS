@@ -19,8 +19,6 @@ export type Platform = (typeof PLATFORMS)[number];
 export const AUTH_BACKENDS = ["gws", "direct", "meta_graph", "pat"] as const;
 export type AuthBackend = (typeof AUTH_BACKENDS)[number];
 
-export const ACCOUNT_STATUSES = ["active", "expired", "disabled"] as const;
-export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
 /**
  * Credential references — secrets live in .env or on-disk gws profiles, not in Postgres.
@@ -45,17 +43,6 @@ export interface CredentialRefs {
   /** Meta Graph API app id / page id env vars. */
   meta_app_id_env?: string;
   meta_page_id_env?: string;
-}
-
-/** One row in agents.integration_accounts (logical shape). */
-export interface IntegrationAccount {
-  account_key: AccountKey;
-  platform: Platform;
-  display_name: string;
-  status: AccountStatus;
-  auth_backend: AuthBackend;
-  credential_refs: CredentialRefs;
-  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -107,12 +94,8 @@ export function resolveAccountKey(
   return platform === "google" ? GOOGLE_BUILTIN_ACCOUNT : DEFAULT_ACCOUNT_KEY;
 }
 
-export function isAccountKey(value: string): value is AccountKey {
+function isAccountKey(value: string): value is AccountKey {
   return (ACCOUNT_KEYS as readonly string[]).includes(value);
-}
-
-export function isPlatform(value: string): value is Platform {
-  return (PLATFORMS as readonly string[]).includes(value);
 }
 
 /** Env var naming convention for per-account secrets. */

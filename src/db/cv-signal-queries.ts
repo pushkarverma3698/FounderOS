@@ -19,7 +19,7 @@ import { cvSignals, type CvSignal } from "./schema.js";
 
 const DEFAULT_TENANT = "turicks";
 
-export interface SignalInput {
+interface SignalInput {
   readonly term: string;
   readonly category: string;
 }

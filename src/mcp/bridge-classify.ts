@@ -78,13 +78,3 @@ export function isWriteTool(
 export function bridgedToolName(serverName: string, toolName: string): string {
   return `mcp__${serverName}__${toolName}`;
 }
-
-/** Runtime names of every HITL-gated bridged tool, derived from the manifest's
- *  write allowlists. Used to mark `*` in the supervisor capability manifest. */
-export function gatedRuntimeNames(manifest: BridgeManifest): string[] {
-  const names: string[] = [];
-  for (const [server, entry] of Object.entries(manifest.servers)) {
-    for (const toolName of entry.write) names.push(bridgedToolName(server, toolName));
-  }
-  return names;
-}

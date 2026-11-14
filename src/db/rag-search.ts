@@ -38,7 +38,7 @@ export interface RagHit {
 }
 
 /** Metadata-column equality filter, ANDed onto a search's WHERE clause. */
-export interface RagFilter {
+interface RagFilter {
   entry_type?: string;
   /** brain_memories only: the real `memory_type` column (decision/bug/note/architecture/...). */
   memory_type?: string;
@@ -270,7 +270,7 @@ export async function keywordSearchRagTable(
 import { hybridRagSearch, HybridResult, RagStageError, errText } from "./rag-hybrid.js";
 import { embedText } from "../lib/embed.js";
 
-export interface SearchBrainOptions {
+interface SearchBrainOptions {
   query: string;
   topK?: number;
   filters?: RagFilter;
