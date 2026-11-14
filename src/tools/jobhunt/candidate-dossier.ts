@@ -163,6 +163,12 @@ export function parseDossierMarkdown(markdown: string): CandidateDossier {
   return { facts, qaPairs, sections, rawText: markdown };
 }
 
+/** Phrases (normalised, matched at a word start) that ask when the candidate can start. */
+export const NOTICE_PHRASES: readonly string[] = [
+  "notice period", "opzegtermijn", "how soon can you join", "how soon can you start", "when can you start",
+  "when can you join", "earliest start date", "start date", "joining time", "time to join", "availability", "beschikbaar",
+];
+
 const SEMANTIC_RULES: ReadonlyArray<{
   readonly name: string;
   readonly phrases: readonly string[];
@@ -172,7 +178,7 @@ const SEMANTIC_RULES: ReadonlyArray<{
 }> = [
   {
     name: "noticePeriod",
-    phrases: ["notice period", "opzegtermijn", "when can you start", "earliest start date", "start date", "availability", "beschikbaar"],
+    phrases: NOTICE_PHRASES,
     resolve: (p, d) =>
       d?.facts["notice period"] ??
       d?.facts["availability"] ??
@@ -183,7 +189,7 @@ const SEMANTIC_RULES: ReadonlyArray<{
   },
   {
     name: "salary",
-    phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual"],
+    phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual", "ctc"],
     excludes: ["current"],
     resolve: (p, d) =>
       d?.facts["salary expectation"] ??
