@@ -10,7 +10,9 @@ import type { Context } from "grammy";
 import { recordTailoringResult } from "../db/job-queries.js";
 import { buildCoverLetter, type CoverLetterModel } from "../tools/jobhunt/cover-letter.js";
 import { invokeWorkerWithFallbacks } from "../agents/worker-invoke.js";
-import { uploadFile } from "../infra/storage/s3-client.js";
+import { downloadFile, uploadFile } from "../infra/storage/s3-client.js";
+import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
+import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
 import { DEFAULT_PROFILE_ID } from "../tools/jobhunt/profile-config.js";
 import { safeHtml } from "./safe-html.js";
 import { childLogger } from "../infra/logger.js";
@@ -72,7 +74,7 @@ export async function sendCoverLetter(
   const written = await writeCoverLetter(row, cvMarkdown);
   if (!written.ok) {
     await ctx.reply(
-      `⚠ No cover letter this time: ${safeHtml(written.reason.slice(0, 300))}\n` +
+      `⚠ No cover letter this time: ${safeHtml(written.reason.slice(0, 900))}\n` +
         `The tailored CV is still on its way.`,
       { parse_mode: "HTML" },
     );
@@ -107,6 +109,12 @@ export async function writeCoverLetter(
       invokeWorkerWithFallbacks(messages, { attribution: { agent: "jobhunt", stage: "worker" } }),
   };
 
+  const [profile, dossier] = await Promise.all([
+    readApplyProfile(applyProfilePathFor(row.profile_id)),
+    readCandidateDossier(row.profile_id),
+  ]);
+  const answers = profile.ok ? profile.profile.answers : undefined;
+  const noticeDetail = dossier?.facts["notice period"] ?? answers?.notice_period_detail;
   const result = await buildCoverLetter(
     {
       companyName: row.company,
@@ -115,9 +123,20 @@ export async function writeCoverLetter(
       track: row.track,
       cvText: cvMarkdown,
       founderContext: founderContextFor(row.profile_id),
+      postingCountry: row.country ?? undefined,
+      dossierText: dossier?.rawText,
+      notice: {
+        ...(answers?.notice_period_days !== undefined ? { days: answers.notice_period_days } : {}),
+        ...(noticeDetail ? { detail: noticeDetail } : {}),
+      },
     },
     model,
   );
+
+  if (!result.success && result.kind === "empty") {
+    const earlier = await existingDraftLetter(row);
+    if (earlier) return { ok: true, letter: earlier };
+  }
 
   if (!result.success || !result.letter) {
     log.warn(
@@ -129,6 +148,20 @@ export async function writeCoverLetter(
 
   await archiveCoverLetter(row, result.letter);
   return { ok: true, letter: result.letter };
+}
+
+/** The letter `/draft` archived for this row, when there is one and it is not empty. */
+async function existingDraftLetter(row: JobApplication): Promise<string | null> {
+  if (!row.cover_letter_s3_key) return null;
+  try {
+    const text = (await downloadFile(row.cover_letter_s3_key)).toString("utf8").trim();
+    if (text.length > 0) log.warn({ id: row.id }, "Model returned no letter twice — using the archived /draft letter");
+    return text.length > 0 ? text : null;
+  } catch (err) {
+    // allow-failopen: no archived copy only means there is no fallback; the typed "no letter" result still reaches the founder.
+    log.warn({ id: row.id, err: (err as Error).message }, "Archived /draft letter could not be read");
+    return null;
+  }
 }
 
 /**

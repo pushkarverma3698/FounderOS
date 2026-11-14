@@ -27,7 +27,7 @@ export type CoverLetterOutcome =
   | { readonly ok: false; readonly reason: string };
 
 const MAX_CHAT_LETTER_CHARS = 3500;
-const MAX_REASON_CHARS = 120;
+const MAX_REASON_CHARS = 500;
 const RATE_LIMIT_RETRY_MS = 15_000;
 const RATE_LIMITED = /\b429\b|rate.?limit|too many requests|RESOURCE_EXHAUSTED|quota/i;
 

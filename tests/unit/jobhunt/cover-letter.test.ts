@@ -110,6 +110,7 @@ const CV = [
   "- Built a LangGraph agent kernel on Node and Postgres.",
   "## Skills",
   "- TypeScript, PostgreSQL, Docker",
+  "- Cut failures from 36 a sweep to 7, which put 900 postings back in reach.",
 ].join("\n");
 
 /**
@@ -156,6 +157,9 @@ const options = {
   jobDescription: "We run Node and Postgres. You will own reliability.",
   track: "backend",
   cvText: CV,
+  postingCountry: "NL",
+  notice: { detail: "Available from September" },
+  now: new Date("2026-11-14T10:00:00Z"),
 };
 
 describe("buildCoverLetter", () => {
@@ -191,7 +195,8 @@ describe("buildCoverLetter", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/slop|cliche/i);
-    expect(model.calls).toHaveLength(2);
+    // The 32-character draft is also too short, so it costs one empty-retry before the revision.
+    expect(model.calls).toHaveLength(3);
   });
 
   it("fails when the model returns something too short to be a letter", async () => {
@@ -268,5 +273,91 @@ describe("the letter is delivered as text, not a file", () => {
     // Most forms cap the box; anything longer gets truncated by the site rather
     // than by us, which is how a letter loses its last paragraph silently.
     expect((result.letter ?? "").length).toBeLessThan(3000);
+  });
+});
+
+describe("buildCoverLetter — empty result", () => {
+  it("retries once when the model returns nothing, and uses the second answer", async () => {
+    const model = scriptedModel("", CLEAN_LETTER);
+    const result = await buildCoverLetter(options, model);
+    expect(result.success).toBe(true);
+    expect(model.calls).toHaveLength(2);
+  });
+
+  it("returns a typed empty result with a plain reason when the retry is empty too", async () => {
+    const model = scriptedModel("");
+    const result = await buildCoverLetter(options, model);
+    expect(result.success).toBe(false);
+    expect(result.kind).toBe("empty");
+    expect(result.error).toContain("0 characters");
+    expect(model.calls).toHaveLength(2);
+  });
+});
+
+describe("buildCoverLetter — fact check", () => {
+  const WRONG = "I can start immediately and am relocating to the Netherlands.";
+  const withSentence = (sentence: string): string =>
+    CLEAN_LETTER.replace("I am available from September and would like to talk.", `${sentence} I would like to talk.`);
+
+  it("never lets the wrong relocation sentence through, cut or regenerated", async () => {
+    const model = scriptedModel(withSentence(WRONG));
+    const india = { ...options, postingCountry: "IN" };
+    const longer = { ...india, founderContext: "I am relocating to the Netherlands." };
+    const result = await buildCoverLetter(longer, model);
+    // Too short to survive the cut: falls through to one regeneration, then the clean letter.
+    expect(model.calls.length).toBeGreaterThanOrEqual(1);
+    expect(result.letter ?? "").not.toContain("relocating");
+  });
+
+  it("regenerates once with the violations listed when cutting would leave a stub", async () => {
+    const model = scriptedModel(withSentence(WRONG), CLEAN_LETTER);
+    const result = await buildCoverLetter({ ...options, postingCountry: "IN" }, model);
+    expect(model.calls).toHaveLength(2);
+    const asked = JSON.stringify(model.calls[1]);
+    expect(asked).toContain("relocation");
+    expect(result.error ?? "ok").toBe("ok");
+  });
+
+  it("returns no letter, listing each violated rule and sentence, when the regeneration repeats the claim", async () => {
+    const model = scriptedModel(withSentence(WRONG));
+    const result = await buildCoverLetter({ ...options, postingCountry: "IN", notice: { days: 0 } }, model);
+    expect(result.success).toBe(false);
+    expect(result.kind).toBe("facts");
+    expect(result.error).toContain("relocation");
+    expect(result.error).toContain("relocating to the Netherlands");
+    expect(result.violations?.length).toBeGreaterThan(0);
+    expect(model.calls).toHaveLength(2);
+  });
+
+  it("blocks a permit claim even when it is in the founder context", async () => {
+    const model = scriptedModel(withSentence("I hold a Dutch partner permit with full work rights."));
+    const result = await buildCoverLetter(
+      { ...options, founderContext: "I hold a Dutch partner permit with full work rights." },
+      model,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("permit");
+  });
+
+  it("cuts a long letter's bad sentence without a second model call", async () => {
+    const extra = [
+      "At Turicks I also kept the run logs for every sweep, so each failure had a recorded cause and a recorded fix.",
+      "I would be glad to walk through how the retry policy was chosen and what it changed for the sweep.",
+    ].join(" ");
+    const long = withSentence(WRONG).replace("At Turicks I built", `${extra} At Turicks I built`);
+    const model = scriptedModel(long);
+    const result = await buildCoverLetter({ ...options, postingCountry: "IN", notice: { days: 0 } }, model);
+    expect(result.error ?? "ok").toBe("ok");
+    expect(result.letter).not.toContain("relocating");
+    expect(result.removed).toHaveLength(1);
+    expect(model.calls).toHaveLength(1);
+  });
+});
+
+describe("coverLetterPrompt — posting country", () => {
+  it("tells the model where the role is", () => {
+    expect(coverLetterPrompt({ ...options, postingCountry: "IN" })).toContain("Role location: India");
+    expect(coverLetterPrompt({ ...options, postingCountry: "NL" })).toContain("Role location: the Netherlands");
+    expect(coverLetterPrompt({ ...options, postingCountry: undefined })).toContain("not known");
   });
 });
