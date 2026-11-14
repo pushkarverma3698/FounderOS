@@ -14,7 +14,7 @@ import type { JobApplication } from "../db/schema.js";
 import { downloadFile } from "../infra/storage/s3-client.js";
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
 import { labelMatches, type FormPlanSummary, type RowApplicationFacts } from "../tools/jobhunt/form-brain.js";
-import { writeCoverLetter } from "./cover-letter-delivery.js";
+import { vetArchivedLetter, writeCoverLetter } from "./cover-letter-delivery.js";
 import { safeHtml } from "./safe-html.js";
 
 export interface ApplyCoverLetter {
@@ -68,19 +68,21 @@ export async function resolveApplyCoverLetter(
   opts: CoverLetterOptions = {},
 ): Promise<CoverLetterOutcome> {
   try {
-    let text: string;
-    let source: "archived" | "written";
+    let text = "";
+    let source: "archived" | "written" = "archived";
     if (row.cover_letter_s3_key) {
-      text = (await downloadFile(row.cover_letter_s3_key)).toString("utf8").trim();
-      source = "archived";
-    } else {
-      if (!cvText) return { ok: false, reason: "no letter on file and the base CV could not be read" };
+      const archived = (await downloadFile(row.cover_letter_s3_key)).toString("utf8").trim();
+      // An archived letter is attached unread, so it passes the fact check or a new one is written.
+      text = archived ? ((await vetArchivedLetter(row, archived, cvText ?? "")) ?? "") : "";
+    }
+    if (!text) {
+      if (!cvText) return { ok: false, reason: "no usable letter on file and the base CV could not be read" };
       const written = await writeWithRetry(row, cvText, opts);
       if (!written.ok) return { ok: false, reason: plainReason(written.reason) };
       text = written.letter.trim();
       source = "written";
     }
-    if (!text) return { ok: false, reason: "the archived letter is empty" };
+    if (!text) return { ok: false, reason: "the letter is empty" };
     const pdfPath = coverLetterPdfPath(artifactDir, row);
     await fs.mkdir(artifactDir, { recursive: true });
     await fs.writeFile(pdfPath, (await renderCvToPdf(text)).pdfBuffer);

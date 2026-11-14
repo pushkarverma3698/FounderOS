@@ -139,3 +139,26 @@ describe("removing sentences", () => {
     expect(readsWhole(out)).toBe(false);
   });
 });
+
+describe("vetLetter (archived letters get the same check)", () => {
+  const para = "I built and ran a production agent system on one Linux server, with an approval gate in front of every outbound action and a test suite that runs on each commit. Every model call is attributed by cost and every deploy goes through the same pipeline.";
+  const whole = ["Dear Hiring Team,", para, para, para, "Kind regards,\nSam Example"].join("\n\n");
+  const ctx = { postingCountry: "IN", sourceText: "CV text with no claims." };
+
+  it("returns a clean letter unchanged", async () => {
+    const { vetLetter } = await import("../../../src/tools/jobhunt/cover-letter-facts.js");
+    expect(vetLetter(whole, ctx)).toBe(whole);
+  });
+
+  it("cuts a relocation sentence the posting country does not support", async () => {
+    const { vetLetter } = await import("../../../src/tools/jobhunt/cover-letter-facts.js");
+    const out = vetLetter(whole.replace("Kind regards", "I am relocating to the Netherlands.\n\nKind regards"), ctx);
+    expect(out).not.toBeNull();
+    expect(out).not.toMatch(/relocating/);
+  });
+
+  it("refuses a letter that is no longer whole once the bad sentences are cut", async () => {
+    const { vetLetter } = await import("../../../src/tools/jobhunt/cover-letter-facts.js");
+    expect(vetLetter("Dear Hiring Team,\n\nI am relocating to the Netherlands and need visa sponsorship.", ctx)).toBeNull();
+  });
+});

@@ -220,6 +220,17 @@ export function readsWhole(letter: string): boolean {
   return letter.split(/\n{2,}/).filter((p) => p.trim().length > 0).length >= 3 && letter.length >= 600;
 }
 
+/**
+ * A letter that was not written in this run (an archived `/draft` letter): the same rules, no model.
+ * Returns it with the offending sentences cut, or null when what is left is not a clean, whole letter.
+ */
+export function vetLetter(letter: string, ctx: LetterFactContext): string | null {
+  const found = checkLetterFacts(letter, ctx);
+  if (found.length === 0) return letter;
+  const cut = removeSentences(letter, found.map((v) => v.sentence));
+  return readsWhole(cut) && checkLetterFacts(cut, ctx).length === 0 ? cut : null;
+}
+
 /** One founder-facing line per violation. */
 export function describeViolation(v: FactViolation): string {
   return `${v.rule}: ${v.detail} ("${v.sentence.length > 120 ? `${v.sentence.slice(0, 119)}…` : v.sentence}")`;

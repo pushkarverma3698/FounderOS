@@ -8,7 +8,8 @@
 
 import type { Context } from "grammy";
 import { recordTailoringResult } from "../db/job-queries.js";
-import { buildCoverLetter, type CoverLetterModel } from "../tools/jobhunt/cover-letter.js";
+import { buildCoverLetter, type CoverLetterModel, type CoverLetterOptions } from "../tools/jobhunt/cover-letter.js";
+import { vetLetter } from "../tools/jobhunt/cover-letter-facts.js";
 import { invokeWorkerWithFallbacks } from "../agents/worker-invoke.js";
 import { downloadFile, uploadFile } from "../infra/storage/s3-client.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
@@ -109,32 +110,14 @@ export async function writeCoverLetter(
       invokeWorkerWithFallbacks(messages, { attribution: { agent: "jobhunt", stage: "worker" } }),
   };
 
-  const [profile, dossier] = await Promise.all([
-    readApplyProfile(applyProfilePathFor(row.profile_id)),
-    readCandidateDossier(row.profile_id),
-  ]);
-  const answers = profile.ok ? profile.profile.answers : undefined;
-  const noticeDetail = dossier?.facts["notice period"] ?? answers?.notice_period_detail;
+  const options = await letterOptions(row, cvMarkdown);
   const result = await buildCoverLetter(
-    {
-      companyName: row.company,
-      jobTitle: row.title,
-      jobDescription: row.description ?? "",
-      track: row.track,
-      cvText: cvMarkdown,
-      founderContext: founderContextFor(row.profile_id),
-      postingCountry: row.country ?? undefined,
-      dossierText: dossier?.rawText,
-      notice: {
-        ...(answers?.notice_period_days !== undefined ? { days: answers.notice_period_days } : {}),
-        ...(noticeDetail ? { detail: noticeDetail } : {}),
-      },
-    },
+    options,
     model,
   );
 
   if (!result.success && result.kind === "empty") {
-    const earlier = await existingDraftLetter(row);
+    const earlier = await existingDraftLetter(row, options);
     if (earlier) return { ok: true, letter: earlier };
   }
 
@@ -150,13 +133,55 @@ export async function writeCoverLetter(
   return { ok: true, letter: result.letter };
 }
 
-/** The letter `/draft` archived for this row, when there is one and it is not empty. */
-async function existingDraftLetter(row: JobApplication): Promise<string | null> {
+/** What the letter writer and the fact check know about this row and candidate. */
+async function letterOptions(row: JobApplication, cvMarkdown: string): Promise<CoverLetterOptions> {
+  const [profile, dossier] = await Promise.all([
+    readApplyProfile(applyProfilePathFor(row.profile_id)),
+    readCandidateDossier(row.profile_id),
+  ]);
+  const answers = profile.ok ? profile.profile.answers : undefined;
+  const noticeDetail = dossier?.facts["notice period"] ?? answers?.notice_period_detail;
+  return {
+    companyName: row.company,
+    jobTitle: row.title,
+    jobDescription: row.description ?? "",
+    track: row.track,
+    cvText: cvMarkdown,
+    founderContext: founderContextFor(row.profile_id),
+    postingCountry: row.country ?? undefined,
+    dossierText: dossier?.rawText,
+    notice: {
+      ...(answers?.notice_period_days !== undefined ? { days: answers.notice_period_days } : {}),
+      ...(noticeDetail ? { detail: noticeDetail } : {}),
+    },
+  };
+}
+
+function vetAgainst(text: string, o: CoverLetterOptions): string | null {
+  return vetLetter(text, {
+    postingCountry: o.postingCountry,
+    sourceText: [o.cvText, o.founderContext ?? "", o.dossierText ?? ""].join("\n"),
+    exemptText: `${o.companyName} ${o.jobTitle}`,
+    notice: o.notice,
+  });
+}
+
+/**
+ * An archived letter passed through the same fact check as a new one. Letters archived before the check
+ * existed carry the claims it blocks, and `/apply` attaches them unread. Null means: do not use it.
+ */
+export async function vetArchivedLetter(row: JobApplication, text: string, cvMarkdown: string): Promise<string | null> {
+  return vetAgainst(text, await letterOptions(row, cvMarkdown));
+}
+
+/** The letter `/draft` archived for this row, when there is one and it passes the fact check. */
+async function existingDraftLetter(row: JobApplication, options: CoverLetterOptions): Promise<string | null> {
   if (!row.cover_letter_s3_key) return null;
   try {
-    const text = (await downloadFile(row.cover_letter_s3_key)).toString("utf8").trim();
-    if (text.length > 0) log.warn({ id: row.id }, "Model returned no letter twice — using the archived /draft letter");
-    return text.length > 0 ? text : null;
+    const raw = (await downloadFile(row.cover_letter_s3_key)).toString("utf8").trim();
+    const text = raw.length > 0 ? vetAgainst(raw, options) : null;
+    if (text) log.warn({ id: row.id }, "Model returned no letter twice — using the archived /draft letter");
+    return text;
   } catch (err) {
     // allow-failopen: no archived copy only means there is no fallback; the typed "no letter" result still reaches the founder.
     log.warn({ id: row.id, err: (err as Error).message }, "Archived /draft letter could not be read");
