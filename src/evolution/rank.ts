@@ -8,14 +8,14 @@
 import type { Finding, FindingKind, Severity } from "./types.js";
 
 /** Severity ordering. Higher sorts first. */
-export const SEVERITY_RANK: Readonly<Record<Severity, number>> = { high: 3, medium: 2, low: 1 };
+const SEVERITY_RANK: Readonly<Record<Severity, number>> = { high: 3, medium: 2, low: 1 };
 
 /**
  * Findings ordered by how directly acting on one changes an outcome.
  * Money and silent defects first; risk and tidiness last. A finding nobody
  * can act on this week ranks below one that can be fixed by deleting a line.
  */
-export const KIND_PRIORITY: readonly FindingKind[] = [
+const KIND_PRIORITY: readonly FindingKind[] = [
   "unapplied-lesson",
   "cost-hotspot",
   "recurring-failure",

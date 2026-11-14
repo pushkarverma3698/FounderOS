@@ -16,7 +16,7 @@
  *  (rank position matters less); 60 is the widely-used default. */
 export const RRF_K = 60;
 
-export interface FusedItem<T> {
+interface FusedItem<T> {
   /** The representative object (first list it was seen in). */
   item: T;
   /** Summed reciprocal-rank score across all input lists. Higher = better. */

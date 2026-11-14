@@ -14,7 +14,7 @@
  * environment on import, and scripts load the model factory without it.
  */
 
-export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 4096;
+const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 4096;
 
 export function modelMaxOutputTokens(): number {
   const n = Number(process.env["MODEL_MAX_OUTPUT_TOKENS"]);

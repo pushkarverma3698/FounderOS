@@ -19,8 +19,8 @@ card. Read-only tools (search, read, analytics) run without a gate.
 
 ### What stops it from claiming it did something it didn't?
 An action step is rejected unless it carries a successful, code-authored
-`ToolReceipt`, and the reply-writer only sees validated results. → [diagram
-07](diagrams/07-receipt-and-zero-hallucination.md).
+`ToolReceipt`, and the reply-writer only sees validated results. → diagram
+07.
 
 ### What happens if the process crashes mid-approval?
 Nothing is lost. The approval row is written to Postgres *before* the graph pauses,
@@ -45,14 +45,14 @@ isolation (see [THREAT-MODEL.md](THREAT-MODEL.md), T6).
 v2 was a LangGraph supervisor + 7 ReAct departments that lost complex tasks within
 three steps (regex pre-router, empty-argument handoffs, a 77-regex post-hoc guard
 that sometimes wiped the thread). The full story is in the
-[case studies](turicks-case-studies/); the audit is in
-[`ZERO-BASE-AUDIT.md`](../ZERO-BASE-AUDIT.md).
+case studies; the audit is in
+`ZERO-BASE-AUDIT.md`.
 
 ### How do you keep it from getting bloated again?
 Six CI rules (`scripts/verify-architecture.ts`): tombstones, regex-routing = 0,
 gateway-imports = 0, kernel-purity = 0, a 400-line file budget, and a fail-open
-tax — with a debt baseline that may only shrink. → [diagram
-08](diagrams/08-anti-slop-ci-gates.md).
+tax — with a debt baseline that may only shrink. → diagram
+08.
 
 ### How much does development cost to run?
 `pnpm test` is **$0** — the full graph runs offline with scripted models. Live

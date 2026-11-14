@@ -18,13 +18,13 @@ import { buildBootReport, type BootCapabilityInput } from "./boot-report.js";
 import { existsSync, mkdirSync, accessSync, constants } from "node:fs";
 import { ARTIFACT_ROOT } from "../core/config.js";
 
-export interface BootValidationInput extends BootCapabilityInput {
+interface BootValidationInput extends BootCapabilityInput {
   DATABASE_URL?: string | undefined;
   TELEGRAM_BOT_TOKEN?: string | undefined;
   TELEGRAM_CHAT_ID?: string | undefined;
 }
 
-export interface BootValidation {
+interface BootValidation {
   errors: string[];
   warnings: string[];
 }
@@ -37,7 +37,7 @@ const TELEGRAM_TOKEN_SHAPE = /^\d+:[A-Za-z0-9_-]+$/;
 /**
  * Validate that ARTIFACT_ROOT exists and is writable.
  */
-export function assertArtifactRootWritable(dir: string = ARTIFACT_ROOT): void {
+function assertArtifactRootWritable(dir: string = ARTIFACT_ROOT): void {
   try {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });

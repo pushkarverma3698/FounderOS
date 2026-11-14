@@ -10,6 +10,4 @@ export {
   timeBucket,
   recurringIdemKey,
   hitlGate,
-  type BucketGranularity,
-  type ApprovalRequest,
 } from "../../infra/hitl.js";

@@ -339,8 +339,8 @@ mac_client/overlay.js    — the on-page review UI (resume label, SUBMIT/SKIP)
 
 - [`docs/JOBHUNT-FREE-LANE.md`](./JOBHUNT-FREE-LANE.md) — free board lane economics (numbers dated 2026-08-06)
 - [`docs/plans/2026-08-20-jobhunt-sponsor-board-import.md`](./plans/2026-08-20-jobhunt-sponsor-board-import.md) — registry growth to 1,297 boards
-- [`docs/plans/2026-08-24-jobhunt-supply-to-apply-pipeline-audit.md`](./plans/2026-08-24-jobhunt-supply-to-apply-pipeline-audit.md) — the audit this doc's architecture derives from
-- [`docs/plans/2026-08-25-jobhunt-apply-completion-brief.md`](./plans/2026-08-25-jobhunt-apply-completion-brief.md) — T1–T6 execution brief (T1–T4 shipped; T5–T6 open, see below)
+- `docs/plans/2026-08-24-jobhunt-supply-to-apply-pipeline-audit.md` — the audit this doc's architecture derives from
+- `docs/plans/2026-08-25-jobhunt-apply-completion-brief.md` — T1–T6 execution brief (T1–T4 shipped; T5–T6 open, see below)
 - [`docs/strategy/09-NL-ENTRY-CAMPAIGN.md`](./strategy/09-NL-ENTRY-CAMPAIGN.md) — the salary floor and permit constraints the gates enforce
 
 ## Open work (not built)

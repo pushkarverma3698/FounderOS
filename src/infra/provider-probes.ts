@@ -23,7 +23,7 @@ import { childLogger } from "./logger.js";
 
 const log = childLogger({ module: "provider-probes" });
 
-export interface ProviderProbeReport {
+interface ProviderProbeReport {
   checked_at: string;
   gmail_backend: GoogleBackend;
   calendar_backend: GoogleBackend;
@@ -37,11 +37,7 @@ export interface ProviderProbeReport {
 
 let lastProbe: ProviderProbeReport | null = null;
 
-export function getLastProviderProbe(): ProviderProbeReport | null {
-  return lastProbe;
-}
-
-export function setLastProviderProbe(report: ProviderProbeReport): void {
+function setLastProviderProbe(report: ProviderProbeReport): void {
   lastProbe = report;
 }
 
@@ -90,7 +86,7 @@ export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Pr
 }
 
 /** Probe googleapis: service-account + subject configured, then a 1-message list. */
-export async function probeGoogleapisGmail(
+async function probeGoogleapisGmail(
   timeoutMs = getProviderProbeTimeoutMs(),
 ): Promise<ProviderCheck> {
   if (!(await googleapisConfigured())) {
@@ -184,7 +180,7 @@ const CAPABILITY_LABEL: Record<string, string> = {
   active_linkedin: "LinkedIn (posting and comments)",
 };
 
-export interface ProviderAuthFailure {
+interface ProviderAuthFailure {
   readonly provider: string;
   readonly detail: string | undefined;
   /** Which of the 3 Google accounts (src/core/accounts.ts ACCOUNT_KEYS) this is — omitted for the single-account boot probe. */
@@ -274,44 +270,6 @@ export function clearCredentialAlert(provider: string, accountKey?: string): voi
 /** Test seam. */
 export function _resetCredentialAlerts(): void {
   alertedCapabilities.clear();
-}
-
-export async function runProviderSmokeAtBoot(
-  notify: (html: string) => Promise<void> = defaultNotify,
-): Promise<void> {
-  log.info("Running provider smoke probes…");
-  const report = await runProviderProbes();
-  const tag = (s: ProviderStatus) => (s === "up" ? "UP" : s === "down" ? "DOWN" : "SKIP");
-
-  log.info(
-    `[boot] gmail=${report.gmail_backend}/${tag(report.active_gmail.status)} ` +
-      `calendar=${report.calendar_backend}/${tag(report.active_calendar.status)} ` +
-      `linkedin=${report.linkedin_backend}/${tag(report.active_linkedin.status)}`,
-  );
-
-  const authFailures: ProviderAuthFailure[] = [];
-  for (const [name, cap] of [
-    ["active_gmail", report.active_gmail],
-    ["active_calendar", report.active_calendar],
-    ["active_linkedin", report.active_linkedin],
-  ] as const) {
-    if (cap.status !== "down") continue;
-    if (isCredentialFailure(cap.detail)) {
-      // error, not warn: a dead grant is a standing outage needing a human,
-      // and it stayed invisible for days at warn (issue #426 item 4).
-      log.error({ provider: name, detail: cap.detail }, "Active provider DOWN — credential expired or revoked");
-      authFailures.push({ provider: name, detail: cap.detail });
-    } else {
-      log.warn({ provider: name, detail: cap.detail }, "Active provider probe DOWN");
-    }
-  }
-
-  if (authFailures.length > 0) {
-    await notify(formatProviderAuthAlert(authFailures)).catch((err) =>
-      // allow-failopen: a Telegram blip must not stop boot; the error line above is already written
-      log.warn({ err: (err as Error).message }, "Provider auth alert send failed"),
-    );
-  }
 }
 
 /** Lazy import so provider-probes stays usable in tests without the Telegram stack. */
