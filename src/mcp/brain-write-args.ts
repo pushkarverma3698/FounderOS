@@ -30,7 +30,7 @@ function optionalString(raw: unknown): string | undefined {
  * Who wrote this row. BRAIN_CLIENT / BRAIN_MACHINE come from the hub's environment (the SSH launcher sets them);
  * missing means an unknown agent, never a rejected write.
  */
-export function buildProvenance(
+function buildProvenance(
   args: Record<string, unknown>,
   visibility: BrainProvenance["visibility"],
   env: Record<string, string | undefined>,

@@ -4,7 +4,7 @@
  */
 import { z } from "zod";
 
-export const BRAIN_ORIGINS = [
+const BRAIN_ORIGINS = [
   "mac-claude", "mac-agy", "vps-claude", "vps-agy", "vps-daemon", "telegram", "docs", "agent",
 ] as const;
 

@@ -48,7 +48,7 @@ const INSTRUCTIONS: Record<HubScope, string> = {
     "save_bug after; always pass the project tag.",
 };
 
-export interface HubOptions {
+interface HubOptions {
   scope: HubScope;
   google?: GoogleDeps;
   bridge?: BridgeDeps;

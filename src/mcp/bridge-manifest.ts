@@ -30,7 +30,7 @@ const sharedServerFields = {
 };
 
 /** A local child-process server (blender, npx-launched servers). */
-export const stdioServerSchema = z.object({
+const stdioServerSchema = z.object({
   transport: z.literal("stdio"),
   /** Executable to spawn (e.g. "uvx", "npx"). */
   command: z.string().min(1),
@@ -43,7 +43,7 @@ export const stdioServerSchema = z.object({
 
 /** A hosted remote server reached over streamable HTTP (the 2026 default:
  *  Notion, Linear, Stripe, DeepWiki, … — no local install). */
-export const httpServerSchema = z.object({
+const httpServerSchema = z.object({
   transport: z.literal("http"),
   /** The server's streamable-HTTP endpoint (e.g. "https://mcp.deepwiki.com/mcp"). */
   url: z.string().url(),

@@ -30,38 +30,8 @@ function api() {
 }
 
 /** The founder's default chat id (single-tenant). */
-export function defaultChatId(): string {
+function defaultChatId(): string {
   return env.TELEGRAM_CHAT_ID;
-}
-
-/**
- * The Telegram chat a kernel thread belongs to. Thread ids are `<tenant>:<chatId>`
- * (src/gateway/kernel-run.ts threadIdFor); anything else yields undefined, and
- * the caller falls back to defaultChatId(). Lets a tool answer the chat that
- * asked — a family group — instead of always the founder's DM.
- */
-export function chatIdFromThreadId(threadId: unknown): string | undefined {
-  if (typeof threadId !== "string") return undefined;
-  const tail = threadId.slice(threadId.lastIndexOf(":") + 1);
-  return /^-?\d+$/.test(tail) ? tail : undefined;
-}
-
-/**
- * Send a short plain-text status message to a Telegram chat.
- * Used by long-running tools (claude_code) to stream progress to the founder
- * while the office run is still in flight. Best-effort: failures are logged,
- * never thrown — a progress ping must not kill the task it reports on.
- */
-export async function sendStatusText(
-  text: string,
-  opts: { chatId?: string | number } = {},
-): Promise<void> {
-  const chatId = opts.chatId ?? defaultChatId();
-  try {
-    await api().sendMessage(chatId, text.slice(0, 4000));
-  } catch (err) {
-    log.warn({ chatId, err: (err as Error).message }, "Status text send failed (non-fatal)");
-  }
 }
 
 /**
@@ -162,25 +132,6 @@ export async function sendToChatWithKeyboard(
     parse_mode: parseMode,
     ...(keyboard.length > 0 ? { reply_markup: { inline_keyboard: keyboard.map((row) => row.map((b) => ({ ...b }))) } } : {}),
   });
-}
-
-/**
- * Send a file from disk to a Telegram chat as a document attachment.
- * @param chatId  target chat (defaults to the founder's chat)
- * @param absPath absolute path to the file (already path-guard-validated)
- * @param filename display name for the attachment
- * @param caption optional caption
- */
-export async function sendDocument(
-  absPath: string,
-  filename: string,
-  opts: { chatId?: string | number; caption?: string } = {},
-): Promise<void> {
-  const chatId = opts.chatId ?? defaultChatId();
-  await api().sendDocument(chatId, new InputFile(absPath, filename), {
-    ...(opts.caption ? { caption: opts.caption } : {}),
-  });
-  log.info({ chatId, filename }, "Document sent to Telegram");
 }
 
 /**

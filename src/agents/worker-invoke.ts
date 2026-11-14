@@ -43,13 +43,13 @@ import { TENANT } from "../core/config.js";
 const log = childLogger({ module: "agents:worker-invoke" });
 
 /** One turn, in the tuple form LangChain accepts. */
-export interface WorkerTurn {
+interface WorkerTurn {
   readonly role: "system" | "user" | "assistant";
   readonly content: string;
 }
 
 /** The narrow slice of a chat model a one-shot completion needs. */
-export interface InvokableModel {
+interface InvokableModel {
   invoke(messages: unknown, config?: unknown): Promise<{ content: unknown }>;
 }
 
@@ -84,9 +84,9 @@ function costSink(call: AccruedCall): void {
  * `FALLBACK_ATTEMPT_TIMEOUT_MS` in gateway/model-fallback.ts, which exists for
  * exactly this reason one layer up.
  */
-export const ATTEMPT_TIMEOUT_MS = 45_000;
+const ATTEMPT_TIMEOUT_MS = 45_000;
 
-export interface InvokeOptions {
+interface InvokeOptions {
   /** Overridable so tests do not wait 45 real seconds to prove a timeout. */
   readonly attemptTimeoutMs?: number;
   /**

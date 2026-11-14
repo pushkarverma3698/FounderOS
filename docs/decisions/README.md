@@ -1,6 +1,6 @@
 # Architecture Decision Records — Index
 
-51 ADRs spanning three rewrites (v1 → v2 → v3, see [ZERO-BASE-AUDIT.md](../../ZERO-BASE-AUDIT.md)).
+51 ADRs spanning three rewrites (v1 → v2 → v3, see ZERO-BASE-AUDIT.md).
 Read chronologically they're confusing — most were written *about* the department/supervisor
 architecture that was torn out on 2026-07-08. Read with the status column below, they're a
 decision log: what was tried, what broke, what replaced it, and why.
@@ -28,7 +28,7 @@ rejected and why, which is the part a "we used X" bullet point never shows.
 | [017](017-bounded-conversation-history.md) | Bounded conversation history | An early, narrower attempt at the loop problem that README's SF-3 later shows was *not* the permanent fix — good evidence of honest iteration |
 | [010](010-v2-react-agent-rebuild.md) | Rebuild as prebuilt-supervisor + ReAct sub-agents | **Superseded** — this is the decision that became the v2 system the zero-base audit tore out. Worth reading precisely because it was wrong, and for the right-sounding reasons at the time |
 | [003](003-critic-pattern.md) | The critic pattern — cross-model quality gate | The origin of `governance/critique-rules.md`, still loaded by `criticNode` at runtime |
-| [045](045-retire-stable-tier.md) | Retire the `stable` promotion tier | A rollback of an earlier decision, made in the open rather than quietly reverted |
+| 045 | Retire the `stable` promotion tier | A rollback of an earlier decision, made in the open rather than quietly reverted |
 | [042](042-multi-business-parameterization.md) | Multi-business parameterization, bounded not SaaS | Names the line between "generalize this" and "over-engineer this" with a business reason, not a technical one |
 
 ## Full log
@@ -71,7 +71,7 @@ never renamed to avoid breaking existing inbound links) are disambiguated below 
 | 025 | [hierarchy-proof-on-prebuilts](025-hierarchy-proof-on-prebuilts.md) | Hierarchy proof on the prebuilt supervisor, phase 5 | Archived |
 | 026 | [weekly-qa-auditor](026-weekly-qa-auditor.md) | Weekly QA auditor — deterministic funnel, Claude-judged | Archived |
 | 027 | [tool-count-and-handoff-rules](027-tool-count-and-handoff-rules.md) | Tool-count and handoff rules for the hierarchical company | Archived |
-| 028a | [composio-vs-direct-clis](028-composio-vs-direct-clis.md) | Composio vs. direct CLIs (gws, gh, LinkedIn API) | Superseded |
+| 028a | composio-vs-direct-clis | Composio vs. direct CLIs (gws, gh, LinkedIn API) | Superseded |
 | 028b | [langchain-v1-model-agnostic](028-langchain-v1-model-agnostic.md) | LangChain v1, model-agnostic office | Archived |
 | 028c | [manager-no-tools-hierarchy](028-manager-no-tools-hierarchy.md) | Manager has no tools (CrewAI hierarchical rule) | Archived |
 | 029a | [direct-platform-integrations](029-direct-platform-integrations.md) | Direct platform integrations (provider abstraction) | Accepted |
@@ -87,15 +87,15 @@ never renamed to avoid breaking existing inbound links) are disambiguated below 
 | 036 | [account-registry](036-account-registry.md) | Integration account registry | Accepted |
 | 037 | [apify-research-engine](037-apify-research-engine.md) | Apify as the research department's real-data engine | Accepted |
 | 038 | [postgres-canonical-brain](038-postgres-canonical-brain.md) | Postgres is the canonical brain | Accepted |
-| 039 | [weekly-release-train](039-weekly-release-train.md) | Weekly release train + enforced quality gates | Superseded |
+| 039 | weekly-release-train | Weekly release train + enforced quality gates | Superseded |
 | 040 | [multi-model-eng-team](040-multi-model-eng-team.md) | Multi-model engineering team, adopt phased | Accepted |
 | 041 | [mcp-client-bridge](041-mcp-client-bridge.md) | External MCP client bridge | Accepted |
 | 042 | [multi-business-parameterization](042-multi-business-parameterization.md) | Multi-business parameterization, bounded not SaaS | Archived |
 | 043 | [checkpoint-ttl-and-idempotency-window](043-checkpoint-ttl-and-idempotency-window.md) | Checkpoint TTL sweep + opt-in idempotency window | Archived |
 | 044 | [creative-department-and-roadmap-p1-p4](044-creative-department-and-roadmap-p1-p4.md) | Creative department + roadmap P1–P4 | Archived |
-| 045 | [retire-stable-tier](045-retire-stable-tier.md) | Retire the `stable` tier — two-stage promotion | Superseded |
+| 045 | retire-stable-tier | Retire the `stable` tier — two-stage promotion | Superseded |
 | 046 | [operating-model-freeze](046-operating-model-freeze.md) | The engineering operating model is frozen | Accepted |
 
 There is no ADR for the v3 rebuild itself — that decision is the subject of the whole repo.
-Start with [JARVIS-ARCHITECTURE.md](../../JARVIS-ARCHITECTURE.md) and
-[ZERO-BASE-AUDIT.md](../../ZERO-BASE-AUDIT.md) instead.
+Start with JARVIS-ARCHITECTURE.md and
+ZERO-BASE-AUDIT.md instead.

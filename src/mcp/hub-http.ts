@@ -32,9 +32,9 @@ import { closeBridgeConnections } from "./hub-bridge.js";
 
 const log = logger.child({ module: "mcp-hub-http" });
 
-export const MIN_TOKEN_LENGTH = 32;
+const MIN_TOKEN_LENGTH = 32;
 
-export interface HubHttpConfig {
+interface HubHttpConfig {
   host: string;
   port: number;
   tokens: Array<{ token: string; scope: HubScope }>;
@@ -115,7 +115,7 @@ export function createHubHttpServer(cfg: HubHttpConfig): Server {
   });
 }
 
-export async function runHubHttp(cfg: HubHttpConfig): Promise<Server> {
+async function runHubHttp(cfg: HubHttpConfig): Promise<Server> {
   const http = createHubHttpServer(cfg);
   await new Promise<void>((resolve, reject) => {
     http.once("error", reject);

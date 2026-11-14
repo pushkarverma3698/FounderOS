@@ -21,7 +21,7 @@ import { childLogger } from "./logger.js";
 const log = childLogger({ module: "single-instance" });
 
 /** Default lock location — matches the documented restart workflow. */
-export const DEFAULT_PID_FILE = process.env["FOUNDEROS_PID_FILE"] ?? "/tmp/founderos.pid";
+const DEFAULT_PID_FILE = process.env["FOUNDEROS_PID_FILE"] ?? "/tmp/founderos.pid";
 
 /**
  * Is this lock path erased between service restarts?
@@ -63,7 +63,7 @@ export function readPidFile(pidFile: string): number | null {
   }
 }
 
-export interface AcquireLockOptions {
+interface AcquireLockOptions {
   pidFile?: string;
   /** Accepted for test ergonomics; a live previous instance is always signalled. */
   killSignal?: boolean;
@@ -73,7 +73,7 @@ export interface AcquireLockOptions {
   _kill?: (pid: number, sig: NodeJS.Signals) => void;
 }
 
-export interface AcquireLockResult {
+interface AcquireLockResult {
   /** PID of the previous live instance we replaced, or null if none. */
   replacedPid: number | null;
 }
@@ -114,7 +114,7 @@ export function acquireSingleInstanceLock(opts: AcquireLockOptions = {}): Acquir
   return { replacedPid };
 }
 
-export interface WaitForExitOptions {
+interface WaitForExitOptions {
   /** Max time to wait for graceful exit before SIGKILL (default 8000ms). */
   timeoutMs?: number;
   /** Poll interval (default 200ms). */

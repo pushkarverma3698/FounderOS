@@ -21,13 +21,13 @@ import type { RagHit } from "./rag-search.js";
  * leans toward showing the hit. Calibrate with the no-answer cases in src/eval/retrieval-no-answer.ts: raise it to
  * the highest value that keeps every golden hit above it.
  */
-export const BRAIN_ABSTAIN_SIMILARITY = 0.55;
+const BRAIN_ABSTAIN_SIMILARITY = 0.55;
 
 /** At most this many hits are listed under an abstain. */
 const ABSTAIN_LIST_MAX = 2;
 
 /** Where the row came from: metadata.origin, else docs (a synced file), agent (ide_mcp), else the raw source. */
-export function hitOrigin(hit: RagHit): string {
+function hitOrigin(hit: RagHit): string {
   const origin = hit.metadata["origin"];
   if (typeof origin === "string" && origin.length > 0) return origin;
   if (typeof hit.metadata["source_path"] === "string") return "docs";
@@ -43,7 +43,7 @@ function hitDate(hit: RagHit): string {
 }
 
 /** True for a hit read from brain_memories (the only table that selects type, project and created_at). */
-export function isBrainHit(hit: RagHit): boolean {
+function isBrainHit(hit: RagHit): boolean {
   return hit.memory_type !== undefined;
 }
 
@@ -52,7 +52,7 @@ export function hitHeader(hit: RagHit): string {
 }
 
 /** Highest cosine among the hits that carry one, or null when none does. */
-export function bestCosine(hits: readonly RagHit[]): number | null {
+function bestCosine(hits: readonly RagHit[]): number | null {
   let best: number | null = null;
   for (const h of hits) if (typeof h.cosine === "number" && (best === null || h.cosine > best)) best = h.cosine;
   return best;
@@ -62,7 +62,7 @@ export function bestCosine(hits: readonly RagHit[]): number | null {
  * The abstain text when the best cosine is under BRAIN_ABSTAIN_SIMILARITY, else null. It names the closest hit and
  * lists at most two, so the founder still sees what was nearest, labelled as weak.
  */
-export function abstainText(
+function abstainText(
   hits: readonly RagHit[],
   query: string,
   renderOne: (hit: RagHit, index: number) => string,
