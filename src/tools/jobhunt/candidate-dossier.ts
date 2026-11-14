@@ -189,7 +189,7 @@ const SEMANTIC_RULES: ReadonlyArray<{
   },
   {
     name: "salary",
-    phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual", "ctc"],
+    phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual"],
     excludes: ["current"],
     resolve: (p, d) =>
       d?.facts["salary expectation"] ??

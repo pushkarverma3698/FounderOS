@@ -77,9 +77,9 @@ describe("name, experience and salary synonyms", () => {
     expect(one(field("Years of experience", "select", ["0-2 years", "3-5 years"]), profile()).kind).toBe("ask");
   });
 
-  it("maps expected CTC / expected salary to the stored salary only, never the current one", () => {
+  it("maps expected salary to the stored salary; CTC (an INR figure) and current salary stay asks", () => {
     const p = profile({ salary_floor_eur_year: 52000 });
-    expect(one(field("Expected CTC"), p)).toMatchObject({ kind: "value", value: "52000" });
+    expect(one(field("Expected CTC"), p).kind).toBe("ask"); // the stored figure is EUR per year
     expect(one(field("What is your expected salary ?", "textarea"), p)).toMatchObject({ kind: "value", value: "52000" });
     expect(one(field("Current CTC"), p).kind).toBe("ask");
     expect(one(field("What is your current fixed Salary ?"), p).kind).toBe("ask");
