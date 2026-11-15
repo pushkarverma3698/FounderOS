@@ -119,7 +119,7 @@ describe("handleDraft (resolution path)", () => {
             "At Turicks I wrote the firmware-adjacent control loop in C++ and kept it",
             "running on hardware in the field for eighteen months without a rollback.",
             "",
-            "I am available from September and would like to talk.",
+            "I would like to talk.",
             "",
             "Pushkar Verma",
           ].join("\n"),
