@@ -153,6 +153,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     example: "/wife_gaps",
   },
   {
+    command: "questions",
+    description: "Unanswered form questions that block your roles, answered in one sitting. questions tashi for Tashi's",
+    group: "jobs",
+  },
+  {
+    command: "wife_questions",
+    description: "Unanswered form questions that block your wife's roles, answered in one sitting",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_questions",
+  },
+  {
     command: "applied",
     description: "applied n — mark row n applied and drop it off the queue. applied tashi n for Tashi's",
     group: "jobs",

@@ -49,3 +49,27 @@ export async function recordLane(id: string, lane: string, reason: string, now: 
     .set({ apply_lane: lane, apply_lane_reason: reason, apply_lane_at: now })
     .where(eq(jobApplications.id, id));
 }
+
+export interface LaneReasonRow {
+  readonly id: string;
+  readonly company: string;
+  readonly reason: string;
+}
+
+/** Open rows the shadow pass sent to needs_you since `since`, with the reason that names the unanswered questions. */
+export async function listNeedsYouReasons(profileId: string, since: Date): Promise<LaneReasonRow[]> {
+  const rows = await getDb()
+    .select({ id: jobApplications.id, company: jobApplications.company, reason: jobApplications.apply_lane_reason })
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.profile_id, profileId),
+        eq(jobApplications.apply_lane, "needs_you"),
+        gte(jobApplications.apply_lane_at, since),
+        isNull(jobApplications.applied_at),
+        isNull(jobApplications.skipped_at),
+        ne(jobApplications.liveness, "expired"),
+      ),
+    );
+  return rows.flatMap((r) => (r.reason ? [{ id: r.id, company: r.company, reason: r.reason }] : []));
+}

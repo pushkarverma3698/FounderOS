@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { escapeHtml } from "./apply-page.js";
 import { PROFILE_PAGE_SCRIPT } from "./profile-page-script.js";
 
-const CSS =
+export const PROFILE_PAGE_CSS =
   "body{margin:0;background:#f6f7f9;color:#14181f;font:16px/1.45 system-ui,-apple-system,sans-serif}" +
   "main{max-width:640px;margin:0 auto;padding:16px}h1{font-size:1.25rem;margin:0 0 4px}" +
   "h2{font-size:1.05rem;margin:24px 0 8px}.sub{color:#5b6573;margin:0 0 12px}" +
@@ -29,7 +29,7 @@ const CSS =
   "input,select,textarea{background:#0f1319;border-color:#3a4350}.sub,.hint{color:#9aa4b2}" +
   "#msg.ok{background:#12301d;border-color:#2f6b45;color:#bfe8cb}#msg.bad{background:#34130f;border-color:#7a2b22;color:#f5c2bc}}";
 
-const STYLE_HASH = createHash("sha256").update(CSS).digest("base64");
+const STYLE_HASH = createHash("sha256").update(PROFILE_PAGE_CSS).digest("base64");
 const TELEGRAM_SCRIPT_HOST = "https://telegram.org";
 
 /** Response headers with the CSP for one request's nonce. Only Telegram Web may frame the page. */
@@ -52,7 +52,7 @@ export function renderProfilePage(nonce: string): string {
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">` +
-    `<title>Saved answers</title><style>${CSS}</style></head><body><main>` +
+    `<title>Saved answers</title><style>${PROFILE_PAGE_CSS}</style></head><body><main>` +
     `<h1>Saved answers</h1><p class="sub" id="who">Loading</p><div id="msg" role="status" hidden></div><div id="root"></div>` +
     `</main><script nonce="${n}" src="${TELEGRAM_SCRIPT_HOST}/js/telegram-web-app.js"></script>` +
     `<script nonce="${n}">${PROFILE_PAGE_SCRIPT}</script></body></html>`
