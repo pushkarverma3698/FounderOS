@@ -24,6 +24,7 @@ import { profileSelector } from "./profile-config.js";
 import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import type { FreeFunnel } from "./free-ingest.js";
+import { ZERO_PASS_STREAK_THRESHOLD, formatZeroPassAlert, zeroPassThreshold } from "./funnel-alert.js";
 
 /** How long a quiet lane may go without saying anything at all. 24 h since 2026-11-07 (was 3 h): the audit found
  * about 5 quiet pings a day. A stopped lane still shows within a day; the funnel alert still fires at once. */
@@ -32,8 +33,7 @@ export const ALIVE_PING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** Rows named individually in a new-roles alert before it summarises the rest. */
 export const NEW_ROWS_NAMED = 3;
 
-/** Number of consecutive 0-pass sweeps before raising a closed-funnel alert. */
-export const ZERO_PASS_STREAK_THRESHOLD = 6;
+export { ZERO_PASS_STREAK_THRESHOLD } from "./funnel-alert.js";
 
 /**
  * How recently the EMPLOYER must have published a role for it to interrupt.
@@ -113,6 +113,8 @@ export interface HeartbeatState {
   readonly zeroPassStreak: number;
   /** Last sweep's funnel diagnostic snapshot. */
   readonly lastFunnel: FreeFunnel | null;
+  /** The streak's alert was already sent. Absent on old rows: a streak >= 6 then counts as sent. */
+  readonly zeroPassAlerted?: boolean;
 }
 
 export function initialHeartbeat(now: Date): HeartbeatState {
@@ -197,39 +199,30 @@ export function afterQuietSweep(
   const zeroPass = funnel ? funnel.screened === 0 : true;
   const newStreak = zeroPass ? state.zeroPassStreak + 1 : 0;
 
+  // Legacy rows have no flag: a streak already past 6 was alerted under the old strict `=== 6` rule.
+  const alerted = state.zeroPassAlerted ?? state.zeroPassStreak >= ZERO_PASS_STREAK_THRESHOLD;
+
   const pending: HeartbeatState = {
     quietSweeps: state.quietSweeps + 1,
     boardsPolled: state.boardsPolled + boardsPolled,
     lastMessageAt: state.lastMessageAt,
     zeroPassStreak: newStreak,
     lastFunnel: funnel ?? state.lastFunnel,
+    zeroPassAlerted: zeroPass ? alerted : false,
   };
 
   const who = profile?.candidateName ? ` for ${esc(profile.candidateName)}` : "";
 
-  // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
-  if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
-    const top = funnelClosingStage(funnel ?? state.lastFunnel);
-    const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
-    // Only the DIAGNOSIS varies by closing stage, never whether the alert fires.
-    //
-    // A dedup-only streak does not support "the funnel may be restricted or
-    // closed" — every posting the sweep saw was one we already had. But it is
-    // not evidence of health either: a board fetch frozen on a stale cache is
-    // indistinguishable, from inside the funnel, from a genuinely flat market.
-    // Suppressing the alert there would not defer it, it would delete it — the
-    // guard is a strict `=== THRESHOLD`, so the streak then runs 7, 8, 9… and
-    // never gets another chance until a sweep actually passes something.
-    const diagnosis =
-      top?.reason === "already known in tracker"
-        ? "No NEW postings reached screening — either the market is flat or board fetches are serving stale data."
-        : "The funnel may be restricted or closed.";
-    const ping =
-      `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
-      `${dropClause}. ${diagnosis}`;
+  // Zero-pass streak alert, once per streak. `>=` plus a sent flag (not `===`) because the threshold moves:
+  // a weekend streak that crosses into Monday must still alert, or it is deleted for the rest of the outage.
+  // Only the DIAGNOSIS varies by closing stage, never whether the alert fires: suppressing a dedup-only streak
+  // would delete the alert, since a frozen board cache looks the same as a flat market. Policy: funnel-alert.ts.
+  const effective = funnel ?? state.lastFunnel;
+  const top = funnelClosingStage(effective);
+  if (zeroPass && !alerted && newStreak >= zeroPassThreshold(currentNow, effective, top)) {
     return {
-      next: { ...pending, lastMessageAt: currentNow.getTime() },
-      ping,
+      next: { ...pending, zeroPassAlerted: true, lastMessageAt: currentNow.getTime() },
+      ping: formatZeroPassAlert(newStreak, effective, top, who),
     };
   }
 
@@ -250,7 +243,7 @@ export function afterQuietSweep(
     // window where Pushkar's lane passed 83 genuine new roles. A closed funnel
     // is one event and gets one alert; only a sweep that actually passes
     // something (`zeroPass === false`, at the top of this function) reopens it.
-    next: { ...initialHeartbeat(currentNow), zeroPassStreak: newStreak, lastFunnel: pending.lastFunnel },
+    next: { ...initialHeartbeat(currentNow), zeroPassStreak: newStreak, lastFunnel: pending.lastFunnel, zeroPassAlerted: alerted },
     ping: formatAlivePing(pending, sheetLink, profile),
   };
 }

@@ -117,6 +117,8 @@ export interface FreeFunnel {
   readonly known: number;
   readonly bodyless: number;
   readonly screened: number;
+  /** Boards that failed to fetch this sweep. Absent on older snapshots. */
+  readonly boardFailures?: number;
 }
 
 export interface FreeIngestResult {
@@ -292,6 +294,7 @@ export async function runFreeIngest(
     known,
     bodyless,
     screened: postings.length,
+    boardFailures: sweep.failures.length,
   };
 
   const boardError = appendSkippedDead(summariseFailures(sweep.failures), sweep.skippedDead?.length ?? 0);
