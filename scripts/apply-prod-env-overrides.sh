@@ -194,14 +194,19 @@ echo "==> Patched .env: AGENT_MODEL=$primary_model, WORKER_AGENT_MODEL=$worker_m
 #     nothing, taking the cycle to $4.28 of $5. $2 leaves the research tools their
 #     share. Raise it here, not on the box — a hand-edited .env is wiped by the
 #     next PROD_DOTENV render.
-grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD)=' .env > .env.patched || true
+#
+#   AUTO_APPLY_SHADOW=on (founder decision 2026-11-14: prepare every role that passes all gates as soon as it is
+#     caught). Shadow only: the pass opens and fills forms, routes each to a lane and reports. It never clicks
+#     Submit and writes no cover letter, so it costs $0. Set to off here to stop it.
+grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD|AUTO_APPLY_SHADOW)=' .env > .env.patched || true
 {
   printf '%s\n' 'APIFY_PLAN=free'
   printf '%s\n' 'JOBHUNT_MONTHLY_CAP_USD=2.00'
+  printf '%s\n' 'AUTO_APPLY_SHADOW=on'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00"
+echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00, AUTO_APPLY_SHADOW=on"
 # AI Studio key — forwarded from a GitHub secret so a PROD_DOTENV re-render can
 # never wipe it. Still required: image-gen/web-search/gap-scanner call
 # generativelanguage.googleapis.com directly with this key (not migrated to
