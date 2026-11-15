@@ -88,6 +88,9 @@ function unreachableNotice(err: unknown): string {
   );
 }
 
+/** A callback button, or a link button (the evening apply batch opens the answer page and the job posting). */
+export type JobsChatButton = { readonly text: string; readonly callback_data: string } | { readonly text: string; readonly url: string };
+
 /**
  * Send a job-lane message to the jobs chat (JOBHUNT_CHAT_ID), the way `sendToChat` sends to the founder.
  *
@@ -99,7 +102,7 @@ function unreachableNotice(err: unknown): string {
 export async function sendToJobsChat(
   text: string,
   parseMode: "HTML" | "Markdown" = "HTML",
-  keyboard: readonly (readonly { readonly text: string; readonly callback_data: string }[])[] = [],
+  keyboard: readonly (readonly JobsChatButton[])[] = [],
 ): Promise<void> {
   const target = jobsChatId();
   const markup = keyboard.length > 0 ? { reply_markup: { inline_keyboard: keyboard.map((row) => row.map((b) => ({ ...b }))) } } : {};
