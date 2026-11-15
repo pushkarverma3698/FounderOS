@@ -15,7 +15,8 @@ import { runMaintenanceChild } from "../infra/child-run.js";
 import { sendToChat } from "../infra/telegram-send.js";
 import { FREE_SWEEP_CRON, runFreeSweep } from "../tools/jobhunt/sweep-runner.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
-import { runShadowApply, shadowApplyEnabled } from "../tools/jobhunt/shadow-apply.js";
+import { realAutoSendHook } from "../gateway/auto-send-hook.js";
+import { realShadowDeps, runShadowApply, shadowApplyEnabled } from "../tools/jobhunt/shadow-apply.js";
 import { runEveningBatch, EVENING_CRON, EVENING_TIME_ZONE } from "./apply-evening-batch.js";
 import { runJobhuntFindingsCheck } from "../evolution/jobhunt-check.js";
 
@@ -49,7 +50,7 @@ export async function runFreeSweepAndShadowApply(): Promise<void> {
   await runFreeSweep();
   if (!shadowApplyEnabled()) return;
   try {
-    await runShadowApply();
+    await runShadowApply({ ...realShadowDeps(), autoSend: realAutoSendHook() });
   } catch (err) {
     log.error({ err: (err as Error).message }, "Shadow apply pass failed after the free sweep");
   }

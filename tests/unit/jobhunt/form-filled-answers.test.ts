@@ -65,7 +65,8 @@ function parseProfile(raw: Record<string, unknown>) {
 describe("summariseFormPlan filledAnswers", () => {
   it("returns the value, option or file name for every filled field, next to filledLabels", () => {
     const summary = summariseFormPlan(plan(), FIELDS);
-    expect(summary.filledAnswers).toEqual([
+    // `source` and `confidence` (answer-source.ts) ride along for auto-send; this test pins the page-facing fields.
+    expect(summary.filledAnswers.map(({ source: _s, confidence: _c, ...page }) => page)).toEqual([
       { label: "Full name *", value: "Fixture Person", fieldType: "text", editable: true },
       { label: CITY, value: "Amsterdam, Netherlands", fieldType: "text", editable: true },
       { label: "Resume/CV *", value: "cv-fixture.pdf", fieldType: "file", editable: false },

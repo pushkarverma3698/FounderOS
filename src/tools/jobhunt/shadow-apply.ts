@@ -6,6 +6,10 @@
  * (apply-lane.ts), stores it on the row and sends one summary. Nothing reaches an employer. Opening the form
  * is the liveness check. Off unless AUTO_APPLY_SHADOW=on.
  *
+ * Auto-send (ADR-018 amendment 2026-11-15): a row routed `auto` is handed to `deps.autoSend` only when
+ * AUTO_APPLY_SEND=on, the profile's /autoapply switch is on and `canAutoSend` passes. With no `autoSend` dep or
+ * either switch off, this pass is exactly the shadow pass: nothing reaches an employer.
+ *
  * One browser at a time, at most AUTO_APPLY_PREPARE_PER_RUN forms opened per run (default 5, newest first), so a
  * sweep tick cannot stall. Workday and other unsupported hosts are routed from the URL alone, with no browser.
  */
@@ -15,6 +19,8 @@ import { listLaneCandidates, claimLaneRow, recordLane } from "../../db/job-apply
 import type { JobApplication } from "../../db/schema.js";
 import { childLogger } from "../../infra/logger.js";
 import { isShadowCandidate, routeLane, type LaneCandidateRow, type LaneInput, type LaneVerdict } from "./apply-lane.js";
+import { autoSendEnvOn, canAutoSend, dailyCapFrom, type AutoSendHistory, type AutoSendOutcomeLite } from "./auto-send-rules.js";
+import type { FormPlanSummary } from "./form-filled.js";
 import { applyProfilePathFor, readApplyProfile, type ApplyProfile } from "./apply-profile.js";
 import { readCandidateDossier, type CandidateDossier } from "./candidate-dossier.js";
 import { classifyFormUrl } from "./form-platform.js";
@@ -48,6 +54,12 @@ export interface ShadowDeps {
   readonly record: (id: string, verdict: LaneVerdict, now: Date) => Promise<void>;
   readonly prepare: typeof prepareApplicationForm;
   readonly send: (html: string) => Promise<void>;
+  /** The auto-send half, wired in src/jobs (the send path lives in src/gateway). Absent: shadow only. */
+  readonly autoSend?: {
+    readonly runtimeOn: (profileId: string) => Promise<boolean>;
+    readonly history: (profileId: string, now: Date) => Promise<AutoSendHistory>;
+    readonly send: (row: ShadowRow, profileId: string, summary: FormPlanSummary) => Promise<AutoSendOutcomeLite>;
+  };
 }
 
 async function resumeIfPresent(row: ShadowRow, profile: ApplyProfile): Promise<string | undefined> {
@@ -99,6 +111,43 @@ async function routeOne(
   }
 }
 
+/** Hand an `auto` row to the send path when both switches and the rules allow it; returns the verdict to record and report. */
+async function maybeAutoSend(
+  deps: ShadowDeps,
+  env: NodeJS.ProcessEnv,
+  row: ShadowRow,
+  profileId: string,
+  verdict: LaneVerdict,
+  summary: FormPlanSummary,
+): Promise<LaneVerdict> {
+  const auto = deps.autoSend;
+  if (!auto || verdict.lane !== "auto" || !autoSendEnvOn(env)) return verdict;
+  try {
+    const now = deps.now();
+    const decision = canAutoSend(
+      row,
+      { ...verdict, summary },
+      { envOn: true, runtimeOn: await auto.runtimeOn(profileId), dailyCap: dailyCapFrom(env), now },
+      await auto.history(profileId, now),
+    );
+    if (!decision.ok) {
+      log.info({ rowId: row.id, reason: decision.reason }, "Auto-send not allowed for this row");
+      return { lane: "auto", reason: `${verdict.reason}; not auto-sent: ${decision.reason}` };
+    }
+    const out = await auto.send(row, profileId, summary);
+    if (out.kind === "no-letter") {
+      const needsYou: LaneVerdict = { lane: "needs_you", reason: out.detail };
+      await deps.record(row.id, needsYou, deps.now());
+      return needsYou;
+    }
+    return { lane: "auto", reason: out.kind === "sent" ? `auto-sent: ${out.detail}` : `${verdict.reason}; not auto-sent: ${out.detail}` };
+  } catch (err) {
+    // allow-failopen: a failed limit lookup or send crash leaves the row on the auto lane for the founder to send by hand.
+    log.error({ rowId: row.id, err: (err as Error).message }, "Auto-send step failed; nothing further sent for this row");
+    return { lane: "auto", reason: `${verdict.reason}; auto-send failed: ${(err as Error).message}` };
+  }
+}
+
 export interface ShadowOutcome {
   readonly routed: readonly ShadowRoutedRow[];
   readonly opened: number;
@@ -123,8 +172,10 @@ export async function runShadowApply(deps: ShadowDeps = realShadowDeps(), env: N
       if (needsBrowser && opened >= cap) continue;
       if (!(await deps.claim(row.id, deps.now()))) continue;
       if (needsBrowser) opened += 1;
-      const verdict = routeLane(await routeOne(deps, row, applyProfile, dossier));
-      await deps.record(row.id, verdict, deps.now());
+      const input = await routeOne(deps, row, applyProfile, dossier);
+      const routedVerdict = routeLane(input);
+      await deps.record(row.id, routedVerdict, deps.now());
+      const verdict = input.kind === "prepared" ? await maybeAutoSend(deps, env, row, profile.id, routedVerdict, input.summary) : routedVerdict;
       routed.push({ company: row.company, title: row.title, profileId: profile.id, lane: verdict.lane, reason: verdict.reason });
     }
   }
