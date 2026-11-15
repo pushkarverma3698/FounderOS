@@ -101,7 +101,7 @@ allows to shrink but never grow. Keeps `regex-routing`, `gateway-imports`,
 
 ### AI slop
 Plausible, confident, over-engineered AI-generated code that passes review and
-fails production. The failure mode the [case studies](turicks-case-studies/)
+fails production. The failure mode the case studies
 document escaping.
 
 ### turicks-brain / personal-rag

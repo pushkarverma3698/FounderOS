@@ -33,8 +33,8 @@ Reproduce any table: `scripts/sql/market-skill-frequency.sql`, `market-cuts.sql`
 The v2 study sequence described an architecture that no longer exists. The authoritative, up-to-date material now lives at the root and in the docs index:
 
 1. **[../../CLAUDE.md](../../CLAUDE.md)** — the contract-first kernel, one orchestration path, anti-slop CI invariants
-2. **[../../JARVIS-ARCHITECTURE.md](../../JARVIS-ARCHITECTURE.md)** — why v2 failed within 3 steps; the typed StateGraph that replaced it
-3. **[../../ZERO-BASE-AUDIT.md](../../ZERO-BASE-AUDIT.md)** — 4 live failure traces that justified the rebuild
+2. **../../JARVIS-ARCHITECTURE.md** — why v2 failed within 3 steps; the typed StateGraph that replaced it
+3. **../../ZERO-BASE-AUDIT.md** — 4 live failure traces that justified the rebuild
 4. **[../PROOF.md](../PROOF.md)** — the executable guarantees (each is a scenario, not a claim)
 5. **[../README.md](../README.md)** — the full documentation index
 
@@ -42,7 +42,7 @@ The v2 study sequence described an architecture that no longer exists. The autho
 
 ## The story: v1 → v2 → v3
 
-**[../turicks-case-studies/](../turicks-case-studies/)** — candid engineering case studies on where we fell for AI slop, over-engineered, and simplified for production. Written for the Turicks community and website.
+**../turicks-case-studies/** — candid engineering case studies on where we fell for AI slop, over-engineered, and simplified for production. Written for the Turicks community and website.
 
 ---
 

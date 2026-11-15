@@ -24,15 +24,15 @@ import { getProfile, resolveProfileToken } from "../tools/jobhunt/profile-config
 import { parseSenderProfiles } from "./jobhunt-sender-profile.js";
 
 /** initData older than this is refused: a copied payload stops working within the hour. */
-export const INIT_DATA_MAX_AGE_SEC = 60 * 60;
+const INIT_DATA_MAX_AGE_SEC = 60 * 60;
 /** A payload from the future by more than this is a clock problem or a forgery. */
 const CLOCK_SKEW_SEC = 60;
 
-export type InitDataResult =
+type InitDataResult =
   | { readonly ok: true; readonly userId: number; readonly authDate: number }
   | { readonly ok: false; readonly reason: "malformed" | "bad-hash" | "stale" };
 
-export type MiniAppAuth =
+type MiniAppAuth =
   | { readonly ok: true; readonly userId: number; readonly profileId: string }
   | { readonly ok: false; readonly reason: "malformed" | "bad-hash" | "stale" | "no-bot-token" | "unknown-user" };
 

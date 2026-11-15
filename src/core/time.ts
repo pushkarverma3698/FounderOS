@@ -21,8 +21,8 @@
 import { env } from "./config.js";
 
 /** Injectable "now" source. Default is the real wall clock. */
-export type Clock = () => Date;
-export const systemClock: Clock = () => new Date();
+type Clock = () => Date;
+const systemClock: Clock = () => new Date();
 
 /** Simple repeat rules the reminder sweep can re-arm from with zero LLM. */
 export type Recurrence =
@@ -78,7 +78,7 @@ function offsetMinutes(when: Date, timeZone: string): number {
 }
 
 /** The Y/M/D wall-clock date of an instant in a zone. */
-export function wallDate(when: Date, timeZone: string): { y: number; mo: number; d: number } {
+function wallDate(when: Date, timeZone: string): { y: number; mo: number; d: number } {
   // en-CA renders "2026-07-23" — stable, parseable.
   const [y, mo, d] = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -93,13 +93,13 @@ export function wallDate(when: Date, timeZone: string): { y: number; mo: number;
 }
 
 /** Weekday of an instant in a zone: 0=Sun..6=Sat. */
-export function zoneWeekday(when: Date, timeZone: string): number {
+function zoneWeekday(when: Date, timeZone: string): number {
   const wd = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(when);
   return WEEKDAY_NAMES.indexOf(wd as (typeof WEEKDAY_NAMES)[number]);
 }
 
 /** Build the UTC instant for a target wall-clock time (Y-M-D H:M) in a zone. */
-export function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, timeZone: string): Date {
+function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, timeZone: string): Date {
   // Treat the wall time as if it were UTC, then subtract the zone's offset at
   // that instant. Date.UTC folds day/month overflow (d + N) correctly.
   const guess = new Date(Date.UTC(y, mo - 1, d, h, mi, 0, 0));

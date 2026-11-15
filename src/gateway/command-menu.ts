@@ -35,7 +35,7 @@
 import { esc } from "../tools/jobhunt/telegram-format.js";
 
 /** One row of Telegram's `setMyCommands` payload. */
-export interface MenuCommand {
+interface MenuCommand {
   /** Lowercase, 1–32 chars of [a-z0-9_] — Telegram rejects the whole call otherwise. */
   readonly command: string;
   /** Plain text, ≤256 chars. No HTML: the native menu does not parse it. */

@@ -36,7 +36,7 @@ let _redis: Redis | null = null;
  * Returns null if REDIS_URL is not configured (SaaS-phase: Redis is optional).
  * Callers must handle null → fail-open (cacheGet returns null, incrQuota returns 0).
  */
-export function getRedis(): Redis | null {
+function getRedis(): Redis | null {
   if (_redis) return _redis;
   if (!env.REDIS_URL) {
     log.debug("REDIS_URL not set — Redis disabled");
@@ -61,14 +61,6 @@ export function getRedis(): Redis | null {
   _redis.on("close",   () => log.info("Redis connection closed"));
 
   return _redis;
-}
-
-/** Graceful shutdown — call in SIGTERM handler. */
-export async function closeRedis(): Promise<void> {
-  if (_redis) {
-    await _redis.quit();
-    _redis = null;
-  }
 }
 
 // ── Key Helpers ───────────────────────────────────────────────────────────────
@@ -123,18 +115,13 @@ export const KEYS = {
 
 // ── Key Utilities ─────────────────────────────────────────────────────────────
 
-/** SHA-256 hash of any JSON-serializable payload — used for llmCache keys. */
-export function hashPrompt(payload: unknown): string {
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-}
-
 /** Returns today's date in YYYY-MM-DD format (UTC). */
-export function todayUtc(): string {
+function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
 /** Returns Unix timestamp of tomorrow midnight UTC — used for quota key expiry. */
-export function tomorrowMidnightUtc(): number {
+function tomorrowMidnightUtc(): number {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() + 1);
   d.setUTCHours(0, 0, 0, 0);
@@ -219,18 +206,5 @@ export async function incrQuota(tenantId: string): Promise<number> {
   } catch (err) {
     log.warn({ tenantId, err: (err as Error).message }, "Redis quota check failed — fail-open");
     return 0; // allow send on Redis failure
-  }
-}
-
-/** Get current quota count without incrementing. Returns 0 on miss or error. */
-export async function getQuota(tenantId: string): Promise<number> {
-  const redis = getRedis();
-  if (!redis) return 0;
-  const key = KEYS.quota(tenantId, todayUtc());
-  try {
-    const raw = await redis.get(key);
-    return raw ? parseInt(raw, 10) : 0;
-  } catch {
-    return 0;
   }
 }

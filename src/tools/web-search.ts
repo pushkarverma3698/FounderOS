@@ -15,7 +15,7 @@ import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:search_web" });
 
-export interface WebSearchArgs {
+interface WebSearchArgs {
   query: string;
   /** Max results to return (default: 5) */
   limit?: number;

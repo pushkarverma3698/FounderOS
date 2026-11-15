@@ -53,7 +53,7 @@ import type { Finding } from "./types.js";
 const FIELD_SEPARATOR = "";
 
 /** Collapse whitespace and a trailing slash — the only cosmetic noise these fields carry. */
-export function normalizeIdentityPart(value: string): string {
+function normalizeIdentityPart(value: string): string {
   return value.trim().replace(/\s+/g, " ").replace(/\/+$/, "");
 }
 

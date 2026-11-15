@@ -49,7 +49,7 @@ export function recencyWeight(ageDays: number): number {
   return 1 - ((1 - RECENCY_FLOOR) * ageDays) / RECENCY_FULL_DECAY_DAYS;
 }
 
-export interface Scored<T> {
+interface Scored<T> {
   item: T;
   score: number;
 }

@@ -22,7 +22,7 @@ function clampInt(raw: unknown, dflt: number, max: number): number {
 }
 
 /** First non-empty line of the memory, whitespace collapsed, cut to TITLE_MAX. */
-export function memoryTitle(content: string): string {
+function memoryTitle(content: string): string {
   const first = content.split("\n").find((l) => l.trim() !== "") ?? "";
   return first.replace(/\s+/g, " ").trim().slice(0, TITLE_MAX);
 }

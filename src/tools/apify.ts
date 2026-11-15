@@ -41,7 +41,7 @@ const MARKDOWN_MAX = 12_000; // bound a single page so one scrape can't blow the
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export interface ScrapeResult {
+interface ScrapeResult {
   url: string;
   title: string;
   markdown: string;
@@ -49,7 +49,7 @@ export interface ScrapeResult {
   retrieved_at: string;
 }
 
-export type ScrapeOutcome =
+type ScrapeOutcome =
   | { ok: true; data: ScrapeResult[]; source: "apify" | "fetch" | "jina" }
   | { ok: false; error: string };
 

@@ -19,7 +19,7 @@
  */
 
 /** Telegram's hard per-message character limit is 4096; use 4000 to leave room for closing tags during chunking. */
-export const TELEGRAM_MAX = 4000;
+const TELEGRAM_MAX = 4000;
 
 /** Escape the characters that are significant in Telegram HTML. */
 function escapeHtml(text: string): string {
@@ -30,7 +30,7 @@ function escapeHtml(text: string): string {
 }
 
 /** Convert LaTeX display and inline math expressions to readable plain text. */
-export function cleanLatexMath(input: string): string {
+function cleanLatexMath(input: string): string {
   let text = input.replace(/\$\$([\s\S]*?)\$\$/g, (_m, math: string) => convertMathExpression(math));
   text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_m, math: string) => convertMathExpression(math));
   text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_m, math: string) => convertMathExpression(math));

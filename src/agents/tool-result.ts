@@ -19,7 +19,7 @@
  */
 
 /** The component that actually failed — never collapse distinct failures. */
-export type ToolFailureStage =
+type ToolFailureStage =
   | "db" // Postgres / pgvector — e.g. fix with `pnpm brain:sync`
   | "embedding" // Ollama / embedding service
   | "network" // transient connectivity / timeout
@@ -30,14 +30,6 @@ export type ToolFailureStage =
 
 /** Stable marker — must never change once shipped (the gateway greps for it). */
 export const TOOL_FAILURE_MARKER = "[[TOOL_FAILURE";
-
-/**
- * Prefix for a side-effecting tool's result when it deliberately did nothing (duplicate skipped, already fixed,
- * already queued): a success the footer does not count as an action. The kernel's copy is in
- * src/kernel/tool-failure.ts; tests/unit/kernel/no-action-receipt.test.ts keeps the two equal.
- */
-export const NO_ACTION_PREFIX = "ℹ️ No action taken:";
-
 const MARKER_RE = /\[\[TOOL_FAILURE stage=([a-z_]+)\]\]/;
 
 /**

@@ -7,7 +7,7 @@
  * fails immediately; when a phase deletes debt, run with --update-baseline to
  * lower the pin (raising it by hand is the one thing reviewers must reject).
  *
- * Rules (see JARVIS-ARCHITECTURE.md + the approved v3 plan):
+ * Rules (see AGENTS.md + the approved v3 plan):
  *   R1 gateway-imports   nothing outside src/gateway + src/jobs (the composition root) imports gateway
  *   R2 kernel-purity     retired 2026-10-10 with the kernel; src/kernel is now a tombstone (R6)
  *   R3 fail-open-catch   `.catch(() =>` swallows require an `allow-failopen:` tag

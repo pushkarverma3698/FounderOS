@@ -20,9 +20,9 @@ import { missingCredentialReason, noteWorkerModelChoice } from "./model-truth.js
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
-export type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter" | "omnirouter";
+type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter" | "omnirouter";
 
-export interface ParsedModelId {
+interface ParsedModelId {
   provider: ModelProvider;
   model: string;
   id: string;
@@ -176,7 +176,7 @@ export function isQuotaExhaustedError(err: unknown): boolean {
   );
 }
 
-export function resolveTemperature(): number {
+function resolveTemperature(): number {
   const raw = process.env["AGENT_TEMPERATURE"];
   if (raw === undefined) return 0;
   const n = Number.parseFloat(raw);
@@ -225,7 +225,7 @@ export function getConfiguredModelId(): string {
   return normalizeModelId(raw);
 }
 
-export type ModelRole = "planner" | "worker";
+type ModelRole = "planner" | "worker";
 
 /**
  * Fallback chain for a role. PLANNER_/WORKER_FALLBACK_MODELS override the shared

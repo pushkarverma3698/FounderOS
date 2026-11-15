@@ -68,7 +68,7 @@ export const CLI_TIMEOUT_CODE = 124;
 export const CLI_ENOENT_CODE = 127;
 const CLI_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
-export function makeCliRunner(): CliRunner {
+function makeCliRunner(): CliRunner {
   return (bin, args, opts = {}) =>
     new Promise((resolve) => {
       const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -149,7 +149,7 @@ export function normalizeYoutubeUrl(input: string): string | null {
 
 // ── youtube_transcript ────────────────────────────────────────────────────────
 
-export interface YoutubeTranscript {
+interface YoutubeTranscript {
   url: string;
   title: string;
   uploader?: string;
@@ -318,7 +318,7 @@ export async function readPageViaJina(
 
 // ── V2EX Topics (keyless public API) ──────────────────────────────────────────
 
-export interface V2exTopic {
+interface V2exTopic {
   id: number;
   title: string;
   url: string;

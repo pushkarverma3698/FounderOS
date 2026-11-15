@@ -179,7 +179,7 @@ export async function gwsCreateCalendarEvent(
   };
 }
 
-export interface ListCalendarEventsInput {
+interface ListCalendarEventsInput {
   account_key?: string;
   /** RFC 3339 window. */
   time_min: string;

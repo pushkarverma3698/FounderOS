@@ -27,7 +27,7 @@ import { childLogger } from "./logger.js";
 
 const log = childLogger({ module: "screen-log" });
 
-export interface ScreenEntry {
+interface ScreenEntry {
   /** ISO time the message was sent (or last edited). */
   readonly ts: string;
   /** Telegram chat id, as a string. */
@@ -40,7 +40,7 @@ export interface ScreenEntry {
 }
 
 /** One line as written: a message, or a tombstone (`del`) for a deleted message id. */
-export interface ScreenWrite {
+interface ScreenWrite {
   readonly chat: string;
   readonly src: string;
   readonly text?: string;
@@ -51,9 +51,9 @@ export interface ScreenWrite {
 /** Rotate to `<file>.1` past this size. deploy/lib/tg-quiet.sh uses the same number. */
 export const SCREEN_LOG_MAX_BYTES = 1_048_576;
 /** Text kept per line; the planner shows far less (kernel/screen.ts), this only bounds the file. */
-export const SCREEN_TEXT_MAX_CHARS = 4_000;
-export const SCREEN_WINDOW_MS = 12 * 3_600_000;
-export const SCREEN_MAX_ENTRIES = 12;
+const SCREEN_TEXT_MAX_CHARS = 4_000;
+const SCREEN_WINDOW_MS = 12 * 3_600_000;
+const SCREEN_MAX_ENTRIES = 12;
 /** Only the end of the file is read: 12 hours of sends fit many times over. */
 const TAIL_BYTES = 256 * 1024;
 
@@ -61,7 +61,7 @@ const TAIL_BYTES = 256 * 1024;
  * ~/.claude/screen.jsonl, or FOUNDEROS_SCREEN_LOG. Null under vitest unless set: a test that drives a
  * real grammy Api must not append to the developer's (or CI's) home directory.
  */
-export function screenLogFile(): string | null {
+function screenLogFile(): string | null {
   const override = process.env["FOUNDEROS_SCREEN_LOG"];
   if (override) return override;
   if (process.env["VITEST"]) return null;

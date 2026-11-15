@@ -20,9 +20,9 @@ import { childLogger } from "./logger.js";
 const log = childLogger({ module: "child-run" });
 
 /** How much of a failed child's stderr to keep. Enough for a stack's first frames. */
-export const CHILD_STDERR_TAIL_CHARS = 2_000;
+const CHILD_STDERR_TAIL_CHARS = 2_000;
 
-export interface ChildRunResult {
+interface ChildRunResult {
   readonly code: number | null;
   readonly stderr: string;
 }

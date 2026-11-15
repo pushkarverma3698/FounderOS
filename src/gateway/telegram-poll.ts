@@ -21,16 +21,16 @@
  */
 
 /** Telegram's code for "another getUpdates is already running". */
-export const CONFLICT_CODE = 409;
+const CONFLICT_CODE = 409;
 
 /** Retries before we give up and exit loudly. */
 export const CONFLICT_MAX_ATTEMPTS = 6;
 
 /** First backoff step; doubles per attempt. */
-export const CONFLICT_BASE_DELAY_MS = 2_000;
+const CONFLICT_BASE_DELAY_MS = 2_000;
 
 /** Ceiling per wait — a long conflict must not park the bot for hours. */
-export const CONFLICT_MAX_DELAY_MS = 60_000;
+const CONFLICT_MAX_DELAY_MS = 60_000;
 
 /**
  * Is this the "someone else is polling" error, and nothing else?

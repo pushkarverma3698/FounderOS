@@ -20,7 +20,7 @@ import type { RagHit, RagTable } from "./rag-search.js";
 import { reciprocalRankFusion } from "./rrf.js";
 
 /** Which retrieval signals actually produced the returned hits. */
-export type HybridMode = "hybrid" | "vector" | "keyword-fallback";
+type HybridMode = "hybrid" | "vector" | "keyword-fallback";
 
 export interface HybridOk {
   hits: RagHit[];
@@ -84,7 +84,7 @@ export function errText(reason: unknown): string {
  * query that matches one doc keeps its full top-k. Agent-written rows share the source "ide_mcp" but are separate
  * memories, so each counts as its own doc.
  */
-export function spreadAcrossSources(hits: RagHit[]): RagHit[] {
+function spreadAcrossSources(hits: RagHit[]): RagHit[] {
   const seen = new Set<string>();
   const first: RagHit[] = [];
   const repeats: RagHit[] = [];

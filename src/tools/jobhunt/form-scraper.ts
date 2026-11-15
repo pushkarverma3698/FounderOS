@@ -11,6 +11,7 @@ import type { Page } from "playwright";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
 import { classifyFormUrl, resolveFormTargetUrl, type FormPlatform } from "./form-platform.js";
 import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions, stampSelector } from "./form-combobox.js";
+import { revealSmartRecruitersForm } from "./form-smartrecruiters.js";
 
 
 export { classifyFormUrl, resolveFormTargetUrl, type FormPlatform, type PlatformCheck } from "./form-platform.js";
@@ -62,6 +63,8 @@ export async function revealPlatformForm(page: Page, platform: FormPlatform): Pr
       .catch(() => undefined);
     return;
   }
+
+  if (platform === "smartrecruiters") return revealSmartRecruitersForm(page);
 
   if (platform === "greenhouse" || platform === "lever" || platform === "workable") {
     await page

@@ -13,7 +13,7 @@ import { inArray } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobDigestState, type PendingAlerts } from "./job-digest-schema.js";
 
-export interface StoredDigestState {
+interface StoredDigestState {
   readonly pending: PendingAlerts | null;
   readonly lastDigestAt: Date | null;
 }

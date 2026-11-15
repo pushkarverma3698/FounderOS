@@ -253,15 +253,6 @@ export const env = parseEnv();
  */
 export const TENANT = env.FOUNDER_TENANT;
 
-/** Daily LLM spend cap (USD) — enforced at gateway before new runs. */
-export const DAILY_BUDGET_USD = env.BUDGET_DAILY_USD;
-
-/** Per-run LLM spend cap (USD). */
-export const RUN_BUDGET_USD = env.RUN_BUDGET_USD;
-
-/** Per-run token cap (input + output). */
-export const RUN_BUDGET_TOKENS = env.RUN_BUDGET_TOKENS;
-
 /** Parse a positive-integer env var, falling back to a default for unset/garbage. */
 export function intEnv(key: string, fallback: number): number {
   const n = Number(process.env[key]);
@@ -276,30 +267,6 @@ function boolEnv(key: string, fallback = false): boolean {
 }
 
 /**
- * Promote the engineering department to the CTO sub-supervisor (coder/qa/devops).
- * Default OFF — production stays flat until the 3-level nested-HITL path is
- * live-verified over real Telegram (hierarchy plan P2 gate, rule #19.6). Flipping
- * this to "1" is the single, reversible lever that swaps the flat engineering
- * ReAct agent for the hierarchical CTO subgraph in office.ts.
- *
- * 2026-06-29: default RESTORED to false. The default had drifted to `true`, so
- * production was silently running the UNVERIFIED CTO subgraph — which ping-pongs
- * `engineering ↔ coder` (transfer_to_coder) into GraphRecursionError on a trivial
- * read like "list my repos" (T04 live loop). The flat ReAct engineering agent is
- * the production-stable path; the subgraph stays opt-in until its nested-HITL loop
- * is live-verified (rule #19.6).
- */
-export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
-
-/**
- * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
- * Default OFF — live MTProto nested-HITL verification required before production.
- * 2026-06-29: default RESTORED to false (same drift-to-true bug as the engineering
- * subgraph above; flat marketing+sales is the production-stable design).
- */
-export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
-
-/**
  * Long-poll Telegram in this process. Off in development by default so local
  * `pnpm dev` can serve Jarvis without fighting the prod bot for getUpdates.
  * Set TELEGRAM_POLLING_ENABLED=true explicitly to run the gateway locally.
@@ -308,86 +275,6 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
   "TELEGRAM_POLLING_ENABLED",
   env.NODE_ENV === "production",
 );
-
-/**
- * Connect agents to external MCP servers (ADR-041). Default OFF — the single,
- * reversible lever that merges manifest-declared external tools into the
- * department arrays. Reads pass through; writes route through hitlGate.
- */
-export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
-
-/** Filesystem path to the external MCP bridge manifest. */
-export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
-
-/**
- * Whether `synthesize_skill` may author executable code into `src/tools/custom`.
- * OFF by default. Even when ON the tool is HITL-gated, so enabling the flag
- * grants the capability, never an unattended write.
- */
-export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
-
-/**
- * Whether a self-audit run persists its findings to evolution_runs /
- * evolution_findings. OFF by default. Consumers read `process.env` at call time
- * rather than this frozen constant (see src/evolution/run-audit.ts) so the flag
- * can be flipped per-run in tests; this export exists so the boot report and any
- * future config surface can show the value the process started with.
- */
-export const EVOLUTION_PERSIST_FINDINGS = env.EVOLUTION_PERSIST_FINDINGS === "true";
-
-/**
- * Whether the TUI dispatch demo stub (POST /api/v1/dispatch) answers at all.
- * OFF by default. It never invokes the kernel; enabling it only makes the TUI
- * dashboard's prompt box return 200 instead of 404. `src/infra/health.ts` reads
- * `process.env` at request time rather than this frozen constant.
- */
-export const TUI_DISPATCH_ENABLED = env.TUI_DISPATCH_ENABLED === "true";
-
-/**
- * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it
- * adds an Ollama (qwen2.5:7b) call per query and must be live-verified on the VPS
- * before production. Fail-open by design: when disabled or when the model is
- * unavailable, retrieval uses the deterministic fused order.
- */
-export const RAG_RERANK_ENABLED = boolEnv("RAG_RERANK", false);
-
-/**
- * Max supervisor/sub-agent hops before LangGraph aborts a run. Sized for the worst legitimate step:
- * 3 attempts (MAX_ATTEMPTS_PER_STEP) x (dispatch + 2 x 20 read-tool calls + final turn + collect) = 129,
- * plus plan/synthesize. step-budget.test.ts fails if the caps outgrow it.
- */
-export const OFFICE_RECURSION_LIMIT_DEFAULT = 150;
-export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", OFFICE_RECURSION_LIMIT_DEFAULT);
-
-/**
- * Hard ceiling on a single office turn (ms). A hung model/tool call otherwise
- * leaves the founder with the typing indicator forever and NO reply — the worst
- * silent-failure class. On expiry the gateway aborts loud, clears the thread, and
- * tells the founder. Generous default (3 min) so legitimate multi-step / claude_code
- * runs finish; override with OFFICE_TURN_TIMEOUT_MS. Set 0 to disable (not advised).
- */
-export const OFFICE_TURN_TIMEOUT_MS = intEnv("OFFICE_TURN_TIMEOUT_MS", 180_000);
-
-/**
- * Daily outbound send quotas (G4 gap — now enforced via action_log count).
- * Postgres-backed: survives restarts, accurate under concurrent sends.
- * Override via env: DAILY_EMAIL_LIMIT / DAILY_LINKEDIN_LIMIT.
- * Set to 0 to disable the ceiling (not recommended before volume outbound).
- */
-export const DAILY_EMAIL_LIMIT = intEnv("DAILY_EMAIL_LIMIT", 20);
-export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
-
-/**
- * How many human turns of conversation history to persist per thread.
- * Kept deliberately small: the prebuilt supervisor forwards the FULL kept window
- * to every sub-agent on handoff, so any stale leading message pollutes routing.
- * Prod 2026-06-15: at 12, the thread's first message ("Do it yourself don't use
- * claude") never aged out and leaked into every transfer_to_* for hours, driving
- * generic/wrong sub-agent searches. 4 keeps real follow-up context while evicting
- * unrelated older turns fast. Durable context lives in memory tools, not history.
- */
-export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);
-
 /**
  * Root directory for all generated deliverables and artifacts.
  * Configured inside ~/Projects/founderos/artifacts so security path guards admit it.

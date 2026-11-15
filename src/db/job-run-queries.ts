@@ -11,7 +11,7 @@
  * exactly on the days something is wrong.
  */
 
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobIngestRuns, type JobIngestRun, type NewJobIngestRun } from "./schema.js";
 
@@ -33,7 +33,7 @@ export async function recordIngestRun(row: NewJobIngestRun): Promise<JobIngestRu
   return saved ?? null;
 }
 
-export interface SpendWindow {
+interface SpendWindow {
   /** Paid feed calls in the window. */
   readonly runs: number;
   readonly returned: number;
@@ -88,17 +88,4 @@ export async function summariseSpend(
     failed: Number(row?.failed ?? 0),
     fresh: Number(row?.fresh ?? 0),
   };
-}
-
-/** The most recent queries, newest first — the audit surface for a surprising bill. */
-export async function listRecentIngestRuns(
-  opts: { limit?: number; tenantId?: string } = {},
-): Promise<JobIngestRun[]> {
-  const db = getDb();
-  return db
-    .select()
-    .from(jobIngestRuns)
-    .where(eq(jobIngestRuns.tenant_id, opts.tenantId ?? DEFAULT_TENANT))
-    .orderBy(desc(jobIngestRuns.created_at))
-    .limit(opts.limit ?? 50);
 }

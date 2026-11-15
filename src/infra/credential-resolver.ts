@@ -39,20 +39,12 @@ export interface ResolvedGoogleCredentials {
   impersonate_subject?: string;
 }
 
-export interface ResolvedLinkedInCredentials {
+interface ResolvedLinkedInCredentials {
   access_token?: string;
   author_urn?: string;
 }
 
-export interface ResolvedGitHubCredentials {
-  token?: string;
-}
 
-export interface ResolvedMetaCredentials {
-  access_token?: string;
-  page_id?: string;
-  app_id?: string;
-}
 
 /** Build default credential refs when no DB row exists (convention-over-config). */
 export function defaultCredentialRefs(
@@ -111,21 +103,5 @@ export function resolveLinkedInCredentials(refs: CredentialRefs): ResolvedLinked
   return {
     access_token: readEnvValue(accessKey),
     author_urn: readEnvValue(urnKey),
-  };
-}
-
-export function resolveGitHubCredentials(refs: CredentialRefs): ResolvedGitHubCredentials {
-  const key = refs.github_token_env ?? "GITHUB_TOKEN";
-  return { token: readEnvValue(key) };
-}
-
-export function resolveMetaCredentials(refs: CredentialRefs): ResolvedMetaCredentials {
-  const tokenKey = refs.access_token_env;
-  const pageKey = refs.meta_page_id_env;
-  const appKey = refs.meta_app_id_env;
-  return {
-    access_token: tokenKey ? readEnvValue(tokenKey) : undefined,
-    page_id: pageKey ? readEnvValue(pageKey) : undefined,
-    app_id: appKey ? readEnvValue(appKey) : undefined,
   };
 }

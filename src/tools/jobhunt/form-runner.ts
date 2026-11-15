@@ -18,6 +18,7 @@ import {
   type RowApplicationFacts,
 } from "./form-brain.js";
 import { emptyStarredFields } from "./form-required-guard.js";
+import { noFieldsReason } from "./form-smartrecruiters.js";
 import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormUrl,
@@ -27,6 +28,7 @@ import {
   type FormPlatform,
 } from "./form-scraper.js";
 
+import { fieldHoldsValue } from "./form-phone.js";
 import { awaitSubmitOutcome, holdForEmailCode, SUBMIT_CONFIRM_TIMEOUT_MS } from "./held-submit.js";
 
 const log = childLogger({ module: "jobhunt:form-runner" });
@@ -55,15 +57,13 @@ async function typeIntoField(page: Page, selector: string, value: string): Promi
 
   await locator.fill(value, { timeout: 5_000 });
   await page.waitForTimeout(CONTROLLED_INPUT_SETTLE_MS);
-  // allow-failopen: unreadable value returns "" and triggers sequential keystroke fallback.
-  if ((await locator.inputValue().catch(() => "")) === value) return true;
+  if (await fieldHoldsValue(locator, value)) return true;
 
   // allow-failopen: clearing before keystroke retry is best-effort.
   await locator.fill("", { timeout: 5_000 }).catch(() => undefined);
   await locator.pressSequentially(value, { delay: 20, timeout: 15_000 });
   await page.waitForTimeout(CONTROLLED_INPUT_SETTLE_MS);
-  // allow-failopen: unreadable value reports false so the caller records it as unverified.
-  return (await locator.inputValue().catch(() => "")) === value;
+  return fieldHoldsValue(locator, value);
 }
 
 /** Tick a checkbox/radio. Styled forms draw a 0px input behind its <label for>, which check() refuses. */
@@ -258,7 +258,7 @@ export async function prepareApplicationForm(
     if (fields.length === 0) {
       return {
         ok: false,
-        reason: "no fillable form fields were found on this page (the form may be behind a login or custom widget)",
+        reason: await noFieldsReason(page, check.platform),
         platform: check.platform,
       };
     }
@@ -324,7 +324,7 @@ export async function submitApplicationForm(
 
     const fields = await scrapePageFields(page, check.platform);
     if (fields.length === 0) {
-      return { ok: false, reason: "no fillable form fields found on page", platform: check.platform };
+      return { ok: false, reason: await noFieldsReason(page, check.platform), platform: check.platform };
     }
 
     const plan = buildFormFillPlan(fields, profile, row, dossier);

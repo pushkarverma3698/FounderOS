@@ -6,7 +6,7 @@
 > from validated results — with your approval before anything is sent or changed.
 
 This is the plain-English companion to [`CLAUDE.md`](../CLAUDE.md) (the canonical
-rules) and the [diagrams](diagrams/). If you read one architecture doc, read this.
+rules) and the diagrams. If you read one architecture doc, read this.
 
 ---
 
@@ -18,7 +18,7 @@ That's the entire control flow, assembled as a single LangGraph `StateGraph` in
 [`src/kernel/graph.ts`](../src/kernel/graph.ts). There is exactly one path. The
 things a naive agent stack accumulates — a pre-router, a post-hoc guard,
 fast-path bypasses — are all *deliberately absent*, and CI fails the build if any
-of them come back. See [diagram 02](diagrams/02-orchestration-path.md).
+of them come back. See diagram 02.
 
 ---
 
@@ -61,7 +61,7 @@ Take **"Research what Linear ships, then draft a cold email to their founder."**
    **validated results only**. It can say "✅ Email sent" only because a successful
    receipt exists. The reply ships with a receipts block.
 
-Full data-type view: [diagram 04](diagrams/04-contract-dataflow.md).
+Full data-type view: diagram 04.
 
 ---
 
@@ -90,7 +90,7 @@ the business workers).
 An action step whose `expected.kind` is `action_receipt` is rejected unless it
 carries a successful, code-recorded `ToolReceipt`. The synthesizer only ever sees
 validated results, so it *cannot* narrate an action that didn't happen. See
-[diagram 07](diagrams/07-receipt-and-zero-hallucination.md).
+diagram 07.
 
 ### 5. The kernel is a library
 Models, tools, and the checkpointer are injected;
@@ -113,7 +113,7 @@ FounderOS takes real actions, so ordering is a correctness property, not a nicet
 4. **`action_log` row only on real success** — a 200 with an error body is not
    success; we check for the provider's id.
 
-See [diagram 03](diagrams/03-hitl-flow.md) and the [HITL matrix](guides/HITL-MATRIX.md).
+See diagram 03 and the [HITL matrix](guides/HITL-MATRIX.md).
 
 ---
 
@@ -134,8 +134,8 @@ Six CI rules in [`scripts/verify-architecture.ts`](../scripts/verify-architectur
 make good architecture the only shape the build allows: **tombstones** (killed
 modules can't return), **regex-routing = 0**, **gateway-imports = 0**,
 **kernel-purity = 0**, a **400-line file budget**, and the **fail-open tax**. The
-debt baseline may only shrink. See [diagram 08](diagrams/08-anti-slop-ci-gates.md)
-and the [case studies](turicks-case-studies/) for why every one of these exists.
+debt baseline may only shrink. See diagram 08
+and the case studies for why every one of these exists.
 
 ---
 

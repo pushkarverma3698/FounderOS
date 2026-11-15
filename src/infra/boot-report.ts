@@ -12,9 +12,7 @@
  * tested without touching process state. `logBootReport` does the I/O.
  */
 
-import { logger } from "./logger.js";
 
-const log = logger.child({ module: "boot" });
 
 /** The subset of env/config keys the report inspects. All optional strings. */
 export interface BootCapabilityInput {
@@ -42,7 +40,7 @@ export interface BootCapabilityInput {
   AWS_SECRET_ACCESS_KEY?: string | undefined;
 }
 
-export interface CapabilityStatus {
+interface CapabilityStatus {
   /** Human-readable capability name. */
   name: string;
   /** Whether the capability is configured (key/url present). */
@@ -150,15 +148,4 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
           : "GOOGLE_GENERATIVE_AI_API_KEY set but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY missing — generate_image will succeed then fail at S3 upload. Set them (or STORAGE_ENDPOINT_URL for R2/MinIO) in PROD_DOTENV.",
     },
   ];
-}
-
-/** Log the boot report to journald. Warns loudly if a NON-optional cap is missing. */
-export function logBootReport(env: BootCapabilityInput): void {
-  const report = buildBootReport(env);
-  for (const c of report) {
-    const tag = c.live ? "LIVE " : "MISSING";
-    const line = `[boot] ${c.name.padEnd(34)} ${tag}  ${c.detail}`;
-    if (c.live) log.info(line);
-    else log.warn(line);
-  }
 }

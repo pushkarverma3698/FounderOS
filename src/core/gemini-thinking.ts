@@ -29,17 +29,17 @@
 import type { GoogleGenerativeAIChatInput } from "@langchain/google-genai";
 
 /** `thinkingConfig` exactly as the installed @langchain/google-genai types it. */
-export type GeminiThinkingConfig = NonNullable<GoogleGenerativeAIChatInput["thinkingConfig"]>;
+type GeminiThinkingConfig = NonNullable<GoogleGenerativeAIChatInput["thinkingConfig"]>;
 
 /**
  * The levels this repo accepts. MINIMAL is a real API level, but the installed
  * library's type (`"THINKING_LEVEL_UNSPECIFIED" | "LOW" | "MEDIUM" | "HIGH"`)
  * does not include it, so it is refused rather than forced through a cast.
  */
-export const GEMINI_THINKING_LEVELS = ["LOW", "MEDIUM", "HIGH", "DEFAULT"] as const;
-export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number];
+const GEMINI_THINKING_LEVELS = ["LOW", "MEDIUM", "HIGH", "DEFAULT"] as const;
+type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number];
 
-export const GEMINI_THINKING_ENV = "GEMINI_THINKING_LEVEL";
+const GEMINI_THINKING_ENV = "GEMINI_THINKING_LEVEL";
 
 /** Unset or blank → LOW. Case-insensitive. Anything else throws, naming the choices. */
 export function parseGeminiThinkingLevel(raw: string | undefined): GeminiThinkingLevel {
