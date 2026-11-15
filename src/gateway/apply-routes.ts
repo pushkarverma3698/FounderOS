@@ -36,6 +36,7 @@ import { runCodeEntry, runSubmit, type settleSubmittedByHand } from "./apply-sub
 import { handleHandoff, type HandoffDeps } from "./apply-handoff-routes.js";
 import { handleHomeRoutes, type JobsApiDeps } from "./apply-prepare-api.js";
 import { handleProfileEditor, isProfileEditorPath } from "./profile-api.js";
+import { handleQuestions, isQuestionsPath } from "./questions-api.js";
 
 const log = logger.child({ module: "apply-routes" });
 
@@ -202,6 +203,10 @@ export async function handleApplyRequest(
     }
     if (isProfileEditorPath(req.url)) {
       await handleProfileEditor(req, res, deps);
+      return;
+    }
+    if (isQuestionsPath(req.url)) {
+      await handleQuestions(req, res, deps);
       return;
     }
     const parts = pathParts(req.url);
