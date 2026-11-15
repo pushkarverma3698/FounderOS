@@ -12,7 +12,7 @@ import { formAnswerDraftsEnabled } from "../core/config.js";
 import { childLogger } from "../infra/logger.js";
 import type { ApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { normalizeQuestionKey, type CandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
-import { draftFormAnswers, type DraftModel, type QuestionDraft } from "../tools/jobhunt/form-answer-drafts.js";
+import { draftFormAnswers, isDraftable, type DraftModel, type QuestionDraft } from "../tools/jobhunt/form-answer-drafts.js";
 import type { UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { safeHtml } from "./safe-html.js";
@@ -24,6 +24,7 @@ export type DraftMap = Readonly<Record<string, QuestionDraft>>;
 export type DraftResolver = (questions: readonly UnansweredQuestion[], profile: ApplyProfile, dossier?: CandidateDossier) => Promise<DraftMap>;
 
 const NEVER_IN_SOURCE = /salary|work_authorization|auto_consent|self_id|visa|sponsor/i;
+const PRIVATE_LINE = /@[\w-]+\.\w|(?:\d[\s().-]?){9,}|\b(?:phone|mobile|e-?mail|upi|address|date of birth|dob|passport)\b/i;
 
 /** The only text the model sees, and the text every sourceQuote is checked against. Contact details are left out. */
 export function draftSourceText(profile: ApplyProfile, dossier?: CandidateDossier): string {
@@ -33,7 +34,8 @@ export function draftSourceText(profile: ApplyProfile, dossier?: CandidateDossie
   }
   for (const [q, a] of Object.entries(profile.question_bank ?? {})) lines.push(`${q}: ${a}`);
   if (dossier?.rawText) lines.push(dossier.rawText);
-  return lines.join("\n");
+  // Line by line, so a salary, visa or contact line in the question bank or the dossier never reaches the model either.
+  return lines.join("\n").split("\n").filter((l) => !PRIVATE_LINE.test(l) && isDraftable({ label: l, fieldType: "text" })).join("\n");
 }
 
 const worker: DraftModel = { invoke: (messages) => invokeWorkerWithFallbacks(messages, { attribution: { agent: "jobhunt", stage: "worker" } }) };

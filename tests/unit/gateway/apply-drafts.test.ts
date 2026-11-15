@@ -97,6 +97,14 @@ describe("suggested answers", () => {
     expect(text).not.toMatch(/example\.com|salary|work authorization/i);
   });
 
+  it("strips salary, visa and contact lines from the dossier and question bank, keeps work history", () => {
+    const dossier = { rawText: "Phone: +31 6 1234 5678\nEmail: t@example.com\nSalary Expectation: 52284\nVisa: needs sponsorship\nAcme 2019 - 2023: 6 years of AWS" } as never;
+    const text = draftSourceText({ first_name: "Test", last_name: "Person", email: "t@example.com", phone: "1", question_bank: { "expected salary": "52284", "preferred name": "Test" } } as never, dossier);
+    expect(text).toContain("Acme 2019 - 2023: 6 years of AWS");
+    expect(text).toContain("preferred name: Test");
+    expect(text).not.toMatch(/1234|example\.com|52284|sponsor/i);
+  });
+
   it("shows the draft, saves nothing until the tap, then records it through the normal path", async () => {
     setAutoApplyRunnerForTests({
       prepare: async () => prep(),
