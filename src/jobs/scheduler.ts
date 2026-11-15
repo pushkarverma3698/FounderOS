@@ -15,6 +15,7 @@ import { runMaintenanceChild } from "../infra/child-run.js";
 import { sendToChat } from "../infra/telegram-send.js";
 import { FREE_SWEEP_CRON, runFreeSweep } from "../tools/jobhunt/sweep-runner.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
+import { runShadowApply, shadowApplyEnabled } from "../tools/jobhunt/shadow-apply.js";
 import { runJobhuntFindingsCheck } from "../evolution/jobhunt-check.js";
 
 const log = childLogger({ module: "jobs-scheduler" });
@@ -39,6 +40,20 @@ async function runFollowups(): Promise<void> {
   if (outcome.sent > 0 || outcome.failed > 0) log.info(outcome, "Follow-up nudge sweep complete");
 }
 
+/**
+ * The free sweep, then (AUTO_APPLY_SHADOW=on) the shadow apply pass over what it caught. The pass has its own
+ * guard: a failure there is logged and never turns the sweep tick into a rejection.
+ */
+export async function runFreeSweepAndShadowApply(): Promise<void> {
+  await runFreeSweep();
+  if (!shadowApplyEnabled()) return;
+  try {
+    await runShadowApply();
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "Shadow apply pass failed after the free sweep");
+  }
+}
+
 export interface JobsCron {
   readonly name: string;
   readonly expr: string;
@@ -48,7 +63,7 @@ export interface JobsCron {
 }
 
 export const JOBS_CRONS: readonly JobsCron[] = [
-  { name: "free-sweep", expr: FREE_SWEEP_CRON, run: runFreeSweep },
+  { name: "free-sweep", expr: FREE_SWEEP_CRON, run: runFreeSweepAndShadowApply },
   { name: "follow-up", expr: "0 9 * * *", run: runFollowups },
   { name: "pipeline-digest", expr: "0 9 * * 1", run: runPipelineDigest },
   { name: "funding-grower", expr: "0 2 * * *", run: runFundingGrowerSweep },
