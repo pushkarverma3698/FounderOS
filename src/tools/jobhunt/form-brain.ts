@@ -17,6 +17,7 @@ import {
   storedAnswerConflict,
   type CandidateDossier,
 } from "./candidate-dossier.js";
+import { experienceBucketAction, noticePeriodAction } from "./form-answer-synonyms.js";
 import { chooseSelfIdentification } from "./self-identification.js";
 
 export { summariseFormPlan, type FormPlanSummary, type UnansweredQuestion } from "./form-filled.js";
@@ -52,8 +53,8 @@ export interface RowApplicationFacts {
 }
 
 const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
-  firstName: ["first name", "voornaam", "given name"],
-  lastName: ["last name", "surname", "family name", "achternaam", "familienaam"],
+  firstName: ["first name", "firstname", "voornaam", "given name", "forename"],
+  lastName: ["last name", "lastname", "surname", "family name", "achternaam", "familienaam"],
   fullName: ["full name", "your name", "candidate name", "volledige naam", "uw naam", "je naam", "name"],
   email: ["email", "e mail", "mailadres"],
   phone: ["phone", "mobile", "telephone", "telefoon", "mobiel"],
@@ -332,11 +333,21 @@ export function buildFormFillPlan(
     const isChoiceType = field.type === "checkbox-group" || field.type === "radio-group" || field.type === "select";
     if (!isChoiceType) {
       const explicit = explicitAnswerFor(field.label, profile, dossier);
-      const direct = explicit ? textActionFor(field, explicit.value, explicit.source) : matchStandardTextField(field, profile, row);
+      const direct = explicit
+        ? textActionFor(field, explicit.value, explicit.source)
+        : noticePeriodAction(field, profile) ?? matchStandardTextField(field, profile, row);
       if (direct) {
         actions.push(fitToField(field, direct));
         continue;
       }
+    }
+
+    const bucket = isChoiceType && !explicitAnswerFor(field.label, profile, dossier)
+      ? noticePeriodAction(field, profile) ?? experienceBucketAction(field, profile, labelMatches(field.label, "yearsExperience"))
+      : null;
+    if (bucket) {
+      actions.push(bucket);
+      continue;
     }
 
     const learned = lookupLearnedAnswer(field.label, isChoiceType ? field.options : undefined, profile, dossier);
