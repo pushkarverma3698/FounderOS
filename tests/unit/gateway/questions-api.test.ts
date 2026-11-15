@@ -132,6 +132,8 @@ describe("answer bank", () => {
     expect((await post({ question: "Favourite editor", answer: " ", baseVersion: s.version })).status).toBe(400);
     expect((await post({ question: "Why do you want to work at [company]?", answer: "Because", baseVersion: s.version })).status).toBe(400);
     expect((await post({ question: "Favourite editor", answer: "x" })).status).toBe(400);
+    expect((await post({ question: "Will you now or in the future require visa sponsorship?", answer: "No", baseVersion: s.version })).status).toBe(400);
+    expect((await post({ question: "What is your gender?", answer: "Prefer not to say", baseVersion: s.version })).status).toBe(400);
   });
 
   it("serves a shell page with a nonce CSP, no unsafe-inline script and no data", async () => {

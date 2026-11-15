@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { answerVersion, readAnswerState, upsertLearnedAnswer, type SaveResult } from "../tools/jobhunt/answer-store.js";
-import { COMPANY_PLACEHOLDER, summaryLine } from "../tools/jobhunt/open-questions.js";
+import { COMPANY_PLACEHOLDER, isSensitiveQuestion, summaryLine } from "../tools/jobhunt/open-questions.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
 import { logger } from "../infra/logger.js";
 import { readBody, TOO_LARGE } from "./apply-api.js";
@@ -69,6 +69,7 @@ async function post(req: IncomingMessage, res: ServerResponse, profileId: string
   if (!base) return json(res, 400, { error: "baseVersion is required: reload the page" });
   if (!question || question.length > MAX_QUESTION_CHARS) return json(res, 400, { error: `a question is needed (up to ${MAX_QUESTION_CHARS} characters)` });
   if (question.includes(COMPANY_PLACEHOLDER)) return json(res, 400, { error: "that question names the company, so it is answered on each form and not saved" });
+  if (isSensitiveQuestion(question)) return json(res, 400, { error: "work-authorisation, visa and diversity questions are answered in /profile, not here" });
   if (!answer || answer.length > MAX_ANSWER_CHARS) return json(res, 400, { error: `an answer is needed (up to ${MAX_ANSWER_CHARS} characters)` });
   let saved: SaveResult;
   try {

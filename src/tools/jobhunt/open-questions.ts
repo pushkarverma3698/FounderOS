@@ -50,6 +50,11 @@ function maskCompany(label: string, company: string): string {
   return company.trim().length === 0 ? label : label.replace(new RegExp(escapeRe(company.trim()), "gi"), COMPANY_PLACEHOLDER);
 }
 
+/** Eligibility, visa and self-identification: answered only through /profile's closed sets, never as free text. */
+export function isSensitiveQuestion(label: string): boolean {
+  return isProfileField({ rowId: "", company: "", label });
+}
+
 function isProfileField(s: QuestionSource): boolean {
   const field = { selector: "", type: "text" as const, label: s.label, required: true, ...(s.options ? { options: s.options } : {}) };
   return selfIdCategoryOf(s.label) !== null || isEligibilityField(field);
