@@ -46,5 +46,6 @@ export async function handleQuestions(ctx: Context, deps?: QuestionsDeps): Promi
     return;
   }
   const lines = open.questions.slice(0, TEXT_LIST).map((q) => `• ${escapeHtml(q.label)} (${q.roles})`);
-  await ctx.reply(`${escapeHtml(head + profileNote)}\n\n${lines.join("\n")}\n\nOpen /questions in a private chat to answer them in one sitting.`, { parse_mode: "HTML" });
+  const more = open.questions.length > TEXT_LIST ? `\n…and ${open.questions.length - TEXT_LIST} more. Answer in a private chat.` : "\nAnswer these in a private chat.";
+  await ctx.reply(`${escapeHtml(head + profileNote)}\n\n${lines.join("\n")}${more}`, { parse_mode: "HTML" });
 }
