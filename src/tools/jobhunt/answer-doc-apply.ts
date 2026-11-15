@@ -57,7 +57,7 @@ export function previewLines(patch: AnswerPatch, showValues: boolean): string[] 
     const v = w.kind === "qa" || w.kind === "selfid" || w.kind === "top" ? w.value : w.value === null ? "(cleared)" : String(w.value);
     return v.length > 80 ? `${v.slice(0, 77)}...` : v;
   };
-  const writes = patch.writes.map((w) => `Q${w.number} ${w.label} -> ${WHERE[w.kind]}: ${shown(w)}`);
+  const writes = patch.writes.map((w) => `Q${w.number} ${w.label} → ${WHERE[w.kind]}: ${shown(w)}`);
   const held = patch.held.map((h) => `Q${h.number} ${h.label}: ${h.reason}`);
   return [
     `Will write ${patch.writes.length} fields${showValues ? "" : " (values hidden in a group chat)"}`,
