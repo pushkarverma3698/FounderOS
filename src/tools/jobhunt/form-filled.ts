@@ -74,6 +74,8 @@ export interface FormPlanSummary {
   readonly requiredUnanswered: readonly UnansweredQuestion[];
   readonly hasCaptcha: boolean;
   readonly readyToSubmit: boolean;
+  /** Every scraped field in the form's own order (no CAPTCHA widgets), with the value the bot filled when it did. The hand-off panel reads it. */
+  readonly formFields?: readonly { readonly label: string; readonly fieldType: string; readonly value?: string }[];
 }
 
 export function summariseFormPlan(
@@ -100,6 +102,10 @@ export function summariseFormPlan(
   }
 
   const filledLabels = filledAnswers.map((f) => f.label);
+  const filledValue = new Map(filledAnswers.map((f) => [f.label, f.value] as const));
+  const formFields = fields
+    .filter((f) => !f.isCaptcha && f.type !== "captcha" && f.label.trim() !== "")
+    .map((f) => ({ label: f.label, fieldType: f.type, ...(filledValue.has(f.label) ? { value: filledValue.get(f.label)! } : {}) }));
   const requiredUnanswered = unanswered.filter((u) => u.required);
   const optionalUnanswered = unanswered.filter((u) => !u.required);
   const orderedUnanswered = [...requiredUnanswered, ...optionalUnanswered];
@@ -113,5 +119,6 @@ export function summariseFormPlan(
     requiredUnanswered,
     hasCaptcha,
     readyToSubmit: requiredUnanswered.length === 0 && !hasCaptcha,
+    formFields,
   };
 }
