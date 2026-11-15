@@ -147,7 +147,11 @@ export const applySnapshotSchema = z.object({
     /** Absent in snapshots saved before the page showed values: they load with an empty list. */
     filledAnswers: z.array(filledSchema).default([]),
     unanswered: z.array(unansweredSchema),
+    /** The form's own fields in order, for the hand-off panel; absent when the form was never read. */
+    formFields: z.array(z.object({ label: z.string(), fieldType: z.string(), value: z.string().optional() })).optional(),
   }),
+  /** Why the bot stopped before a fillable form (set on a hand-off-only snapshot, shown on the panel). */
+  handoffReason: z.string().optional(),
   /** Epoch ms of the prepare run that produced this snapshot. */
   createdAt: z.number(),
   /** Epoch ms of a Submit click that came back unconfirmed: survives a restart, so the double-submit guard does too. */

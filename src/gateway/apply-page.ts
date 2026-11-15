@@ -106,7 +106,7 @@ export function renderNoticePage(title: string, message: string): string {
 const DOCTYPE = `<!doctype html>`;
 const HEAD_META = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">`;
 
-function shell(title: string, inner: string, mainAttrs = "", scripts = ""): string {
+export function shell(title: string, inner: string, mainAttrs = "", scripts = ""): string {
   const head = HEAD_META + `<title>${escapeHtml(title)}</title><style>${CSS}</style>`;
   return DOCTYPE + `<html lang="en"><head>${head}</head><body><main${mainAttrs}>${inner}</main>${scripts}</body></html>`;
 }

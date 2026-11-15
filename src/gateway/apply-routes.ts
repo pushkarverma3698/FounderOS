@@ -33,6 +33,7 @@ import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE } from "./apply-api
 import { APPLY_PAGE_HEADERS, applyPageHeaders, escapeHtml, renderApplyPage, renderNoticePage } from "./apply-page.js";
 import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySender } from "./apply-session.js";
 import { runCodeEntry, runSubmit, type settleSubmittedByHand } from "./apply-submit.js";
+import { handleHandoff, type HandoffDeps } from "./apply-handoff-routes.js";
 import { handleHomeRoutes, type JobsApiDeps } from "./apply-prepare-api.js";
 import { handleProfileEditor, isProfileEditorPath } from "./profile-api.js";
 
@@ -58,6 +59,8 @@ export interface ApplyRouteDeps {
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
   /** The Mini App job list wiring (apply-prepare-api.ts); defaults to the database. */
   readonly jobs?: JobsApiDeps;
+  /** The hand-off panel's I/O (apply-handoff-routes.ts); defaults to the profile files and the database. */
+  readonly handoff?: HandoffDeps;
 }
 
 export function defaultApplyRouteDeps(): ApplyRouteDeps {
@@ -204,6 +207,10 @@ export async function handleApplyRequest(
     const parts = pathParts(req.url);
     if (await handleHomeRoutes(req, res, parts, deps, deps.jobs)) return;
     const [token = "", action, ...extra] = parts;
+    if (action === "handoff") {
+      await handleHandoff(req, res, token, extra, deps);
+      return;
+    }
     if (extra.length > 0) {
       notFound(res);
       return;
