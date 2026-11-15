@@ -159,3 +159,19 @@ describe("/wife_import_answers", () => {
     expect(sent[0]?.text).toMatch(/reply to the message/);
   });
 });
+
+describe("pastedText (line breaks reach the parser)", () => {
+  it("keeps each numbered question on its own line after the forced profile token", async () => {
+    const { pastedText } = await import("../../../src/gateway/answer-import.js");
+    const { parseAnswerDoc } = await import("../../../src/tools/jobhunt/answer-doc-parse.js");
+    const raw = "wife\n14. Notice period in days.\n30\n31. English level (basic / professional / fluent / native).\nfluent";
+    const parsed = parseAnswerDoc(pastedText(raw, true));
+    expect(parsed.map((p) => [p.number, p.answer])).toEqual([[14, "30"], [31, "fluent"]]);
+  });
+
+  it("keeps the text whole when no profile token was given", async () => {
+    const { pastedText } = await import("../../../src/gateway/answer-import.js");
+    expect(pastedText("14. Notice period in days.\n30", false)).toBe("14. Notice period in days.\n30");
+    expect(pastedText("wife 14. Notice period in days.\n30", true)).toBe("14. Notice period in days.\n30");
+  });
+});

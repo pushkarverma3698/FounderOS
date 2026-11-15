@@ -68,6 +68,15 @@ function mayImport(senderProfile: string | null, target: string): boolean {
   return senderProfile !== null && (senderProfile === target || senderProfile === DEFAULT_PROFILE_ID);
 }
 
+/**
+ * The pasted document after the command, line breaks kept. `resolveProfileArg`'s `rest` joins words with single
+ * spaces, which runs every numbered question into the previous answer (prod 2026-11-15: Q31 landed in Q14).
+ */
+export function pastedText(raw: string, explicitProfile: boolean): string {
+  const body = raw.replace(/^[ \t]+/, "");
+  return explicitProfile ? body.replace(/^\S+[ \t]*\n?/, "") : body;
+}
+
 async function sourceText(ctx: Context, rest: string, deps: ImportDeps): Promise<string | null> {
   const msg = ctx.message;
   const doc: DocRef | undefined = msg?.document ?? msg?.reply_to_message?.document;
@@ -97,7 +106,7 @@ export async function handleImportAnswers(ctx: Context, deps: ImportDeps = defau
 
   let text: string | null;
   try {
-    text = await sourceText(ctx, arg.rest, deps);
+    text = await sourceText(ctx, pastedText(ctx.match?.toString() ?? "", arg.explicit), deps);
   } catch (err) {
     await ctx.reply(`Could not read the document: ${(err as Error).message}`);
     return;
