@@ -53,6 +53,7 @@ import {
   type StuckQuestion,
 } from "./apply-session.js";
 import { coverLetterLine, letterFacts } from "./apply-cover-letter.js";
+import { opensInTelegram, sendPrepFailure, withHandoffButton } from "./apply-handoff-card.js";
 import { safeHtml } from "./safe-html.js";
 
 export { partitionStuck, tryLockApply } from "./apply-session.js";
@@ -74,8 +75,7 @@ export interface AnswerLink {
   readonly inTelegram: boolean;
 }
 
-/** Telegram takes an inline web_app button only in a private chat (positive chat id) and only for an HTTPS URL. */
-export const opensInTelegram = (chatId: string, url: string): boolean => /^[1-9]\d*$/.test(chatId) && /^https:\/\//i.test(url);
+export { opensInTelegram };
 
 const noLink = (reason: string): AnswerLink => ({ url: null, left: 0, reason, inTelegram: false });
 
@@ -218,6 +218,7 @@ function snapshotOf(session: PendingApplySession, prep: PrepOk, stuck: readonly 
         ...(f.options ? { options: [...f.options] } : {}),
         editable: f.editable,
       })),
+      ...(prep.summary.formFields ? { formFields: prep.summary.formFields.map((f) => ({ ...f })) } : {}),
       unanswered: prep.summary.unanswered.map((q) => {
         const triedAnswer = tried.get(keyOf(q.label));
         return {
@@ -294,7 +295,7 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
     const profile = withFormOnlyAnswers(loaded.profile, session.answered, session.company);
     const prep = await getRunnerDeps().prepare(session.targetUrl, session.company, profile, { resumePath: session.resumePdfPath, ...letterFacts(session.coverLetter) }, dossier);
     if (!prep.ok) {
-      await send.text(`⚠ Form preparation failed for ${safeHtml(session.company)}: ${safeHtml(prep.reason)}`);
+      await sendPrepFailure(send, session, prep.reason, prep.platform);
       return;
     }
 
@@ -312,7 +313,8 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
       coverLetterLine(session.coverLetter, session.coverLetterNote, prep.summary),
     ];
     if (!link.url) lines.push(`<i>answer link unavailable: ${safeHtml(link.reason)}</i>`);
-    await send.text(lines.join("\n"), link.url ? withAnswerButton(new InlineKeyboard(), link) : undefined);
+    const cardKb = link.url ? withAnswerButton(new InlineKeyboard(), link) : undefined;
+    await send.text(lines.join("\n"), cardKb && prep.summary.hasCaptcha ? withHandoffButton(cardKb, link) : cardKb);
 
     if (part.pending.some((q) => q.required)) {
       await promptCurrentQuestion(send, updated);

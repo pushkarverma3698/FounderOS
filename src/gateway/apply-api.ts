@@ -127,11 +127,11 @@ export function computeStatus(rowId: string, snap: ApplySnapshot | null, nowMs: 
   return { state: "ready", detail: failed, missingRequired: [] };
 }
 
-type OkAuth = { readonly ok: true; readonly rowId: string; readonly profileId: string; readonly snap: ApplySnapshot | null };
-type Authorized = OkAuth | { readonly ok: false };
+export type OkAuth = { readonly ok: true; readonly rowId: string; readonly profileId: string; readonly snap: ApplySnapshot | null };
+export type Authorized = OkAuth | { readonly ok: false };
 
 /** Link signature, then initData for the profile that owns the row. After a confirmed or cancelled end the snapshot is gone; the remembered outcome carries the owner. */
-function authorize(req: IncomingMessage, token: string, deps: ApiDeps): Authorized {
+export function authorize(req: IncomingMessage, token: string, deps: ApiDeps): Authorized {
   const cfg = readApplyLinkConfig(deps.env);
   if (!cfg.ok) return { ok: false };
   const parsed = parseApplyToken(token);
