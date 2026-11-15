@@ -200,16 +200,24 @@ echo "==> Patched .env: AGENT_MODEL=$primary_model, WORKER_AGENT_MODEL=$worker_m
 #     Submit and writes no cover letter, so it costs $0. Set to off here to stop it.
 #   APPLY_EVENING_BATCH=on (founder approved 2026-11-15): one 19:00 Europe/Amsterdam message per profile listing the
 #     roles still waiting on them (needs-you and hand-off). Sends nothing when nothing waits. Set to off to stop it.
-grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD|AUTO_APPLY_SHADOW|APPLY_EVENING_BATCH)=' .env > .env.patched || true
+#   AUTO_APPLY_SEND=on (founder asked 2026-11-15: "make it on so that it starts applying automatically"): the
+#     server half of auto-send. A row still goes out only when the profile's /autoapply switch is on and
+#     canAutoSend passes (no bot check, every answer approved, cap, 30-day company cooldown). Load limits for the
+#     4-core VPS: one browser at a time (shadow-apply.ts), AUTO_APPLY_PREPARE_PER_RUN=5 forms per 30-min run,
+#     AUTO_APPLY_DAILY_CAP=10 sends per profile per day. Set AUTO_APPLY_SEND=off here to stop every send.
+grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD|AUTO_APPLY_SHADOW|APPLY_EVENING_BATCH|AUTO_APPLY_SEND|AUTO_APPLY_PREPARE_PER_RUN|AUTO_APPLY_DAILY_CAP)=' .env > .env.patched || true
 {
   printf '%s\n' 'APIFY_PLAN=free'
   printf '%s\n' 'JOBHUNT_MONTHLY_CAP_USD=2.00'
   printf '%s\n' 'AUTO_APPLY_SHADOW=on'
   printf '%s\n' 'APPLY_EVENING_BATCH=on'
+  printf '%s\n' 'AUTO_APPLY_SEND=on'
+  printf '%s\n' 'AUTO_APPLY_PREPARE_PER_RUN=5'
+  printf '%s\n' 'AUTO_APPLY_DAILY_CAP=10'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00, AUTO_APPLY_SHADOW=on, APPLY_EVENING_BATCH=on"
+echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00, AUTO_APPLY_SHADOW=on, APPLY_EVENING_BATCH=on, AUTO_APPLY_SEND=on (5/run, 10/day)"
 # AI Studio key — forwarded from a GitHub secret so a PROD_DOTENV re-render can
 # never wipe it. Still required: image-gen/web-search/gap-scanner call
 # generativelanguage.googleapis.com directly with this key (not migrated to
