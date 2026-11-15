@@ -1134,6 +1134,14 @@ export const jobApplications = agentsSchema.table(
      * emits no signal that it did.
      */
     liveness: text("liveness").notNull().default("unknown"),
+    /**
+     * Shadow apply (2026-11-15): where `prepareShadowApplications` routed this role after opening its form
+     * without submitting. auto | needs_you | hand_off, the specific reason, and when. All NULL until routed.
+     * `apply_lane_at` doubles as the claim stamp, so a row is opened at most once per 24 hours.
+     */
+    apply_lane: text("apply_lane"),
+    apply_lane_reason: text("apply_lane_reason"),
+    apply_lane_at: timestamp("apply_lane_at", { withTimezone: true }),
     liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
 
     /**
