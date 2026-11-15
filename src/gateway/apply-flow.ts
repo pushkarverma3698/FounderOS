@@ -53,6 +53,7 @@ import {
   type StuckQuestion,
 } from "./apply-session.js";
 import { coverLetterLine, letterFacts } from "./apply-cover-letter.js";
+import { addUseSuggestion, draftFor, draftLines } from "./apply-drafts.js";
 import { opensInTelegram, sendPrepFailure, withHandoffButton } from "./apply-handoff-card.js";
 import { safeHtml } from "./safe-html.js";
 
@@ -126,7 +127,7 @@ export function fileQuestionNotice(q: UnansweredQuestion): string {
   return `<b>${safeHtml(q.label)}</b> is a file upload: attach it on the company page, or skip.`;
 }
 
-export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion, qTag = "", cTag = ""): InlineKeyboard {
+export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion, qTag = "", cTag = "", hasDraft = false): InlineKeyboard {
   const kb = new InlineKeyboard();
   const opts = isFileQuestion(q) ? [] : (q.options ?? []);
   if (opts.length > 0 && opts.length <= MAX_BUTTON_OPTIONS) {
@@ -135,6 +136,7 @@ export function buildQuestionKeyboard(rowId: string, q: UnansweredQuestion, qTag
       kb.text(label, `${JOB_CALLBACK_PREFIX}q:${rowId}:${idx}${qTag}`).row();
     });
   }
+  if (hasDraft && !isFileQuestion(q)) addUseSuggestion(kb, rowId, qTag);
   return kb.text("⏭ Skip this question", `${JOB_CALLBACK_PREFIX}q:${rowId}:skip${qTag}`).text("✖ Cancel", `${JOB_CALLBACK_PREFIX}k:${rowId}${cTag}`);
 }
 
@@ -185,7 +187,8 @@ export async function promptCurrentQuestion(send: ApplySender, session: PendingA
       : opts.length > 0
         ? "\n<i>Tap an option below or reply with your exact answer:</i>"
         : "\n<i>Reply to this message with your answer (I'll save it to your dossier so I never ask again):</i>";
-  await send.text(`${head}<b>${safeHtml(q.label)}</b>${optionsHint}`, buildQuestionKeyboard(session.rowId, q, questionTag(session), cardTag(session)));
+  const draft = draftFor(session.drafts, q);
+  await send.text(`${head}<b>${safeHtml(q.label)}</b>${optionsHint}${draft ? draftLines(draft) : ""}`, buildQuestionKeyboard(session.rowId, q, questionTag(session), cardTag(session), draft !== undefined));
 }
 
 // ── card, verdict, re-fill ──────────────────────────────────────────────────────────────────────
@@ -300,9 +303,10 @@ export async function runFormPrepAndPrompt(send: ApplySender, session: PendingAp
     }
 
     const part = partitionStuck(prep.summary.unanswered, session.answered, session.skipped);
+    const drafts = await getRunnerDeps().drafts(part.pending, profile, dossier);
     const updated: PendingApplySession = {
       ...session, targetUrl: prep.targetUrl, unanswered: part.pending, stuck: part.stuck, skipped: part.skipped, questionIndex: 0,
-      cardStamp: mintCardStamp(),
+      drafts, cardStamp: mintCardStamp(),
     };
     setSession(updated);
     const link = persistAndLink(snapshotOf(updated, prep, part.stuck));
