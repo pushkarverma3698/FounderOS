@@ -156,6 +156,54 @@ describe("afterQuietSweep", () => {
   });
 });
 
+describe("weekend-aware zero-pass alert", () => {
+  const SAT = new Date("2026-11-14T10:00:00Z"); // Saturday, Amsterdam
+  const WED = new Date("2026-11-11T10:00:00Z");
+  const HALF_HOUR = 30 * 60 * 1000;
+  const quiet = { seen: 80_000, undated: 0, stale: 79_000, offTrack: 900, offMarket: 100, known: 0, bodyless: 0, screened: 0, boardFailures: 0 };
+
+  function run(start: Date, funnel: typeof quiet, sweeps: number) {
+    let state = initialHeartbeat(start);
+    const pings: (string | null)[] = [];
+    for (let i = 1; i <= sweeps; i++) {
+      const step = afterQuietSweep(state, 285, funnel, new Date(start.getTime() + i * HALF_HOUR), LINK);
+      pings.push(step.ping);
+      state = step.next;
+    }
+    return { pings, state };
+  }
+
+  it("weekday: alerts at sweep 6 with the quiet wording when boards are healthy", () => {
+    const { pings } = run(WED, quiet, 6);
+    expect(pings.slice(0, 5).every((p) => p === null)).toBe(true);
+    expect(pings[5]).toContain("Quiet");
+    expect(pings[5]).toContain("Boards are fine");
+    expect(pings[5]).not.toContain("restricted or closed");
+  });
+
+  it("weekend lull with healthy boards stays silent through 17 sweeps, then says so once", () => {
+    const { pings } = run(SAT, quiet, 18);
+    expect(pings.slice(0, 17).every((p) => p === null)).toBe(true);
+    expect(pings[17]).toContain("Quiet");
+  });
+
+  it("weekend with board fetch failures alerts at sweep 6", () => {
+    const { pings } = run(SAT, { ...quiet, boardFailures: 12 }, 6);
+    expect(pings[5]).toContain("funnel alert");
+  });
+
+  it("weekend with a structural closing stage (no body) alerts at sweep 6", () => {
+    const { pings } = run(SAT, { ...quiet, seen: 7, stale: 0, offTrack: 0, offMarket: 0, bodyless: 7 }, 6);
+    expect(pings[5]).toContain("funnel alert");
+  });
+
+  it("a weekend streak that runs into Monday still alerts once, not never", () => {
+    const sun = new Date("2026-11-15T21:00:00Z"); // Sunday 22:00 Amsterdam
+    const { pings } = run(sun, quiet, 8); // sweep 6 is Monday 01:00 Amsterdam
+    expect(pings.filter((p) => p !== null)).toHaveLength(1);
+  });
+});
+
 describe("afterSpokenSweep", () => {
   it("resets the clock, so a real alert is not chased by a redundant ping", () => {
     const spoken = afterSpokenSweep(at(ALIVE_PING_INTERVAL_MS));
