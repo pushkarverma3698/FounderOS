@@ -95,7 +95,7 @@ export async function handleAutoApplySwitch(ctx: Context): Promise<void> {
   }
   const verb = parseAutoApplyVerb(parsed.rest);
   if (!verb) {
-    await ctx.reply("Say on, off or status.", { reply_markup: autoApplyKeyboard({ profileId: parsed.profile.id, runtimeOn: false }) });
+    await ctx.reply("Say on, off or status.", { reply_markup: autoApplyKeyboard({ profileId: parsed.profile.id, runtimeOn: await readRuntimeSwitch(parsed.profile.id) }) });
     return;
   }
   const profileId = parsed.profile.id;
