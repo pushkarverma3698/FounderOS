@@ -17,6 +17,7 @@ import { FREE_SWEEP_CRON, runFreeSweep } from "../tools/jobhunt/sweep-runner.js"
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 import { realAutoSendHook } from "../gateway/auto-send-hook.js";
 import { realShadowDeps, runShadowApply, shadowApplyEnabled } from "../tools/jobhunt/shadow-apply.js";
+import { runEveningBatch, EVENING_CRON, EVENING_TIME_ZONE } from "./apply-evening-batch.js";
 import { runJobhuntFindingsCheck } from "../evolution/jobhunt-check.js";
 
 const log = childLogger({ module: "jobs-scheduler" });
@@ -61,6 +62,8 @@ export interface JobsCron {
   readonly run: () => Promise<unknown>;
   /** Evaluated in the founder's timezone instead of the server's UTC. */
   readonly local?: boolean;
+  /** An explicit zone for this entry (wins over `local`). */
+  readonly timezone?: string;
 }
 
 export const JOBS_CRONS: readonly JobsCron[] = [
@@ -70,6 +73,8 @@ export const JOBS_CRONS: readonly JobsCron[] = [
   { name: "funding-grower", expr: "0 2 * * *", run: runFundingGrowerSweep },
   { name: "import-boards-reminder", expr: "0 10 1 * *", run: sendImportBoardsReminder },
   // 09:30 in appTimeZone(): the server is on UTC, so a bare "30 9" would fire at 15:00 IST.
+  // 19:00 Amsterdam, DST-safe because node-cron evaluates the expression in that zone. Off unless APPLY_EVENING_BATCH=on.
+  { name: "apply-evening-batch", expr: EVENING_CRON, run: () => runEveningBatch(), timezone: EVENING_TIME_ZONE },
   { name: "findings", expr: "30 9 * * *", run: runJobhuntFindingsCheck, local: true },
 ];
 
@@ -81,7 +86,8 @@ export function startJobsScheduler(schedule: ScheduleFn = cron.schedule): void {
     const tick = () => {
       job.run().catch((err) => log.error({ cron: job.name, err: (err as Error).message }, "Jobs cron failed"));
     };
-    if (job.local) schedule(job.expr, tick, { timezone });
+    const zone = job.timezone ?? (job.local ? timezone : undefined);
+    if (zone) schedule(job.expr, tick, { timezone: zone });
     else schedule(job.expr, tick);
   }
   log.info({ crons: JOBS_CRONS.map((j) => `${j.name} ${j.expr}`), timezone }, "Jobs scheduler started");
