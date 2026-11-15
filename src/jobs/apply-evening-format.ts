@@ -87,7 +87,7 @@ export function buildEveningMessages(name: string, roles: readonly WaitingRole[]
 
   const who = `🌙 <b>${esc(name)}</b>`;
   return chunks.map((chunk, i) => {
-    const head = `${who} — ${roles.length} role${roles.length === 1 ? "" : "s"} still waiting on you${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`;
+    const head = `${who}: ${roles.length} role${roles.length === 1 ? "" : "s"} waiting${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`;
     const body: string[] = [];
     let section: WaitingRole["lane"] | null = null;
     for (const { role, line } of chunk) {
@@ -98,7 +98,7 @@ export function buildEveningMessages(name: string, roles: readonly WaitingRole[]
       body.push(line);
     }
     return {
-      text: `${head}\n${body.join("\n")}\n\n<i>Tap ✅ after you apply, ⏭ if it's not for you.</i>`,
+      text: `${head}\n${body.join("\n")}`,
       keyboard: chunk.flatMap(({ role, n }) => roleButtons(n, role)),
     };
   });
