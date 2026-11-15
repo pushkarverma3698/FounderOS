@@ -197,6 +197,12 @@ describe("weekend-aware zero-pass alert", () => {
     expect(pings[5]).toContain("funnel alert");
   });
 
+  it("2026-11-15 replay: Sunday, healthy boards, the last 1 posting died bodyless — silent at 6", () => {
+    const sunday = { seen: 82_307, undated: 2_620, stale: 41_420, offTrack: 34_435, offMarket: 3_144, known: 687, bodyless: 1, screened: 0, boardFailures: 0 };
+    const { pings } = run(new Date("2026-11-15T11:00:00Z"), sunday, 6);
+    expect(pings.every((p) => p === null)).toBe(true);
+  });
+
   it("a weekend streak that runs into Monday still alerts once, not never", () => {
     const sun = new Date("2026-11-15T21:00:00Z"); // Sunday 22:00 Amsterdam
     const { pings } = run(sun, quiet, 8); // sweep 6 is Monday 01:00 Amsterdam

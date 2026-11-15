@@ -219,7 +219,7 @@ export function afterQuietSweep(
   // would delete the alert, since a frozen board cache looks the same as a flat market. Policy: funnel-alert.ts.
   const effective = funnel ?? state.lastFunnel;
   const top = funnelClosingStage(effective);
-  if (zeroPass && !alerted && newStreak >= zeroPassThreshold(currentNow, effective, top?.reason)) {
+  if (zeroPass && !alerted && newStreak >= zeroPassThreshold(currentNow, effective, top)) {
     return {
       next: { ...pending, zeroPassAlerted: true, lastMessageAt: currentNow.getTime() },
       ping: formatZeroPassAlert(newStreak, effective, top, who),

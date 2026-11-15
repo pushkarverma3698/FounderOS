@@ -22,6 +22,17 @@ export const WEEKEND_ZERO_PASS_STREAK_THRESHOLD = ZERO_PASS_STREAK_THRESHOLD * 3
 
 /** Closing stages that mean a bug, not a quiet market. */
 const STRUCTURAL_STAGES = new Set(["no body description", "undated publication"]);
+/**
+ * A structural stage is a fault only at volume. 2026-09-06: 7 bodyless Lever postings a sweep (a mapper bug).
+ * 2026-11-15: 1 bodyless SmartRecruiters posting a sweep on a quiet Sunday (one bad listing, not a bug).
+ */
+export const STRUCTURAL_MIN_COUNT = 3;
+
+type Stage = { readonly reason: string; readonly count: number } | null | undefined;
+
+function isStructural(top: Stage): boolean {
+  return !!top && STRUCTURAL_STAGES.has(top.reason) && top.count >= STRUCTURAL_MIN_COUNT;
+}
 
 export function isWeekendInAmsterdam(now: Date): boolean {
   const day = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Amsterdam", weekday: "short" }).format(now);
@@ -29,19 +40,19 @@ export function isWeekendInAmsterdam(now: Date): boolean {
 }
 
 /** Boards fetched cleanly: known only when the sweep reported a failure count. */
-export function boardsHealthy(funnel: FreeFunnel | null | undefined, closingReason?: string): boolean {
-  return funnel?.boardFailures === 0 && funnel.seen > 0 && !(closingReason && STRUCTURAL_STAGES.has(closingReason));
+export function boardsHealthy(funnel: FreeFunnel | null | undefined, top?: Stage): boolean {
+  return funnel?.boardFailures === 0 && funnel.seen > 0 && !isStructural(top);
 }
 
-/** A real fault: failure count unknown (older snapshot), a board failed, nothing was seen, or the last gate is structural. */
-export function sweepShowsFault(funnel: FreeFunnel | null | undefined, closingReason: string | undefined): boolean {
+/** A real fault: failure count unknown (older snapshot), a board failed, nothing was seen, or a structural gate closed it at volume. */
+export function sweepShowsFault(funnel: FreeFunnel | null | undefined, top: Stage): boolean {
   if (!funnel) return true; // unknown is never read as healthy
   if (funnel.boardFailures === undefined || funnel.boardFailures > 0 || funnel.seen === 0) return true;
-  return closingReason !== undefined && STRUCTURAL_STAGES.has(closingReason);
+  return isStructural(top);
 }
 
-export function zeroPassThreshold(now: Date, funnel: FreeFunnel | null | undefined, closingReason?: string): number {
-  return isWeekendInAmsterdam(now) && !sweepShowsFault(funnel, closingReason)
+export function zeroPassThreshold(now: Date, funnel: FreeFunnel | null | undefined, top?: Stage): number {
+  return isWeekendInAmsterdam(now) && !sweepShowsFault(funnel, top)
     ? WEEKEND_ZERO_PASS_STREAK_THRESHOLD
     : ZERO_PASS_STREAK_THRESHOLD;
 }
@@ -53,7 +64,7 @@ export function formatZeroPassAlert(
   top: { reason: string; count: number } | null,
   who: string,
 ): string {
-  if (boardsHealthy(funnel, top?.reason)) {
+  if (boardsHealthy(funnel, top)) {
     const hours = streak / 2;
     return `ℹ️ <b>Quiet${who}</b>: 0 new roles passed in the last ${streak} sweeps (${hours}h). Boards are fine.`;
   }
