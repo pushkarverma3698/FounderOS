@@ -29,6 +29,7 @@ import {
 } from "./form-scraper.js";
 
 import { fieldHoldsValue } from "./form-phone.js";
+import { filesFirst, recheckTypedValues, settleOnceAfterUploads } from "./form-fill-guard.js";
 import { awaitSubmitOutcome, holdForEmailCode, SUBMIT_CONFIRM_TIMEOUT_MS } from "./held-submit.js";
 
 const log = childLogger({ module: "jobhunt:form-runner" });
@@ -153,8 +154,10 @@ export async function executeFormPlan(
 ): Promise<ReadonlySet<string>> {
   await installEvaluateShim(page);
   const verified = new Set<string>();
-  for (const action of actions) {
+  const settle = settleOnceAfterUploads(page, actions);
+  for (const action of filesFirst(actions)) {
     if (action.kind === "ask") continue;
+    await settle(action);
     try {
       let ok = false;
       if (action.kind === "value") {
@@ -171,6 +174,7 @@ export async function executeFormPlan(
       log.warn({ selector: action.selector, label: action.label, err: (err as Error).message }, "Fill action threw");
     }
   }
+  await recheckTypedValues(page, actions, verified, (sel, v) => typeIntoField(page, sel, v));
   return verified;
 }
 
