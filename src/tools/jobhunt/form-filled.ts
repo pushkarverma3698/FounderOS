@@ -13,6 +13,7 @@
  *  - it is not a file, a CAPTCHA, a consent checkbox or a single checkbox, none of which is typed text.
  */
 
+import { answerSourceOf, type AnswerSource } from "./answer-source.js";
 import type { FormFillAction, ScrapedField, ScrapedFieldKind } from "./form-brain.js";
 
 /** Longest answer the page accepts or offers (the same cap `apply-answers` enforces on a post). */
@@ -24,6 +25,9 @@ export interface FilledAnswer {
   readonly fieldType: ScrapedFieldKind;
   readonly options?: readonly string[];
   readonly editable: boolean;
+  /** Why the form brain chose this value, classed (answer-source.ts). Auto-send reads it; the answer page does not. */
+  readonly source?: AnswerSource;
+  readonly confidence?: number;
 }
 
 type FilledAction = Exclude<FormFillAction, { kind: "ask" }>;
@@ -60,6 +64,8 @@ export function filledAnswerOf(action: FilledAction, fields: readonly ScrapedFie
     fieldType,
     ...(field?.options && field.options.length > 0 ? { options: [...field.options] } : {}),
     editable,
+    source: answerSourceOf(action.why),
+    confidence: action.confidence,
   };
 }
 

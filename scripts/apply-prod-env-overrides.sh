@@ -198,15 +198,18 @@ echo "==> Patched .env: AGENT_MODEL=$primary_model, WORKER_AGENT_MODEL=$worker_m
 #   AUTO_APPLY_SHADOW=on (founder decision 2026-11-14: prepare every role that passes all gates as soon as it is
 #     caught). Shadow only: the pass opens and fills forms, routes each to a lane and reports. It never clicks
 #     Submit and writes no cover letter, so it costs $0. Set to off here to stop it.
-grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD|AUTO_APPLY_SHADOW)=' .env > .env.patched || true
+#   APPLY_EVENING_BATCH=on (founder approved 2026-11-15): one 19:00 Europe/Amsterdam message per profile listing the
+#     roles still waiting on them (needs-you and hand-off). Sends nothing when nothing waits. Set to off to stop it.
+grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD|AUTO_APPLY_SHADOW|APPLY_EVENING_BATCH)=' .env > .env.patched || true
 {
   printf '%s\n' 'APIFY_PLAN=free'
   printf '%s\n' 'JOBHUNT_MONTHLY_CAP_USD=2.00'
   printf '%s\n' 'AUTO_APPLY_SHADOW=on'
+  printf '%s\n' 'APPLY_EVENING_BATCH=on'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00, AUTO_APPLY_SHADOW=on"
+echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00, AUTO_APPLY_SHADOW=on, APPLY_EVENING_BATCH=on"
 # AI Studio key — forwarded from a GitHub secret so a PROD_DOTENV re-render can
 # never wipe it. Still required: image-gen/web-search/gap-scanner call
 # generativelanguage.googleapis.com directly with this key (not migrated to

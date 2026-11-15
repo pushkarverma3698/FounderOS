@@ -153,6 +153,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     example: "/wife_gaps",
   },
   {
+    command: "questions",
+    description: "Unanswered form questions that block your roles, answered in one sitting. questions tashi for Tashi's",
+    group: "jobs",
+  },
+  {
+    command: "wife_questions",
+    description: "Unanswered form questions that block your wife's roles, answered in one sitting",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_questions",
+  },
+  {
     command: "applied",
     description: "applied n — mark row n applied and drop it off the queue. applied tashi n for Tashi's",
     group: "jobs",
@@ -163,6 +175,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
     hidden: true,
     example: "/wife_applied 1",
+  },
+  {
+    command: "autoapply",
+    description: "autoapply on|off|status — send prepared applications without a tap (off by default). autoapply tashi status for Tashi's",
+    group: "jobs",
+  },
+  {
+    command: "wife_autoapply",
+    description: "wife_autoapply on|off|status — the same switch for your wife's queue",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_autoapply status",
   },
   {
     command: "replied",
@@ -203,6 +227,13 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
     hidden: true,
     example: "/wife_profile",
+  },
+  {
+    command: "wife_import_answers",
+    description: "Reply to Tashi's filled-in question document (or attach it as .txt/.md) to preview and save her answers",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_import_answers",
   },
   {
     // VISIBLE, unlike the aliases it lists: one row in the menu instead of
