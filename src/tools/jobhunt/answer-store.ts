@@ -271,7 +271,22 @@ export function setCoreAnswer(profileId: string, field: string, value: string, o
   return setProfilePath(profileId, `answers.${field}`, value, opts);
 }
 
-/** Record or replace a learned answer: older spellings go, the newest is last, EEO answers set self_identification. */
+/** The state with one learned answer recorded: older spellings go, the newest is last, EEO answers set self_identification. */
+export function withLearnedAnswer(s: AnswerState, q: string, a: string): AnswerState {
+  const normQ = normalizeQuestionKey(q);
+  const bank = Object.fromEntries(
+    Object.entries(asRecord(s.profile["question_bank"])).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
+  );
+  const category = selfIdCategoryOf(q);
+  const cur = asRecord(s.profile["answers"]);
+  const selfId = category ? { answers: { ...cur, self_identification: { ...asRecord(cur["self_identification"]), [category]: a } } } : {};
+  return {
+    profile: { ...s.profile, ...selfId, question_bank: { ...bank, [q]: a } },
+    dossierMarkdown: withLearnedLine(s.dossierMarkdown, q, a),
+  };
+}
+
+/** Record or replace a learned answer (see withLearnedAnswer). */
 export function upsertLearnedAnswer(
   profileId: string,
   question: string,
@@ -281,23 +296,7 @@ export function upsertLearnedAnswer(
   const q = question.trim();
   const a = answer.trim();
   if (!q || !a) return Promise.resolve({ ok: false, reason: "a question and an answer are both needed" });
-  const normQ = normalizeQuestionKey(q);
-  return saveAnswers(
-    profileId,
-    (s) => {
-      const bank = Object.fromEntries(
-        Object.entries(asRecord(s.profile["question_bank"])).filter(([k]) => !normQ || normalizeQuestionKey(k) !== normQ),
-      );
-      const category = selfIdCategoryOf(q);
-      const cur = asRecord(s.profile["answers"]);
-      const selfId = category ? { answers: { ...cur, self_identification: { ...asRecord(cur["self_identification"]), [category]: a } } } : {};
-      return {
-        profile: { ...s.profile, ...selfId, question_bank: { ...bank, [q]: a } },
-        dossierMarkdown: withLearnedLine(s.dossierMarkdown, q, a),
-      };
-    },
-    opts,
-  );
+  return saveAnswers(profileId, (s) => withLearnedAnswer(s, q, a), opts);
 }
 
 /** Remove a learned answer from question_bank AND the dossier Learned Form Answers. changed is false when it was in neither. */
