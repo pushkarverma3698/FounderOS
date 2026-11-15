@@ -10,7 +10,7 @@
 import { resolveProfileToken } from "../tools/jobhunt/profile-config.js";
 
 export const JOB_COMMANDS: ReadonlySet<string> = new Set([
-  "draft", "ask", "applied", "replied", "rejected", "profile", "jobs", "today", "fresh", "csv", "gaps",
+  "draft", "ask", "applied", "replied", "rejected", "profile", "jobs", "today", "fresh", "csv", "gaps", "questions",
 ]);
 
 export function parseSenderProfiles(raw: string | undefined): ReadonlyMap<number, string> {
