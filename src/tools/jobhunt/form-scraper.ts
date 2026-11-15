@@ -143,6 +143,16 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       }
       return "";
     };
+    // Capgemini on Workable (2026-11-15): hidden #city/#postcode/#country sat next to #firstname, so the ancestor walk
+    // read "First name" for them. A label tied to another control (label[for], or another control's aria-labelledby) is not ours.
+    const labelTargets = new Set(
+      Array.from(dom.document.querySelectorAll("[aria-labelledby]")).flatMap((c) => (c.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean)),
+    );
+    const boundElsewhere = (c: DomElement, e: DomElement): boolean => {
+      const target = c.getAttribute("for");
+      if (target && target !== e.id) return true;
+      return !!c.id && labelTargets.has(c.id) && !(e.getAttribute("aria-labelledby") ?? "").split(/\s+/).includes(c.id);
+    };
     // Labels are read here, in one snapshot: a per-field locator wait cost 30 s for every field without label[for].
     const labelOf = (e: DomElement): string => {
       const viaFor = forLabel(e);
@@ -155,6 +165,7 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       if (placeholder && !/^(select|type here|start typing|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
       for (let n = e.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
         for (const c of Array.from(n.querySelectorAll("legend, label, strong, [class*='label' i]"))) {
+          if (boundElsewhere(c, e)) continue;
           const t = clean(textOf(c));
           if (t.length > 1 && t.length < 220 && !SKIP.test(t)) return t;
         }
@@ -213,7 +224,10 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
           /recaptcha|h-captcha|cf-turnstile/i.test(e.getAttribute("name") ?? "") ||
           !!e.closest('[class*="recaptcha" i], [class*="captcha" i], [class*="turnstile" i]'),
         hasFormAttr: !!e.closest("form, [role='form'], #application-form, #application_form, #app"),
-        isVisible: rawType === "file" || (rect.width > 0 && rect.height > 0),
+        // aria-hidden + tabindex=-1 marks a script-owned mirror input (Workable's location parts): never a question to fill.
+        isVisible:
+          rawType === "file" ||
+          (rect.width > 0 && rect.height > 0 && (isChoice || !(e.getAttribute("aria-hidden") === "true" && Number(e.getAttribute("tabindex")) < 0))),
       };
     });
     const groups = new Map<string, { label: string; required: boolean } | null>();
