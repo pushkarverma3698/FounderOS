@@ -16,6 +16,8 @@ const markSkipped = vi.fn();
 vi.mock("../../../src/db/apply-queries.js", () => ({ getApplicationById, listApplyQueue: vi.fn(), markSkipped }));
 vi.mock("../../../src/db/job-queries.js", () => ({ updateApplicationStage }));
 vi.mock("../../../src/gateway/jobhunt-commands.js", () => ({ draftRow }));
+const handleAutoApplyTap = vi.fn();
+vi.mock("../../../src/gateway/autoapply-command.js", async (orig) => ({ ...(await orig<object>()), handleAutoApplyTap }));
 
 const {
   jobCallbackData,
@@ -114,6 +116,12 @@ describe("handleJobCallback", () => {
     const ctx = ctxFor("approve:abc");
     expect(await handleJobCallback(ctx)).toBe(false);
     expect(ctx.answerCallbackQuery).not.toHaveBeenCalled();
+  });
+
+  it("routes an /autoapply button tap to its handler", async () => {
+    const ctx = ctxFor("jh:aa:off:p1");
+    expect(await handleJobCallback(ctx)).toBe(true);
+    expect(handleAutoApplyTap).toHaveBeenCalledWith(ctx, { verb: "off", profileId: "p1" });
   });
 
   it("✅ I applied marks the row, spends the button and confirms", async () => {

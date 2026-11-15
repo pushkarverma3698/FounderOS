@@ -22,7 +22,7 @@ describe("buildEveningMessages", () => {
     expect(text).toContain("Greenhouse emails a code");
     expect(text).toContain("2. <b>Co1</b>");
     expect(text).toContain("CAPTCHA on the form");
-    expect(text).toContain("2 roles still waiting");
+    expect(text).toContain("2 roles waiting");
   });
 
   it("escapes HTML in company, title and reason", () => {
