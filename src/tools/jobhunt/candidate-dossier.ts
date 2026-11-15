@@ -169,12 +169,15 @@ export const NOTICE_PHRASES: readonly string[] = [
   "when can you join", "earliest start date", "start date", "joining time", "time to join", "availability", "beschikbaar",
 ];
 
+/** A currency other than EUR named in a salary question or answer. */
+const NON_EUR_CURRENCY = /\b(inr|lpa|ctc|lakhs?|lacs?|crores?|rupees?|rs\.?|usd|gbp|chf|sgd|aud|cad|aed|pln|sek|nok|dkk)\b|[₹$£]/i;
+
 const SEMANTIC_RULES: ReadonlyArray<{
   readonly name: string;
   readonly phrases: readonly string[];
   /** Phrases that veto the rule ("current base salary" is not the salary expectation). */
   readonly excludes?: readonly string[];
-  readonly resolve: (profile: ApplyProfile, dossier?: CandidateDossier) => string | undefined;
+  readonly resolve: (profile: ApplyProfile, dossier: CandidateDossier | undefined, question: string) => string | undefined;
 }> = [
   {
     name: "noticePeriod",
@@ -189,13 +192,14 @@ const SEMANTIC_RULES: ReadonlyArray<{
   },
   {
     name: "salary",
-    phrases: ["salary", "compensation", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual"],
+    phrases: ["salary", "compensation", "ctc", "pay expectation", "remuneration", "salaris", "salarisindicatie", "gross annual"],
     excludes: ["current"],
-    resolve: (p, d) =>
-      d?.facts["salary expectation"] ??
-      d?.facts["expected salary"] ??
-      d?.facts["salary"] ??
-      (p.answers?.salary_floor_eur_year !== undefined ? String(p.answers.salary_floor_eur_year) : undefined),
+    // The stored expectation is EUR. An INR/LPA/USD question gets no bare EUR number (Entrata INR form got "52284", 2026-11-15).
+    resolve: (p, d, question) => {
+      const v = d?.facts["salary expectation"] ?? d?.facts["expected salary"] ?? d?.facts["salary"] ??
+        (p.answers?.salary_floor_eur_year !== undefined ? String(p.answers.salary_floor_eur_year) : undefined);
+      return v !== undefined && NON_EUR_CURRENCY.test(question) && !NON_EUR_CURRENCY.test(v) ? undefined : v;
+    },
   },
   {
     name: "willingToRelocate",
@@ -312,7 +316,7 @@ export function lookupLearnedAnswer(
   if (!rawAnswer) {
     for (const rule of SEMANTIC_RULES) {
       if (rule.phrases.some((p) => hasPhrase(normKey, p)) && !rule.excludes?.some((p) => hasPhrase(normKey, p))) {
-        const resolved = rule.resolve(profile, dossier);
+        const resolved = rule.resolve(profile, dossier, question);
         if (resolved && resolved.trim()) {
           rawAnswer = resolved.trim();
           source = `dossier/profile rule (${rule.name})`;

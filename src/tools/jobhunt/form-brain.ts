@@ -228,16 +228,16 @@ function matchStandardTextField(
   if (labelMatches(field.label, "linkedin")) return textActionFor(field, profile.linkedin, "matched LinkedIn field");
   if (labelMatches(field.label, "website")) return textActionFor(field, profile.website ?? profile.answers?.github, "matched website/portfolio field");
   if (labelMatches(field.label, "country")) {
-    const country = profile.answers?.location_country ?? "India";
-    return textActionFor(field, country, "matched country field");
+    // No invented default: an unset country is asked, never guessed.
+    return textActionFor(field, profile.answers?.location_country, "matched country field");
   }
   if (labelMatches(field.label, "location")) {
     const loc = [profile.answers?.location_city, profile.answers?.location_country].filter(Boolean).join(", ");
     return textActionFor(field, loc || undefined, "matched location field");
   }
   if (labelMatches(field.label, "currentCompany")) {
-    const company = (profile.answers as Record<string, unknown> | undefined)?.["current_company"] as string | undefined ?? "FounderOS / Turicks";
-    return textActionFor(field, company, "matched current company field");
+    // No invented default: an unset employer is asked, never guessed.
+    return textActionFor(field, profile.answers?.current_company, "matched current company field");
   }
   if (labelMatches(field.label, "coverLetter")) return textActionFor(field, row.coverLetterText, "matched cover-letter text field");
   if (labelMatches(field.label, "yearsExperience") && (field.type === "text" || field.type === "number")) {
