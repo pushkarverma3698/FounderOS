@@ -165,6 +165,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     example: "/wife_applied 1",
   },
   {
+    command: "autoapply",
+    description: "autoapply on|off|status — send prepared applications without a tap (off by default). autoapply tashi status for Tashi's",
+    group: "jobs",
+  },
+  {
+    command: "wife_autoapply",
+    description: "wife_autoapply on|off|status — the same switch for your wife's queue",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_autoapply status",
+  },
+  {
     command: "replied",
     description: "replied n — mark row n of your live applications as replied to. replied tashi n for Tashi's",
     group: "jobs",

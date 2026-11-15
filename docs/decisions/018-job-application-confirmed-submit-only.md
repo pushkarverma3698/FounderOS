@@ -67,6 +67,23 @@ Greenhouse sometimes answers the Submit click with an emailed 8-character "confi
 
 Deploy requirement: none beyond `TELEGRAM_CHAT_ID`; `JOBHUNT_SENDER_PROFILES` is only needed to sign in other users or to override the founder's profile.
 
+## Amendment 2026-11-15: the auto-send lane (ships switched off)
+
+Founder decision 2026-11-14: **send without a tap when the form has no bot check, every answer is one I approved, and the limits allow it.** This relaxes rule 1 of the Decision (the founder presses Submit himself) for one lane only. Rules 2 and 3 are unchanged and still apply to every send.
+
+The shadow pass (`src/tools/jobhunt/shadow-apply.ts`, `apply-lane.ts`) prepares each new passing role and routes it `auto`, `needs_you` or `hand_off`. A row routed `auto` is sent by `src/gateway/apply-auto-send.ts` only when `canAutoSend` (`src/tools/jobhunt/auto-send-rules.ts`, pure and unit-tested) says yes:
+
+1. Both switches are on: env `AUTO_APPLY_SEND=on` **and** the profile's runtime switch (`/autoapply on|off|status`, a file `auto-send-<profile>.json` beside the apply profile). A missing or unreadable switch reads as off. `AUTO_APPLY_SEND` is not set in `apply-prod-env-overrides.sh`.
+2. The lane is `auto`: no bot check, no required question unanswered (a required cover-letter box is the one exception, see 5).
+3. Every filled value has a recorded source the code recognises (`answer-source.ts`): the apply profile, the candidate dossier, the question bank, a resume or letter upload, or the fixed "decline to self-identify" rule. An unrecognised source, or a confidence under 0.9, disqualifies the row. A visa, work-authorisation or self-identification answer qualifies only from the profile, dossier, question bank or that fixed rule. The form brain has no model path today; this keeps it that way.
+4. Limits: at most `AUTO_APPLY_DAILY_CAP` attempts per profile per UTC day (default 10, unconfirmed clicks count), and one application per normalised company per 30 days, counted across every `applied_at` row and every auto attempt.
+5. The send is the existing `runSubmit` (same per-row lock, already-applied and already-audited checks, idempotency key `apply-submit:<rowId>`, `checkValidity()` before the click, `applied` only on a confirmed page, an unconfirmed click remembered and never repeated, `action_log` row on success). When the form requires a cover letter, the existing writer and fact check must produce one; if not, nothing is sent and the row becomes `needs_you`.
+6. An attempt row (`job_auto_send_attempt`, key `auto-send-attempt:<rowId>`) is written before the click and never removed, so a row is never auto-sent twice, also across a restart. After each send the chat gets company, title, the result (confirmed, or unconfirmed with the reason, never retried) and the proof screenshot.
+
+No CAPTCHA or bot-check handling of any kind is added: a bot check routes the row to `hand_off`.
+
+**The switch ships off.** It stays off in production until a week of shadow reports has been read and 5 founder-watched sends (run with `/autoapply on` while he is looking) are confirmed. Turning it on is the founder's act: set `AUTO_APPLY_SEND=on` in the VPS env and send `/autoapply on`. `/autoapply off` is the kill switch and takes effect on the next row.
+
 ## References
 
 - `mac-client/mac_client/overlay.js`, `mac-client/mac_client/apply.py`

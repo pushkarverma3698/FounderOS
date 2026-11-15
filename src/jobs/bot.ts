@@ -15,6 +15,7 @@ import { logger } from "../infra/logger.js";
 import { resolveJobsBotToken } from "../infra/jobs-bot-token.js";
 import { handleDraft, handleApplied } from "../gateway/jobhunt-commands.js";
 import { handleAutoApply, tryHandlePendingApplyReply } from "../gateway/auto-apply.js";
+import { handleAutoApplySwitch } from "../gateway/autoapply-command.js";
 import { injectSenderProfile, parseSenderProfiles } from "../gateway/jobhunt-sender-profile.js";
 import { handleJobCallback } from "../gateway/jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "../gateway/live-application-commands.js";
@@ -114,6 +115,7 @@ export function registerJobsHandlers(bot: Registrar, access: ChatAccessConfig = 
 
   both(bot, "draft", (ctx) => handleDraft(ctx));
   both(bot, "apply", (ctx) => handleAutoApply(ctx));
+  both(bot, "autoapply", (ctx) => handleAutoApplySwitch(ctx));
   both(bot, "applied", (ctx) => handleApplied(ctx));
   both(bot, "replied", (ctx) => handleReplied(ctx));
   both(bot, "rejected", (ctx) => handleRejected(ctx));

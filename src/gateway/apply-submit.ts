@@ -36,7 +36,7 @@ import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:apply-submit" });
 
-export type SubmitVia = "telegram" | "miniapp";
+export type SubmitVia = "telegram" | "miniapp" | "auto";
 
 export interface SubmitIo {
   readonly text: (html: string, keyboard?: InlineKeyboard) => Promise<void>;
