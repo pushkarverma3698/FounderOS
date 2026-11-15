@@ -25,6 +25,7 @@ import {
   isFileQuestion,
   opensInTelegram,
 } from "./apply-flow.js";
+import { draftFor } from "./apply-drafts.js";
 import { applyHomeUrl } from "./apply-home.js";
 import { prepareRow } from "./apply-prepare.js";
 import { runSubmit, type SubmitIo } from "./apply-submit.js";
@@ -173,8 +174,10 @@ export async function handleAutoApplyCallback(ctx: Context, data: string): Promi
       await advanceAfterQuestion(ctxSender(ctx), session);
       return true;
     }
+    // "Use suggestion" resolves to the stored draft's answer, then takes the same path as an option tap.
+    const suggested = choiceToken === "use" ? draftFor(session.drafts, q)?.answer : undefined;
     const idx = Number(choiceToken);
-    const chosen = Number.isInteger(idx) ? q.options?.[idx] : undefined;
+    const chosen = suggested ?? (Number.isInteger(idx) ? q.options?.[idx] : undefined);
     if (!chosen) {
       await ctx.answerCallbackQuery({ text: "Invalid option" });
       return true;

@@ -283,3 +283,9 @@ export const ARTIFACT_ROOT =
   process.env["ARTIFACT_ROOT"]?.trim() ||
   join(process.env["HOME"] ?? "/Users/pushkarverma", "Projects/founderos/artifacts");
 
+
+/** Model-suggested answers under form questions in the Telegram apply flow ("Use suggestion"). On unless set to 0/false/no. */
+export function formAnswerDraftsEnabled(): boolean {
+  const v = (process.env["FORM_ANSWER_DRAFTS"] ?? "").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(v);
+}
