@@ -20,6 +20,7 @@ import type { UnansweredQuestion } from "../tools/jobhunt/form-brain.js";
 import { prepareApplicationForm, submitApplicationForm } from "../tools/jobhunt/form-runner.js";
 import { releaseHeld } from "../tools/jobhunt/held-submit.js";
 import { resolveApplyCoverLetter, type ApplyCoverLetter } from "./apply-cover-letter.js";
+import { resolveFormDrafts, type DraftMap, type DraftResolver } from "./apply-drafts.js";
 
 const log = childLogger({ module: "gateway:apply-session" });
 const LOCK_STALE_MS = 10 * 60_000;
@@ -61,6 +62,8 @@ export interface PendingApplySession {
   /** Questions the founder skipped that the form still shows unfilled. */
   readonly skipped: UnansweredQuestion[];
   questionIndex: number;
+  /** Suggested answers for `unanswered`, keyed by question key. Shown only; saved only when the founder taps "Use suggestion". */
+  readonly drafts?: DraftMap;
   /** Minted per card run and carried in its buttons, so a tap on a superseded card is refused. */
   readonly cardStamp?: string;
 }
@@ -163,9 +166,10 @@ export interface AutoApplyRunnerDeps {
   readonly prepare: typeof prepareApplicationForm;
   readonly submit: typeof submitApplicationForm;
   readonly coverLetter: typeof resolveApplyCoverLetter;
+  readonly drafts: DraftResolver;
 }
 
-const REAL_RUNNER: AutoApplyRunnerDeps = { prepare: prepareApplicationForm, submit: submitApplicationForm, coverLetter: resolveApplyCoverLetter };
+const REAL_RUNNER: AutoApplyRunnerDeps = { prepare: prepareApplicationForm, submit: submitApplicationForm, coverLetter: resolveApplyCoverLetter, drafts: resolveFormDrafts };
 let runnerDeps: AutoApplyRunnerDeps = REAL_RUNNER;
 
 export const getRunnerDeps = (): AutoApplyRunnerDeps => runnerDeps;
@@ -175,6 +179,7 @@ export function setAutoApplyRunnerForTests(override?: Partial<AutoApplyRunnerDep
     prepare: override?.prepare ?? REAL_RUNNER.prepare,
     submit: override?.submit ?? REAL_RUNNER.submit,
     coverLetter: override?.coverLetter ?? REAL_RUNNER.coverLetter,
+    drafts: override?.drafts ?? (async () => ({})),
   };
 }
 
