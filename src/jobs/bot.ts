@@ -19,6 +19,7 @@ import { injectSenderProfile, parseSenderProfiles } from "../gateway/jobhunt-sen
 import { handleJobCallback } from "../gateway/jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "../gateway/live-application-commands.js";
 import { handleProfile } from "../gateway/profile-commands.js";
+import { handleAnswerImportCallback, handleImportAnswers } from "../gateway/answer-import.js";
 import { handleWifeCommands } from "../gateway/wife-commands.js";
 import { handleCsv, handleFresh, handleGaps, handleJobs, handleToday, type JobsViewDeps } from "../gateway/jobhunt-view.js";
 import { withForcedProfileToken } from "../gateway/jobhunt-profile-arg.js";
@@ -118,6 +119,7 @@ export function registerJobsHandlers(bot: Registrar, access: ChatAccessConfig = 
   both(bot, "replied", (ctx) => handleReplied(ctx));
   both(bot, "rejected", (ctx) => handleRejected(ctx));
   both(bot, "profile", (ctx) => handleProfile(ctx));
+  bot.command("wife_import_answers", (ctx: Context) => handleImportAnswers(withForcedProfileToken(ctx, "wife"))); // hidden alias only, no base twin
   both(bot, "jobs", (ctx) => handleJobs(ctx, jobsDeps));
   both(bot, "today", (ctx) => handleToday(ctx, jobsDeps));
   both(bot, "fresh", (ctx) => handleFresh(ctx, jobsDeps));
@@ -142,6 +144,7 @@ export function registerJobsHandlers(bot: Registrar, access: ChatAccessConfig = 
   });
 
   bot.on("callback_query:data", async (ctx: Context) => {
+    if (await handleAnswerImportCallback(ctx)) return;
     if (await handleJobCallback(ctx, jobsDeps)) return;
     await ctx.answerCallbackQuery({ text: "Unknown action" });
   });

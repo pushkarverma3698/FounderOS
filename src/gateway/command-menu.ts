@@ -205,6 +205,13 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     example: "/wife_profile",
   },
   {
+    command: "wife_import_answers",
+    description: "Reply to Tashi's filled-in question document (or attach it as .txt/.md) to preview and save her answers",
+    group: "jobs",
+    hidden: true,
+    example: "/wife_import_answers",
+  },
+  {
     // VISIBLE, unlike the aliases it lists: one row in the menu instead of
     // eleven, and nothing Tashi's queue can do goes missing (the founder's
     // condition for hiding them, 2026-09-28).
