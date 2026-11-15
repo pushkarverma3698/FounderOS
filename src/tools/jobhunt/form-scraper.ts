@@ -150,10 +150,30 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     );
     const boundElsewhere = (c: DomElement, e: DomElement): boolean => {
       const target = c.getAttribute("for");
-      if (target && target !== e.id) return true;
+      // Ashby points label[for] at an id no element carries: such a label is unbound, not another control's.
+      if (target && target !== e.id && dom.document.getElementById(target)) return true;
       return !!c.id && labelTargets.has(c.id) && !(e.getAttribute("aria-labelledby") ?? "").split(/\s+/).includes(c.id);
     };
+    // Lever, Entrata (2026-11-15): a walk up past the field's own box read the NEXT question's label. A container that
+    // holds another visible control (one that is not an option of the same group) is shared, so no label in it is ours.
+    const sharedWith = (n: DomElement, e: DomElement): boolean =>
+      Array.from(n.querySelectorAll("input, select, textarea")).some((o) => {
+        if (o === e || (o.getAttribute("type") ?? "").toLowerCase() === "hidden") return false;
+        if (e.name && o.getAttribute("name") === e.name) return false;
+        const r = o.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+    // The question text in the smallest container that is this field's alone; `skip` drops option texts.
+    const ownLabel = (e: DomElement, depth: number, selector: string, skip: (t: string, c: DomElement) => boolean): DomElement | null => {
+      for (let n = e.parentElement, i = 0; n && i < depth; n = n.parentElement, i++) {
+        if (sharedWith(n, e)) return null;
+        const c = Array.from(n.querySelectorAll(selector)).find((x) => !boundElsewhere(x, e) && !skip(clean(textOf(x)), x));
+        if (c) return c;
+      }
+      return null;
+    };
     // Labels are read here, in one snapshot: a per-field locator wait cost 30 s for every field without label[for].
+    // A placeholder is a hint ("Type your response"), so the field's own question text outranks it.
     const labelOf = (e: DomElement): string => {
       const viaFor = forLabel(e);
       if (viaFor && !SKIP.test(viaFor)) return viaFor;
@@ -161,15 +181,10 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       if (named && !SKIP.test(named)) return named;
       const aria = clean(e.getAttribute("aria-label"));
       if (aria) return aria;
+      const own = ownLabel(e, 6, "legend, label, strong, [class*='label' i]", (t) => t.length <= 1 || t.length >= 800 || SKIP.test(t));
+      if (own) return clean(textOf(own));
       const placeholder = clean(e.getAttribute("placeholder"));
       if (placeholder && !/^(select|type here|start typing|enter|choose|\.\.\.)/i.test(placeholder)) return placeholder;
-      for (let n = e.parentElement, i = 0; n && i < 6; n = n.parentElement, i++) {
-        for (const c of Array.from(n.querySelectorAll("legend, label, strong, [class*='label' i]"))) {
-          if (boundElsewhere(c, e)) continue;
-          const t = clean(textOf(c));
-          if (t.length > 1 && t.length < 220 && !SKIP.test(t)) return t;
-        }
-      }
       return "";
     };
     const optionTextOf = (e: DomElement): string => {
@@ -186,14 +201,11 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
       const box = e.closest('[role="radiogroup"], [role="group"], fieldset');
       const named = labelledBy(box);
       if (named) return { label: named, required: box?.getAttribute("aria-required") === "true" };
-      for (let n = e.parentElement, i = 0; n && i < 8; n = n.parentElement, i++) {
-        for (const c of Array.from(n.querySelectorAll("legend, label, [class*='label' i]:not(input):not(select):not(textarea)"))) {
-          const t = clean(textOf(c));
-          if (t.length < 4 || t.length >= 250 || /^(clear|remove)$/i.test(t) || opts.includes(t)) continue;
-          return { label: t, required: /[*✱]\s*$/.test(t) || /required/i.test(c.className || "") };
-        }
-      }
-      return null;
+      const skip = (t: string, el: DomElement): boolean => t.length < 4 || t.length >= 800 || /^(clear|remove)$/i.test(t) || opts.includes(t) || !!el.querySelector("input");
+      const c = ownLabel(e, 8, "legend, label, [class*='label' i]:not(input):not(select):not(textarea)", skip);
+      if (!c) return null;
+      const t = clean(textOf(c));
+      return { label: t, required: /[*✱]\s*$/.test(t) || /required/i.test(c.className || "") };
     };
 
     const els = Array.from(dom.document.querySelectorAll("input, select, textarea"));
