@@ -1145,6 +1145,17 @@ export const jobApplications = agentsSchema.table(
     liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
 
     /**
+     * Mac worker lease (2026-11-22, 0048): the Mac applies to CAPTCHA-blocked rows from a real Chrome. One lease at
+     * a time per row: `mac_lease_id` names it, `mac_lease_until` is when it lapses, `mac_attempts` caps retries.
+     */
+    mac_lease_id: text("mac_lease_id"),
+    mac_leased_at: timestamp("mac_leased_at", { withTimezone: true }),
+    mac_lease_until: timestamp("mac_lease_until", { withTimezone: true }),
+    mac_attempts: integer("mac_attempts").notNull().default(0),
+    mac_result: text("mac_result"),
+    mac_result_at: timestamp("mac_result_at", { withTimezone: true }),
+
+    /**
      * Where this row appeared in the LAST brief, and at what number.
      *
      * Pinned at render time so `/draft 2` resolves to the row the founder was
@@ -1834,3 +1845,11 @@ export * from "./journey-runs-schema.js";
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
+
+// ── mac_worker_beat ─────────────────────────────────────────────────────────────
+
+/** One row per Mac worker: when it last checked in. `macOnline` (tools/jobhunt/mac-worker-rules.ts) reads it. */
+export const macWorkerBeat = agentsSchema.table("mac_worker_beat", {
+  worker_id: text("worker_id").primaryKey(),
+  last_beat_at: timestamp("last_beat_at", { withTimezone: true }).notNull().defaultNow(),
+});

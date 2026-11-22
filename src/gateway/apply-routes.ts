@@ -35,6 +35,7 @@ import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySe
 import { runCodeEntry, runSubmit, type settleSubmittedByHand } from "./apply-submit.js";
 import { handleHandoff, type HandoffDeps } from "./apply-handoff-routes.js";
 import { handleHomeRoutes, type JobsApiDeps } from "./apply-prepare-api.js";
+import { handleMacWorkerRequest, isMacWorkerPath } from "./mac-worker-api.js";
 import { handleProfileEditor, isProfileEditorPath } from "./profile-api.js";
 import { handleQuestions, isQuestionsPath } from "./questions-api.js";
 
@@ -199,6 +200,10 @@ export async function handleApplyRequest(
     const method = req.method ?? "";
     if (method !== "GET" && method !== "POST") {
       text(res, 405, "Method not allowed", { Allow: "GET, POST" });
+      return;
+    }
+    if (isMacWorkerPath(req.url)) {
+      await handleMacWorkerRequest(req, res);
       return;
     }
     if (isProfileEditorPath(req.url)) {
