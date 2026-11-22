@@ -3,7 +3,8 @@
  * Greenhouse answers the Submit click with a code field (the code is emailed to the applicant) and keeps
  * Submit greyed until it is typed. This module keeps that one browser page open for up to ten minutes,
  * keyed by application row, so the founder can type the code on the Mini App page.
- * The bot never reads email: the code only arrives through enterEmailCode, typed by the founder.
+ * The code arrives through enterEmailCode: typed by the founder, or (EMAIL_CODE_AUTOREAD on) read from Gmail
+ * read-only by email-code-poll.ts. This module itself never touches email.
  * The confirmation check lives here so the first click and the click after the code run the same check.
  * Markup is a HYPOTHESIS (no saved Greenhouse HTML in the repo): prompt text + empty code input(s) + greyed Submit.
  */

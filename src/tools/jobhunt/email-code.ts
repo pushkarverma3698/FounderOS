@@ -68,24 +68,33 @@ function codesIn(text: string): string[] {
   return out;
 }
 
-/** Every distinct code in the qualifying mails (empty, one, or several). */
-export function findEmailCodes(mails: readonly CodeMail[], opts: ExtractOptions): string[] {
+export interface CodeScan {
+  /** Every distinct code in the qualifying mails (empty, one, or several). */
+  readonly codes: string[];
+  /** Sender domains of the mails that carried a code (for logging; never the code or the body). */
+  readonly domains: string[];
+}
+
+export function scanEmailCodes(mails: readonly CodeMail[], opts: ExtractOptions): CodeScan {
   const needle = companyNeedle(opts.company);
-  if (!needle) return [];
+  const codes = new Set<string>();
+  const domains = new Set<string>();
+  if (!needle) return { codes: [], domains: [] };
   const floor = Math.floor(opts.sentAfter / 1000) * 1000;
-  const found = new Set<string>();
   for (const m of mails) {
     if (!(m.receivedAt >= floor)) continue;
     if (!senderAllowed(m.sender, opts.senderAllow)) continue;
     if (!squash(`${m.subject} ${m.body}`).includes(needle)) continue;
-    for (const c of codesIn(`${m.subject}\n${m.body}`)) found.add(c);
+    const here = codesIn(`${m.subject}\n${m.body}`);
+    for (const c of here) codes.add(c);
+    if (here.length > 0) domains.add(senderDomain(m.sender));
   }
-  return [...found];
+  return { codes: [...codes], domains: [...domains] };
 }
 
 /** The code, or null when there is none or more than one (never guess). */
 export function extractEmailCode(mails: readonly CodeMail[], opts: ExtractOptions): string | null {
-  const codes = findEmailCodes(mails, opts);
+  const { codes } = scanEmailCodes(mails, opts);
   return codes.length === 1 ? codes[0]! : null;
 }
 
