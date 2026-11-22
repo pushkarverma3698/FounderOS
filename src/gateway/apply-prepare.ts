@@ -15,7 +15,8 @@ import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-pr
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { coverLetterMessage } from "./apply-cover-letter.js";
 import { runFormPrepAndPrompt } from "./apply-flow.js";
-import { appliedOn, artifactDirForChat, resolveCoverLetter, resolveResumePdf } from "./apply-material.js";
+import { resolveResumePdf } from "../tools/jobhunt/resume-pdf.js";
+import { appliedOn, artifactDirForChat, resolveCoverLetter } from "./apply-material.js";
 import { forgetUnconfirmedClick, LOCK_HELD_MESSAGE, newSession, tryLockApply, type ApplySender } from "./apply-session.js";
 import { alreadyAppliedMessage } from "./apply-submit.js";
 import { safeHtml } from "./safe-html.js";

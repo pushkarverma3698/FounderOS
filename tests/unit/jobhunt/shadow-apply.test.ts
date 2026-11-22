@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApplyProfile } from "../../../src/tools/jobhunt/apply-profile.js";
 import type { JobSearchProfile } from "../../../src/tools/jobhunt/profile-config.js";
-import { runShadowApply, shadowApplyEnabled, shadowPerRunCap, type ShadowDeps, type ShadowRow } from "../../../src/tools/jobhunt/shadow-apply.js";
+import { realShadowDeps, runShadowApply, shadowApplyEnabled, shadowPerRunCap, type ShadowDeps, type ShadowRow } from "../../../src/tools/jobhunt/shadow-apply.js";
 
 vi.mock("../../../src/infra/logger.js", () => ({
   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
   childLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
+
+const mockResolve = vi.fn();
+vi.mock("../../../src/tools/jobhunt/resume-pdf.js", () => ({
+  resolveResumePdf: (...a: unknown[]) => mockResolve(...a),
+  artifactDirForChat: (id: string) => `/art/${id}`,
+}));
+vi.mock("../../../src/infra/telegram-send.js", () => ({ jobsChatId: () => "jobs-chat" }));
 
 const NOW = new Date("2026-11-15T12:00:00Z");
 const PASS = JSON.stringify([{ gate: "Sponsor", status: "pass", evidence: "x" }]);
@@ -100,5 +107,28 @@ describe("runShadowApply", () => {
     const { d, prepare } = deps({ p1: [mk("a", "https://jobs.lever.co/x/1")] }, { loadProfile: async () => null });
     await runShadowApply(d, {});
     expect(prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe("resume fallback chain", () => {
+  it("routeOne hands the jobs profile and apply profile to resumeFor and the result to prepare", async () => {
+    const resumeFor = vi.fn(async () => "/art/jobs-chat/cv-base-p1.pdf");
+    const { d, prepare } = deps({ p1: [mk("r1", "https://jobs.lever.co/x/1")] }, { resumeFor });
+    await runShadowApply(d, {});
+    expect(resumeFor).toHaveBeenCalledWith(expect.objectContaining({ id: "r1" }), expect.objectContaining({ id: "p1" }), applyProfile);
+    expect((prepare.mock.calls[0] as unknown[] | undefined)?.[3]).toEqual({ resumePath: "/art/jobs-chat/cv-base-p1.pdf" });
+  });
+
+  it("real resumeFor uses the shared chain in the jobs chat artifact dir", async () => {
+    mockResolve.mockResolvedValue({ ok: true, pdfPath: "/art/jobs-chat/cv-base-p1.pdf" });
+    const row = mk("r2", "https://jobs.lever.co/x/1");
+    const out = await realShadowDeps().resumeFor(row, profile("p1"), applyProfile);
+    expect(out).toBe("/art/jobs-chat/cv-base-p1.pdf");
+    expect(mockResolve).toHaveBeenCalledWith(row, expect.objectContaining({ id: "p1" }), applyProfile, "/art/jobs-chat");
+  });
+
+  it("real resumeFor returns undefined when resolution fails", async () => {
+    mockResolve.mockResolvedValue({ ok: false, reason: "base CV read failed" });
+    expect(await realShadowDeps().resumeFor(mk("r3", "https://jobs.lever.co/x/1"), profile("p1"), applyProfile)).toBeUndefined();
   });
 });

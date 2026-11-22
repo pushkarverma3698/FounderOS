@@ -14,7 +14,6 @@
  * sweep tick cannot stall. Workday and other unsupported hosts are routed from the URL alone, with no browser.
  */
 
-import { promises as fs } from "node:fs";
 import { listLaneCandidates, claimLaneRow, recordLane } from "../../db/job-apply-lane-queries.js";
 import type { JobApplication } from "../../db/schema.js";
 import { childLogger } from "../../infra/logger.js";
@@ -26,6 +25,7 @@ import { readCandidateDossier, type CandidateDossier } from "./candidate-dossier
 import { classifyFormUrl } from "./form-platform.js";
 import { prepareApplicationForm } from "./form-runner.js";
 import { listProfiles, type JobSearchProfile } from "./profile-config.js";
+import { artifactDirForChat, resolveResumePdf } from "./resume-pdf.js";
 import { formatShadowSummary, type ShadowRoutedRow } from "./shadow-apply-report.js";
 
 /** What this pass reads off a job_applications row (a full JobApplication satisfies it). */
@@ -48,7 +48,7 @@ export interface ShadowDeps {
   readonly profiles: () => readonly JobSearchProfile[];
   readonly loadProfile: (profileId: string) => Promise<ApplyProfile | null>;
   readonly loadDossier: (profileId: string) => Promise<CandidateDossier | undefined>;
-  readonly resumeFor: (row: ShadowRow, profile: ApplyProfile) => Promise<string | undefined>;
+  readonly resumeFor: (row: ShadowRow, profile: JobSearchProfile, applyProfile: ApplyProfile) => Promise<string | undefined>;
   readonly candidates: (profileId: string, now: Date) => Promise<readonly ShadowRow[]>;
   readonly claim: (id: string, now: Date) => Promise<boolean>;
   readonly record: (id: string, verdict: LaneVerdict, now: Date) => Promise<void>;
@@ -62,11 +62,14 @@ export interface ShadowDeps {
   };
 }
 
-async function resumeIfPresent(row: ShadowRow, profile: ApplyProfile): Promise<string | undefined> {
-  const configured = (row.track ? profile.resumes?.[row.track] : undefined) ?? profile.default_resume ?? "";
-  if (!configured) return undefined;
-  // allow-failopen: a missing resume file only means the resume field is reported as unanswered.
-  return fs.stat(configured).then((s) => (s.isFile() && s.size > 0 ? configured : undefined)).catch(() => undefined);
+/** Same chain as the manual path (tailored, configured, rendered from cv.md); $0, no model call. */
+async function resumeIfPresent(row: ShadowRow, profile: JobSearchProfile, applyProfile: ApplyProfile): Promise<string | undefined> {
+  const { jobsChatId } = await import("../../infra/telegram-send.js");
+  const out = await resolveResumePdf(row, profile, applyProfile, artifactDirForChat(jobsChatId()));
+  if (out.ok) return out.pdfPath;
+  log.warn({ rowId: row.id, reason: out.reason }, "Shadow apply: no resume PDF resolved; the resume field stays unanswered");
+  // allow-failopen: no resume file only means the resume field is reported as unanswered.
+  return undefined;
 }
 
 export function realShadowDeps(): ShadowDeps {
@@ -93,13 +96,14 @@ export function realShadowDeps(): ShadowDeps {
 async function routeOne(
   deps: ShadowDeps,
   row: ShadowRow,
+  jobsProfile: JobSearchProfile,
   profile: ApplyProfile,
   dossier: CandidateDossier | undefined,
 ): Promise<LaneInput> {
   const check = classifyFormUrl(row.url ?? "");
   if (!check.supported) return { kind: "failed", reason: check.reason, platform: null };
   try {
-    const resumePath = await deps.resumeFor(row, profile);
+    const resumePath = await deps.resumeFor(row, jobsProfile, profile);
     // No coverLetterText: the letter is a paid call and shadow runs cost $0.
     const result = await deps.prepare(row.url ?? "", row.company, profile, resumePath ? { resumePath } : {}, dossier);
     return result.ok
@@ -171,7 +175,7 @@ export async function runShadowApply(deps: ShadowDeps = realShadowDeps(), env: N
       const needsBrowser = classifyFormUrl(row.url ?? "").supported;
       if (!(await deps.claim(row.id, deps.now()))) continue;
       if (needsBrowser) opened += 1;
-      const input = await routeOne(deps, row, applyProfile, dossier);
+      const input = await routeOne(deps, row, profile, applyProfile, dossier);
       const routedVerdict = routeLane(input);
       await deps.record(row.id, routedVerdict, deps.now());
       const verdict = input.kind === "prepared" ? await maybeAutoSend(deps, env, row, profile.id, routedVerdict, input.summary) : routedVerdict;

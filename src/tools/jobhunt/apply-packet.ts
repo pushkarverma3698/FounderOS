@@ -124,7 +124,7 @@ export async function resolveBriefRow(
 }
 
 /** Where a tailored CV PDF lands — mirrors write-artifact.ts's directory convention. */
-export function tailoredCvPath(artifactDir: string, row: JobApplication): string {
+export function tailoredCvPath(artifactDir: string, row: Pick<JobApplication, "id" | "company">): string {
   const companySlug = row.company.toLowerCase().replace(/[^a-z0-9]+/g, "_") || "role";
   return path.join(artifactDir, `cv-${companySlug}-${row.id.slice(0, 8)}.pdf`);
 }
