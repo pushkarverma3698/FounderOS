@@ -289,3 +289,9 @@ export function formAnswerDraftsEnabled(): boolean {
   const v = (process.env["FORM_ANSWER_DRAFTS"] ?? "").trim().toLowerCase();
   return !["0", "false", "no", "off"].includes(v);
 }
+
+/** Read the emailed apply security code from Gmail (read-only) and enter it. OFF unless set to 1/true/yes/on. */
+export function emailCodeAutoreadEnabled(): boolean {
+  const v = (process.env["EMAIL_CODE_AUTOREAD"] ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(v);
+}
