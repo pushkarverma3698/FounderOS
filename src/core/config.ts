@@ -290,6 +290,15 @@ export function formAnswerDraftsEnabled(): boolean {
   return !["0", "false", "no", "off"].includes(v);
 }
 
+/**
+ * Bearer token for the Mac worker API (/apply/mac-worker/*, gateway/mac-worker-api.ts). Read per call so a test
+ * can set it. Unset or blank means the whole API answers 404. Not the Mini App session and not the apply-link secret.
+ */
+export function macWorkerToken(): string | undefined {
+  const v = process.env["MAC_WORKER_TOKEN"]?.trim();
+  return v ? v : undefined;
+}
+
 /** Read the emailed apply security code from Gmail (read-only) and enter it. OFF unless set to 1/true/yes/on. */
 export function emailCodeAutoreadEnabled(): boolean {
   const v = (process.env["EMAIL_CODE_AUTOREAD"] ?? "").trim().toLowerCase();

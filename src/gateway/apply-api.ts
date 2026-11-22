@@ -56,10 +56,10 @@ export interface ApiDeps {
 export const defaultPhotoTo: ApiDeps["photoTo"] = (chatId, png, caption, filename) => sendPhoto(png, { chatId, caption, filename });
 
 /** The whole body as text, or TOO_LARGE as soon as it passes the cap (the rest is dropped, not buffered). */
-export function readBody(req: IncomingMessage): Promise<string | typeof TOO_LARGE> {
+export function readBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<string | typeof TOO_LARGE> {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers["content-length"]);
-    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    if (Number.isFinite(declared) && declared > maxBytes) {
       resolve(TOO_LARGE);
       return;
     }
@@ -69,7 +69,7 @@ export function readBody(req: IncomingMessage): Promise<string | typeof TOO_LARG
     req.on("data", (chunk: Buffer) => {
       if (settled) return;
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         settled = true;
         chunks.length = 0;
         resolve(TOO_LARGE);
