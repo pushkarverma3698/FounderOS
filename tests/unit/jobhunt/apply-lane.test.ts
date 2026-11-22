@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isShadowCandidate, routeLane, type LaneCandidateRow } from "../../../src/tools/jobhunt/apply-lane.js";
+import { isShadowCandidate, routeLane, selectShadowBatch, type LaneCandidateRow } from "../../../src/tools/jobhunt/apply-lane.js";
 import type { FormPlanSummary, UnansweredQuestion } from "../../../src/tools/jobhunt/form-filled.js";
 import { formatShadowSummary, type ShadowRoutedRow } from "../../../src/tools/jobhunt/shadow-apply-report.js";
 
@@ -103,5 +103,31 @@ describe("formatShadowSummary", () => {
     expect(msgs.length).toBeGreaterThan(1);
     expect(msgs.every((m) => m.length <= 3600)).toBe(true);
     expect(msgs.join("\n").match(/•/g)).toHaveLength(80);
+  });
+});
+
+describe("selectShadowBatch", () => {
+  const NOW = new Date("2026-11-20T12:00:00Z");
+  const PASS = JSON.stringify([{ gate: "Sponsor", status: "pass", evidence: "x" }]);
+  const row = (id: string, url: string, ageH: number) => ({
+    id, url, gate_json: PASS, created_at: new Date(NOW.getTime() - ageH * 3_600_000),
+    applied_at: null, skipped_at: null, liveness: "unknown", apply_lane_at: null,
+  });
+  it("takes every no-browser row without spending a slot, then the oldest browser rows up to the cap", () => {
+    const rows = [
+      row("new-lever", "https://jobs.lever.co/a/1", 1),
+      row("wd", "https://x.wd1.myworkdayjobs.com/job/1", 2),
+      row("old-lever", "https://jobs.lever.co/a/2", 20),
+      row("mid-lever", "https://jobs.lever.co/a/3", 10),
+      row("him", "https://himalayas.app/jobs/1", 3),
+    ];
+    const out = selectShadowBatch(rows, NOW, 2).map((r) => r.id);
+    expect(out).toEqual(["old-lever", "mid-lever", "him", "wd"]);
+    expect(out).not.toContain("new-lever");
+  });
+  it("returns oldest first, drops non-candidates, and gives zero browser rows when no slots are left", () => {
+    const stale = row("stale", "https://jobs.lever.co/a/9", 30);
+    const out = selectShadowBatch([row("b", "https://jobs.lever.co/a/1", 1), stale, row("wd", "https://x.wd1.myworkdayjobs.com/j", 5)], NOW, 0);
+    expect(out.map((r) => r.id)).toEqual(["wd"]);
   });
 });

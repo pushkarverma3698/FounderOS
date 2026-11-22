@@ -2,14 +2,16 @@
  * job_applications: shadow apply lane reads and writes (kept out of job-queries.ts, over its line budget).
  */
 
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, not, or } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication } from "./schema.js";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
-const CANDIDATE_LIMIT = 50;
+const CANDIDATE_LIMIT = 200;
 
-/** Coarse SQL cut of the shadow-apply pool, newest first. `isShadowCandidate` is the exact rule applied on top. */
+/**
+ * Coarse SQL cut of the shadow-apply pool, oldest first. It drops rows with a flag or reject gate here, so rows
+ * that can never be routed do not fill the limit and starve the ones that can. `isShadowCandidate` is the exact rule applied on top. */
 export async function listLaneCandidates(profileId: string, now: Date): Promise<JobApplication[]> {
   const cutoff = new Date(now.getTime() - WINDOW_MS);
   return getDb()
@@ -19,13 +21,16 @@ export async function listLaneCandidates(profileId: string, now: Date): Promise<
       and(
         eq(jobApplications.profile_id, profileId),
         gte(jobApplications.created_at, cutoff),
+        isNotNull(jobApplications.gate_json),
+        not(like(jobApplications.gate_json, '%"status":"flag"%')),
+        not(like(jobApplications.gate_json, '%"status":"reject"%')),
         isNull(jobApplications.applied_at),
         isNull(jobApplications.skipped_at),
         ne(jobApplications.liveness, "expired"),
         or(isNull(jobApplications.apply_lane_at), lt(jobApplications.apply_lane_at, cutoff)),
       ),
     )
-    .orderBy(desc(jobApplications.created_at))
+    .orderBy(asc(jobApplications.created_at))
     .limit(CANDIDATE_LIMIT);
 }
 
