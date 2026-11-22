@@ -14,7 +14,7 @@
  */
 
 import type { InlineKeyboard } from "grammy";
-import { TENANT } from "../core/config.js";
+import { emailCodeAutoreadEnabled, TENANT } from "../core/config.js";
 import { getApplicationById } from "../db/apply-queries.js";
 import type { JobApplication } from "../db/schema.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
@@ -24,19 +24,21 @@ import { loadApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
 import { withFormOnlyAnswers } from "../tools/jobhunt/company-answer.js";
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
+import { pollEmailCode, readRecentMail } from "../tools/jobhunt/email-code-poll.js";
 import { enterEmailCode, heldCodeInfo, onHeldExpired, type CodeEntryResult } from "../tools/jobhunt/held-submit.js";
 import { shortJobId } from "../tools/jobhunt/job-ref.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
 import { letterFacts, letterOf } from "./apply-cover-letter.js";
 import { answerLink, buildBlockedKeyboard, buildSubmitKeyboard } from "./apply-flow.js";
-import { appliedOn, artifactDirForChat, resolveCoverLetter, resolveResumePdf } from "./apply-material.js";
-import { cardTag, endSession, getRunnerDeps, noteUnconfirmedClick, sessionForRow, unconfirmedClickAt } from "./apply-session.js";
+import { resolveResumePdf } from "../tools/jobhunt/resume-pdf.js";
+import { appliedOn, artifactDirForChat, resolveCoverLetter } from "./apply-material.js";
+import { cardTag, endSession, getRunnerDeps, noteUnconfirmedClick, sessionForRow, tryLockApply, unconfirmedClickAt } from "./apply-session.js";
 import { markRowApplied } from "./jobhunt-buttons.js";
 import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:apply-submit" });
 
-export type SubmitVia = "telegram" | "miniapp" | "auto";
+export type SubmitVia = "telegram" | "miniapp" | "auto" | "mac";
 
 export interface SubmitIo {
   readonly text: (html: string, keyboard?: InlineKeyboard) => Promise<void>;
@@ -117,6 +119,7 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
   const filled = (loadApplySnapshot(rowId)?.summary.filledAnswers ?? []).filter((f) => f.fieldType !== "file");
   const formOnly = [...filled.map((f) => ({ label: f.label, answer: f.value })), ...(session?.answered ?? [])];
   const submitProfile = withFormOnlyAnswers(loaded.profile, formOnly, row.company);
+  const sentAt = Date.now();
   const result = await getRunnerDeps().submit(targetUrl, row.company, submitProfile, facts, dossier, rowId);
 
   if (!result.ok) {
@@ -135,12 +138,34 @@ export async function runSubmit(rowId: string, chatId: string, via: SubmitVia, i
     // Not applied, not an unconfirmed click: the page is held and the founder types the emailed code.
     onHeldExpired(rowId, () => void settleUnconfirmed(row, targetUrl, "No code was typed within 10 minutes, so the form was closed.", io));
     await io.text(codeNeededMessage(row), buildBlockedKeyboard(row.id, targetUrl, answerLink(row.id), cardTag(sessionForRow(row.id))));
+    if (emailCodeAutoreadEnabled()) autoreadCode(row, sentAt, via, io);
     return { kind: "code-needed", row, detail: result.evidence };
   }
   return settleUnconfirmed(row, targetUrl, result.evidence, io);
 }
 
-async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
+/** Flag on: read the emailed code from Gmail (read-only) and enter it; the prompt above stays as the fallback. */
+function autoreadCode(row: JobApplication, sentAt: number, via: SubmitVia, io: SubmitIo): void {
+  const enter = async (code: string): Promise<void> => {
+    const release = tryLockApply(row.id, Date.now(), "submit");
+    if (!release) throw new Error("row busy (a code is already being entered)");
+    try {
+      await runCodeEntry(row.id, via, code, io);
+    } finally {
+      release();
+    }
+  };
+  void pollEmailCode(
+    { rowId: row.id, company: row.company, sentAfter: sentAt },
+    { read: () => readRecentMail(), isHeld: () => heldCodeInfo(row.id) !== null, enter, now: Date.now, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) },
+  ).catch((err: unknown) => {
+    // allow-failopen: the Telegram prompt is already out; a poller crash leaves the founder's manual path.
+    log.warn({ rowId: row.id, err: (err as Error).message }, "email code autoread crashed");
+  });
+}
+
+/** Applied, the audit row and the chat line for a confirmed send. Also the Mac worker's confirmed result (mac-worker-api.ts). */
+export async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
   await markRowApplied(row);
   await auditConfirmed(row, via, targetUrl);
   endSession(row.id);
