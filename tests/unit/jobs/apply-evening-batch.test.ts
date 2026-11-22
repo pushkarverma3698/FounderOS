@@ -93,3 +93,18 @@ describe("schedule", () => {
     expect(eveningDay(new Date("2026-11-15T23:30:00Z"))).toBe("2026-11-16");
   });
 });
+
+describe("scoreboard in the evening batch", () => {
+  it("sends the scoreboard first, even when nothing waits", async () => {
+    const { d, send } = deps({});
+    const scoreboard = vi.fn(async () => ["<b>Scoreboard</b>"]);
+    expect(await runEveningBatch(NOW, { ...d, scoreboard })).toBe(2);
+    expect(send).toHaveBeenCalledWith({ text: "<b>Scoreboard</b>", keyboard: [] });
+  });
+  it("puts it before the waiting list", async () => {
+    const { d, send } = deps({ p1: [row(1, "p1", "needs_you")] });
+    await runEveningBatch(NOW, { ...d, scoreboard: async (id) => (id === "p1" ? ["<b>SB</b>"] : []) });
+    expect((send.mock.calls[0] as unknown as [{ text: string }])[0].text).toBe("<b>SB</b>");
+    expect(send.mock.calls.length).toBeGreaterThan(1);
+  });
+});

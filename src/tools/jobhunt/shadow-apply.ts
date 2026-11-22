@@ -10,7 +10,7 @@
  * AUTO_APPLY_SEND=on, the profile's /autoapply switch is on and `canAutoSend` passes. With no `autoSend` dep or
  * either switch off, this pass is exactly the shadow pass: nothing reaches an employer.
  *
- * One browser at a time, at most AUTO_APPLY_PREPARE_PER_RUN forms opened per run (default 5, newest first), so a
+ * One browser at a time, at most AUTO_APPLY_PREPARE_PER_RUN forms opened per run (default 5, oldest first), so a
  * sweep tick cannot stall. Workday and other unsupported hosts are routed from the URL alone, with no browser.
  */
 
@@ -18,7 +18,7 @@ import { promises as fs } from "node:fs";
 import { listLaneCandidates, claimLaneRow, recordLane } from "../../db/job-apply-lane-queries.js";
 import type { JobApplication } from "../../db/schema.js";
 import { childLogger } from "../../infra/logger.js";
-import { isShadowCandidate, routeLane, type LaneCandidateRow, type LaneInput, type LaneVerdict } from "./apply-lane.js";
+import { routeLane, selectShadowBatch, type LaneCandidateRow, type LaneInput, type LaneVerdict } from "./apply-lane.js";
 import { autoSendEnvOn, canAutoSend, dailyCapFrom, type AutoSendHistory, type AutoSendOutcomeLite } from "./auto-send-rules.js";
 import type { FormPlanSummary } from "./form-filled.js";
 import { applyProfilePathFor, readApplyProfile, type ApplyProfile } from "./apply-profile.js";
@@ -166,10 +166,9 @@ export async function runShadowApply(deps: ShadowDeps = realShadowDeps(), env: N
     }
     const dossier = await deps.loadDossier(profile.id);
     const now = deps.now();
-    const rows = (await deps.candidates(profile.id, now)).filter((r) => isShadowCandidate(r, now));
+    const rows = selectShadowBatch(await deps.candidates(profile.id, now), now, cap - opened);
     for (const row of rows) {
       const needsBrowser = classifyFormUrl(row.url ?? "").supported;
-      if (needsBrowser && opened >= cap) continue;
       if (!(await deps.claim(row.id, deps.now()))) continue;
       if (needsBrowser) opened += 1;
       const input = await routeOne(deps, row, applyProfile, dossier);
