@@ -38,7 +38,7 @@ import { safeHtml } from "./safe-html.js";
 
 const log = childLogger({ module: "gateway:apply-submit" });
 
-export type SubmitVia = "telegram" | "miniapp" | "auto";
+export type SubmitVia = "telegram" | "miniapp" | "auto" | "mac";
 
 export interface SubmitIo {
   readonly text: (html: string, keyboard?: InlineKeyboard) => Promise<void>;
@@ -164,7 +164,8 @@ function autoreadCode(row: JobApplication, sentAt: number, via: SubmitVia, io: S
   });
 }
 
-async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
+/** Applied, the audit row and the chat line for a confirmed send. Also the Mac worker's confirmed result (mac-worker-api.ts). */
+export async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
   await markRowApplied(row);
   await auditConfirmed(row, via, targetUrl);
   endSession(row.id);
