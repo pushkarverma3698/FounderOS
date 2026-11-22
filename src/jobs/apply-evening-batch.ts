@@ -18,6 +18,7 @@ import { childLogger } from "../infra/logger.js";
 import { sendToJobsChat } from "../infra/telegram-send.js";
 import { listProfiles, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
+import { countScoreboard, dayWindow, formatScoreboard, isEmptyScoreboard } from "../tools/jobhunt/apply-scoreboard.js";
 import { buildEveningMessages, type EveningMessage, type WaitingRole } from "./apply-evening-format.js";
 
 const log = childLogger({ module: "apply-evening-batch" });
@@ -34,6 +35,8 @@ export interface EveningDeps {
   readonly waiting: (profileId: string, now: Date) => Promise<readonly JobApplication[]>;
   /** The signed answer link for a row, or null when none can be built. */
   readonly answerUrl: (row: JobApplication, now: Date) => string | null;
+  /** The profile's daily scoreboard messages (HTML); empty when the day recorded nothing. Optional. */
+  readonly scoreboard?: (profileId: string, name: string, now: Date) => Promise<readonly string[]>;
   readonly send: (message: EveningMessage) => Promise<void>;
   /** True when this caller won today's marker for the profile. */
   readonly claim: (profileId: string, now: Date) => boolean;
@@ -76,6 +79,12 @@ async function realDeps(): Promise<EveningDeps> {
       const snap = loadApplySnapshot(row.id);
       return cfg.ok && snap && snap.profileId === row.profile_id ? buildApplyUrl(cfg, row.id, row.profile_id, now.getTime()) : null;
     },
+    scoreboard: async (profileId, name, now) => {
+      const { loadScoreboardInput } = await import("../db/apply-scoreboard-queries.js");
+      const { start, end } = dayWindow(now, EVENING_TIME_ZONE);
+      const board = countScoreboard(await loadScoreboardInput(profileId, start, end, now));
+      return isEmptyScoreboard(board) ? [] : formatScoreboard(name, board);
+    },
     send: (m) => sendToJobsChat(m.text, "HTML", m.keyboard),
     claim: claimMarker,
     release: releaseMarker,
@@ -95,7 +104,8 @@ const toRole = (row: JobApplication, answerUrl: string | null): WaitingRole => (
 async function batchFor(profile: JobSearchProfile, now: Date, d: EveningDeps): Promise<EveningMessage[]> {
   const rows = await d.waiting(profile.id, now);
   const first = profile.candidateName.trim().split(/\s+/)[0] ?? profile.candidateName;
-  return buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))));
+  const board = d.scoreboard ? await d.scoreboard(profile.id, first, now) : [];
+  return [...board.map((text): EveningMessage => ({ text, keyboard: [] })), ...buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))))];
 }
 
 /** Send each profile's batch. Returns how many profiles got one. One profile failing never blocks the others. */

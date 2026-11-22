@@ -14,6 +14,7 @@
 
 import type { FormPlanSummary } from "./form-filled.js";
 import type { FormPlatform } from "./form-platform.js";
+import { classifyFormUrl } from "./form-platform.js";
 import { parseGates } from "./gates.js";
 
 export type ApplyLane = "auto" | "needs_you" | "hand_off";
@@ -87,4 +88,26 @@ export function isShadowCandidate(row: LaneCandidateRow, now: Date): boolean {
   if (!row.created_at || now.getTime() - row.created_at.getTime() > LANE_WINDOW_MS) return false;
   if (row.applied_at || row.skipped_at || row.liveness === "expired") return false;
   return !row.apply_lane_at || now.getTime() - row.apply_lane_at.getTime() >= LANE_WINDOW_MS;
+}
+
+/**
+ * The rows one pass handles, oldest first (the oldest is closest to leaving the 24h window). Rows that need no
+ * browser (Workday, aggregators, any unsupported host) are all taken: they are routed from the URL alone and
+ * never use a slot. Rows that open a browser fill at most `browserSlots`.
+ */
+export function selectShadowBatch<R extends LaneCandidateRow & { readonly url: string | null }>(
+  rows: readonly R[],
+  now: Date,
+  browserSlots: number,
+): R[] {
+  const oldestFirst = rows
+    .filter((r) => isShadowCandidate(r, now))
+    .sort((a, b) => (a.created_at?.getTime() ?? 0) - (b.created_at?.getTime() ?? 0));
+  let slots = Math.max(0, browserSlots);
+  return oldestFirst.filter((r) => {
+    if (!classifyFormUrl(r.url ?? "").supported) return true;
+    if (slots <= 0) return false;
+    slots -= 1;
+    return true;
+  });
 }

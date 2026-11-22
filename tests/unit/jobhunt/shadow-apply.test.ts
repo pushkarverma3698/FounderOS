@@ -53,7 +53,7 @@ describe("env switches", () => {
 });
 
 describe("runShadowApply", () => {
-  it("caps browser opens across profiles, newest first, and leaves the rest for the next run", async () => {
+  it("caps browser opens across profiles, oldest first, and leaves the rest for the next run", async () => {
     const rows = { p1: [1, 2, 3].map((n) => mk(`a${n}`, "https://jobs.lever.co/x/1")), p2: [mk("b1", "https://jobs.lever.co/y/2")] };
     const { d, prepare, record, send } = deps(rows);
     const out = await runShadowApply(d, { AUTO_APPLY_PREPARE_PER_RUN: "2" });
