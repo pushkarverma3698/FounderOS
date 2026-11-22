@@ -12,6 +12,8 @@ import { readRuntimeSwitch, writeRuntimeSwitch } from "../tools/jobhunt/auto-sen
 import { listProfiles } from "../tools/jobhunt/profile-config.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
+import { countScoreboard, dayWindow, formatScoreboard } from "../tools/jobhunt/apply-scoreboard.js";
+import { loadScoreboardInput } from "../db/apply-scoreboard-queries.js";
 import { safeHtml } from "./safe-html.js";
 
 export type AutoApplyVerb = "on" | "off" | "status";
@@ -72,6 +74,12 @@ async function statusFor(profileId: string): Promise<AutoApplyStatus> {
   };
 }
 
+async function scoreboardFor(profileId: string): Promise<readonly string[]> {
+  const now = new Date();
+  const { start, end } = dayWindow(now, "Europe/Amsterdam");
+  return formatScoreboard("", countScoreboard(await loadScoreboardInput(profileId, start, end, now)));
+}
+
 /** The On/Off/Refresh tap: same write as the typed verb, then the status message is redrawn in place. */
 export async function handleAutoApplyTap(ctx: Context, tap: { verb: AutoApplyVerb; profileId: string }): Promise<void> {
   if (!listProfiles().some((p) => p.id === tap.profileId)) {
@@ -102,4 +110,5 @@ export async function handleAutoApplySwitch(ctx: Context): Promise<void> {
   if (verb !== "status") await writeRuntimeSwitch(profileId, verb === "on");
   const status = await statusFor(profileId);
   await ctx.reply(renderAutoApplyStatus(status), { parse_mode: "HTML", reply_markup: autoApplyKeyboard(status) });
+  for (const text of await scoreboardFor(profileId)) await ctx.reply(text, { parse_mode: "HTML" });
 }
