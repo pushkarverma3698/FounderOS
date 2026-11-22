@@ -68,7 +68,7 @@ export function countScoreboard(i: ScoreboardInput): Scoreboard {
   return {
     caught: i.caught.length,
     routedWithin2h: routed.length,
-    filled: i.caught.filter((r) => r.apply_lane).length,
+    filled: i.caught.filter((r) => r.apply_lane === "auto" || r.apply_lane === "needs_you").length,
     sent: vps + afterClick + byHand,
     sentBy: { vps, afterClick, byHand },
     confirmed: i.submitted.length,

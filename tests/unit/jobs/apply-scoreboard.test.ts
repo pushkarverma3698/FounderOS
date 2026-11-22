@@ -7,6 +7,8 @@ const input: ScoreboardInput = {
     { created_at: t("2026-11-15T08:00:00Z"), apply_lane: "auto", apply_lane_at: t("2026-11-15T09:00:00Z") },
     { created_at: t("2026-11-15T08:00:00Z"), apply_lane: "needs_you", apply_lane_at: t("2026-11-15T11:00:00Z") },
     { created_at: t("2026-11-15T08:00:00Z"), apply_lane: null, apply_lane_at: null },
+    // hand_off is routed from the URL alone: no form was filled, so it must not count as filled.
+    { created_at: t("2026-11-15T08:00:00Z"), apply_lane: "hand_off", apply_lane_at: t("2026-11-15T13:00:00Z") },
   ],
   waitingLanes: ["needs_you", "needs_you", "hand_off", null],
   attempts: 3,
@@ -22,7 +24,7 @@ const input: ScoreboardInput = {
 describe("countScoreboard", () => {
   const s = countScoreboard(input);
   it("counts the funnel", () => {
-    expect(s).toMatchObject({ caught: 3, routedWithin2h: 1, filled: 2, confirmed: 5, clicks: 2 });
+    expect(s).toMatchObject({ caught: 4, routedWithin2h: 1, filled: 2, confirmed: 5, clicks: 2 });
   });
   it("splits sent by sender", () => {
     expect(s.sent).toBe(6);
@@ -45,7 +47,7 @@ describe("formatScoreboard", () => {
   it("shows the target, every count and each failure reason", () => {
     const text = formatScoreboard("Pushkar", s).join("\n");
     expect(text).toContain("target 35–40 sent/day");
-    expect(text).toContain("Caught 3 → routed within 2h 1 → filled 2 → sent 6 → confirmed 5");
+    expect(text).toContain("Caught 4 → routed within 2h 1 → filled 2 → sent 6 → confirmed 5");
     expect(text).toContain("VPS 3, after your click 2, by hand 1");
     expect(text).toContain("2 × failed: captcha");
     expect(text).toContain("Waiting: needs you 2, hand-off 1");
