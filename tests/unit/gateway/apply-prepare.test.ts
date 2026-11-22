@@ -23,8 +23,11 @@ vi.mock("../../../src/tools/jobhunt/apply-profile.js", async (orig) => ({
 }));
 vi.mock("../../../src/gateway/apply-material.js", async (orig) => ({
   ...(await orig<typeof import("../../../src/gateway/apply-material.js")>()),
-  resolveResumePdf: (...a: unknown[]) => mockResolveResumePdf(...a),
   resolveCoverLetter: (...a: unknown[]) => mockResolveCoverLetter(...a),
+}));
+vi.mock("../../../src/tools/jobhunt/resume-pdf.js", async (orig) => ({
+  ...(await orig<typeof import("../../../src/tools/jobhunt/resume-pdf.js")>()),
+  resolveResumePdf: (...a: unknown[]) => mockResolveResumePdf(...a),
 }));
 vi.mock("../../../src/gateway/apply-flow.js", async (orig) => ({
   ...(await orig<typeof import("../../../src/gateway/apply-flow.js")>()),

@@ -15,7 +15,7 @@ import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-pr
 import { readCandidateDossier } from "../tools/jobhunt/candidate-dossier.js";
 import { buildHandoffRows, type HandoffRow } from "../tools/jobhunt/handoff-rows.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
-import { artifactDirForChat, resolveResumePdf } from "./apply-material.js";
+import { artifactDirForChat, resolveResumePdf } from "../tools/jobhunt/resume-pdf.js";
 import { auditKeyFor } from "./apply-submit.js";
 
 export interface MacPacket {
