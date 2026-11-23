@@ -76,7 +76,7 @@ export async function leaseNextRow(
 }
 
 /** Per profile, the normalised companies applied to, auto-sent to or clicked-but-unconfirmed on the Mac within 30 days. */
-async function cooledCompanies(profileIds: readonly string[], now: Date): Promise<Map<string, Set<string>>> {
+export async function cooledCompanies(profileIds: readonly string[], now: Date): Promise<Map<string, Set<string>>> {
   const since = new Date(now.getTime() - COMPANY_COOLDOWN_DAYS * 24 * 60 * 60 * 1000);
   const out = new Map<string, Set<string>>();
   for (const id of profileIds) {

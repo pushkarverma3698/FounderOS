@@ -62,7 +62,7 @@ describe("Mac worker API", () => {
     m.releaseDry.mockResolvedValue(true);
     m.settle.mockResolvedValue({ kind: "confirmed" });
     deps = {
-      now: () => NOW, token: () => token, profileIds: () => ["pushkar-nl-tech"], lease: m.lease, getLeased: m.getLeased, extend: m.extend,
+      now: () => NOW, token: () => token, profileIds: () => ["pushkar-nl-tech"], claudeWorkday: () => false, lease: m.lease, getLeased: m.getLeased, extend: m.extend,
       release: m.release, unconfirmed: m.unconfirmed, releaseDry: m.releaseDry, beat: m.beat, packet: m.packet, cv: m.cv, settle: m.settle, notify: m.notify, photo: m.photo,
     } as unknown as Deps;
     server = createServer((req, res) => void handleMacWorkerRequest(req, res, deps));
