@@ -17,11 +17,15 @@
 import { listLaneCandidates, claimLaneRow, recordLane } from "../../db/job-apply-lane-queries.js";
 import type { JobApplication } from "../../db/schema.js";
 import { childLogger } from "../../infra/logger.js";
+import { atsMinOverlap } from "../../core/config.js";
 import { routeLane, selectShadowBatch, type LaneCandidateRow, type LaneInput, type LaneVerdict } from "./apply-lane.js";
 import { autoSendEnvOn, canAutoSend, dailyCapFrom, type AutoSendHistory, type AutoSendOutcomeLite } from "./auto-send-rules.js";
 import type { FormPlanSummary } from "./form-filled.js";
 import { applyProfilePathFor, readApplyProfile, type ApplyProfile } from "./apply-profile.js";
 import { readCandidateDossier, type CandidateDossier } from "./candidate-dossier.js";
+import { atsGate, type AtsRecord } from "./ats-record.js";
+import { realTailorDeps, tailorForRow, tailorPerRunCap, type TailorBudget } from "./ats-tailor.js";
+import { isMacEligibleReason } from "./mac-worker-rules.js";
 import { classifyFormUrl } from "./form-platform.js";
 import { prepareApplicationForm } from "./form-runner.js";
 import { listProfiles, type JobSearchProfile } from "./profile-config.js";
@@ -29,7 +33,9 @@ import { artifactDirForChat, resolveResumePdf } from "./resume-pdf.js";
 import { formatShadowSummary, type ShadowRoutedRow } from "./shadow-apply-report.js";
 
 /** What this pass reads off a job_applications row (a full JobApplication satisfies it). */
-export type ShadowRow = Pick<JobApplication, "id" | "company" | "title" | "url" | "track"> & LaneCandidateRow;
+export type ShadowRow = Pick<JobApplication, "id" | "company" | "title" | "url" | "track"> &
+  LaneCandidateRow &
+  Partial<Pick<JobApplication, "description" | "ats_json">>;
 
 const log = childLogger({ module: "shadow-apply" });
 const DEFAULT_PER_RUN = 5;
@@ -53,6 +59,8 @@ export interface ShadowDeps {
   readonly claim: (id: string, now: Date) => Promise<boolean>;
   readonly record: (id: string, verdict: LaneVerdict, now: Date) => Promise<void>;
   readonly prepare: typeof prepareApplicationForm;
+  /** Tailor the CV and run the ATS check for one row (ats-tailor.ts). Absent: no tailoring. Never throws. */
+  readonly tailorRow?: (row: ShadowRow, profile: JobSearchProfile, budget: TailorBudget) => Promise<AtsRecord | null>;
   readonly send: (html: string) => Promise<void>;
   /** The auto-send half, wired in src/jobs (the send path lives in src/gateway). Absent: shadow only. */
   readonly autoSend?: {
@@ -86,6 +94,10 @@ export function realShadowDeps(): ShadowDeps {
     claim: claimLaneRow,
     record: (id, v, now) => recordLane(id, v.lane, v.reason, now),
     prepare: prepareApplicationForm,
+    tailorRow: async (row, profile, budget) => {
+      const { jobsChatId } = await import("../../infra/telegram-send.js");
+      return tailorForRow(realTailorDeps(), row, profile, artifactDirForChat(jobsChatId()), budget);
+    },
     send: async (html) => {
       const { sendToJobsChat } = await import("../../infra/telegram-send.js");
       await sendToJobsChat(html, "HTML");
@@ -113,6 +125,22 @@ async function routeOne(
     // allow-failopen: a crashed form run is recorded on the row as a hand-off with its message.
     return { kind: "failed", reason: `form run crashed: ${(err as Error).message}`, platform: check.platform };
   }
+}
+
+/** Tailoring is for rows a send can follow: the auto lane, or a hand-off the Mac worker solves. */
+const wantsTailoring = (v: LaneVerdict): boolean => v.lane === "auto" || (v.lane === "hand_off" && isMacEligibleReason(v.reason));
+
+/** Tailor + ATS-check a row that qualifies, then apply the gate. A tailor failure leaves the verdict alone. */
+async function tailorAndGate(
+  deps: ShadowDeps,
+  row: ShadowRow,
+  profile: JobSearchProfile,
+  verdict: LaneVerdict,
+  budget: TailorBudget,
+): Promise<{ readonly verdict: LaneVerdict; readonly ats: AtsRecord | null }> {
+  if (!deps.tailorRow || !wantsTailoring(verdict)) return { verdict, ats: null };
+  const ats = await deps.tailorRow(row, profile, budget);
+  return { verdict: ats ? atsGate(verdict, ats, atsMinOverlap()) : verdict, ats };
 }
 
 /** Hand an `auto` row to the send path when both switches and the rules allow it; returns the verdict to record and report. */
@@ -161,6 +189,7 @@ export interface ShadowOutcome {
 export async function runShadowApply(deps: ShadowDeps = realShadowDeps(), env: NodeJS.ProcessEnv = process.env): Promise<ShadowOutcome> {
   const cap = shadowPerRunCap(env);
   const routed: ShadowRoutedRow[] = [];
+  const budget: TailorBudget = { left: tailorPerRunCap(env) };
   let opened = 0;
   for (const profile of deps.profiles()) {
     const applyProfile = await deps.loadProfile(profile.id);
@@ -176,10 +205,10 @@ export async function runShadowApply(deps: ShadowDeps = realShadowDeps(), env: N
       if (!(await deps.claim(row.id, deps.now()))) continue;
       if (needsBrowser) opened += 1;
       const input = await routeOne(deps, row, profile, applyProfile, dossier);
-      const routedVerdict = routeLane(input);
+      const { verdict: routedVerdict, ats } = await tailorAndGate(deps, row, profile, routeLane(input), budget);
       await deps.record(row.id, routedVerdict, deps.now());
       const verdict = input.kind === "prepared" ? await maybeAutoSend(deps, env, row, profile.id, routedVerdict, input.summary) : routedVerdict;
-      routed.push({ company: row.company, title: row.title, profileId: profile.id, lane: verdict.lane, reason: verdict.reason });
+      routed.push({ company: row.company, title: row.title, profileId: profile.id, lane: verdict.lane, reason: verdict.reason, ...(ats ? { ats } : {}) });
     }
   }
   for (const message of formatShadowSummary(routed)) {

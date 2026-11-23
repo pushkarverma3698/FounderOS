@@ -8,6 +8,7 @@
  */
 
 import { esc, link, sanitizeTelegramUrl } from "../tools/jobhunt/telegram-format.js";
+import { formatAtsTag, type AtsRecord } from "../tools/jobhunt/ats-record.js";
 import { JOB_CALLBACK_PREFIX, jobCallbackData } from "../tools/jobhunt/job-ref.js";
 import type { JobsChatButton } from "../infra/telegram-send.js";
 
@@ -24,6 +25,8 @@ export interface WaitingRole {
   readonly url: string | null;
   readonly lane: "needs_you" | "hand_off";
   readonly reason: string;
+  /** ATS fit and tailoring result from the shadow pass, when there is one. */
+  readonly ats?: AtsRecord | null;
   /** Signed answer-page link when a snapshot exists for the row; null falls back to the prepare button. */
   readonly answerUrl: string | null;
 }
@@ -42,7 +45,7 @@ export function orderRoles(roles: readonly WaitingRole[]): WaitingRole[] {
 }
 
 function roleLine(n: number, r: WaitingRole): string {
-  return `${n}. <b>${esc(r.company)}</b> — ${link(r.title, r.url)} — ${esc(clip(r.reason.trim() || "no reason recorded"))}`;
+  return `${n}. <b>${esc(r.company)}</b> — ${link(r.title, r.url)} — ${esc(clip(r.reason.trim() || "no reason recorded"))}${r.ats ? ` [${esc(formatAtsTag(r.ats))}]` : ""}`;
 }
 
 /** Buttons for role number `n`: the way in (answer page or prepare), the job link, then Applied and Skip. */
