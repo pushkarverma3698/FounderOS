@@ -11,6 +11,7 @@ import type { Page } from "playwright";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
 import { classifyFormUrl, resolveFormTargetUrl, type FormPlatform } from "./form-platform.js";
 import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions, stampSelector } from "./form-combobox.js";
+import { CAPTCHA_WIDGET, probeCaptchaVendor, VENDOR_LABEL } from "./captcha-detect.js";
 import { revealSmartRecruitersForm } from "./form-smartrecruiters.js";
 
 
@@ -373,24 +374,17 @@ export async function scrapePageFields(page: Page, platform: FormPlatform): Prom
     });
   }
 
-  // Recruitee's hCaptcha (captcha-base.recruiteecdn.com, Payter 2026-10-20) puts no captcha class or name on any
-  // input, so the per-field check above misses it. Report it so the row goes to "Submit it yourself"; never solve it.
-  if (!fields.some((f) => f.isCaptcha)) {
+  // Bot checks the per-field test above cannot see (Recruitee hCaptcha, Greenhouse reCAPTCHA Enterprise, Workable
+  // Turnstile): read the live DOM. Reported so the row goes to hand_off; never solved.
+  const vendor = await probeCaptchaVendor(page);
+  const labelled = vendor ? VENDOR_LABEL[vendor] : "CAPTCHA";
+  if (fields.some((f) => f.isCaptcha)) {
+    if (vendor) fields.forEach((f, i) => { if (f.isCaptcha) fields[i] = { ...f, label: labelled }; });
+  } else {
     // allow-failopen: a failed probe leaves the per-field result, which is what we had before this check.
-    const widget = await page.locator(CAPTCHA_WIDGET).count().catch(() => 0);
-    if (widget > 0) fields.push({ selector: CAPTCHA_WIDGET, type: "captcha", label: "CAPTCHA", required: false, isCaptcha: true });
+    const widget = vendor ? 1 : await page.locator(CAPTCHA_WIDGET).count().catch(() => 0);
+    if (widget > 0) fields.push({ selector: CAPTCHA_WIDGET, type: "captcha", label: labelled, required: false, isCaptcha: true });
   }
 
   return fields;
 }
-
-/** A visible challenge widget, its loader, or its token field. Invisible reCAPTCHA (size=invisible) is left out: it shows no challenge. */
-const CAPTCHA_WIDGET = [
-  'iframe[title*="captcha" i]:not([src*="size=invisible"])',
-  'iframe[src*="hcaptcha" i]',
-  'iframe[src*="turnstile" i]',
-  "script#hcaptcha-api-script-id",
-  'script[src*="hcaptcha" i]',
-  '[id^="input-captchaToken"]',
-  'input[name="captchaToken"]',
-].join(", ");
