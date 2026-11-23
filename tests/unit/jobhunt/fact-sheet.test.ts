@@ -167,3 +167,22 @@ describe("the category classifier and the editor markers", () => {
     expect(factSheetStatus(profile({ work_authorization: "unknown" })).find((s) => s.key === "work_authorization")?.filled).toBe(false);
   });
 });
+
+describe("address_state and nationality only match address-style labels", () => {
+  it.each(["State/Province", "Province", "State"])("%s fills", (label) => {
+    expect(one(field(label), filled).value).toBe("Noord-Test");
+  });
+  it.each([
+    "Please state any accommodations you need",
+    "Which region would you like to work in?",
+  ])("%s is not a fact-sheet answer", (label) => {
+    expect(one(field(label), filled).why).not.toMatch(/^fact sheet/);
+    expect(one(field(label, "select", ["Noord-Test", "Other"]), filled).why).not.toMatch(/^fact sheet/);
+  });
+  it("yes/no nationality questions never fill, text or choice", () => {
+    const q = "Do you need nationality-based sponsorship?";
+    expect(one(field(q), filled).why).not.toMatch(/^fact sheet/);
+    expect(one(field(q, "select", ["Yes", "No"]), filled).why).not.toMatch(/^fact sheet/);
+    expect(one(field(q, "select", ["Fakeland", "Other"]), filled).why).not.toMatch(/^fact sheet/);
+  });
+});

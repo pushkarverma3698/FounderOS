@@ -72,7 +72,7 @@ export const FACT_CATEGORIES: readonly FactCategory[] = [
   { key: "nationality", label: "Nationality", home: "fact_sheet", test: /\b(?:nationality|nationaliteit|citizenship|country of citizenship)\b/, exclude: /\bwork\b/, filled: fact("nationality") },
   { key: "languages", label: "Languages spoken", home: "fact_sheet", test: /^languages?\b|\blanguages? (?:you speak|spoken|proficiency|skills?)\b|\bspoken languages?\b|\bwhich languages\b|\bwelke talen\b/, filled: fact("languages") },
   { key: "address_line", label: "Street address", home: "fact_sheet", test: /^(?:home |street |mailing |current |residential )?address(?: line)?(?: 1| one)?$|\bstreet address\b|\baddress line\b|\bstraat\b|\bhome address\b/, exclude: /\b(?:e ?mail|ip|web|website|url|linkedin)\b/, filled: fact("address_line") },
-  { key: "address_state", label: "State or province", home: "fact_sheet", test: /\b(?:state|province|provincie|region)\b/, exclude: /\b(?:united states|statement|state (?:of|that|why|your)|real estate|estate)\b/, filled: fact("address_state") },
+  { key: "address_state", label: "State or province", home: "fact_sheet", test: /^(?:state|province|provincie|region|state province|state or province|state region|province state|state province region)$/, filled: fact("address_state") },
   { key: "postal_code", label: "Postal code", home: "fact_sheet", test: /\b(?:postal code|post code|postcode|zip ?code|zip|postcode)\b/, filled: fact("postal_code") },
 ];
 
@@ -151,7 +151,7 @@ export function factSheetAction(field: ScrapedField, profile: ApplyProfile): For
   if (skill) return skill;
   const cat = factCategoryOf(field.label);
   if (!cat || cat.home !== "fact_sheet" || cat.key === "skill_years") return null;
-  if (YES_NO_START.test(n) && !(field.options && field.options.length > 0)) return null;
+  if (YES_NO_START.test(n)) return null; // yes/no questions are never a plain fact, text or choice
   const value = a?.fact_sheet?.[cat.key]?.trim();
   return value ? fillText(field, value, cat.key) : null;
 }
