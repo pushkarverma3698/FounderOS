@@ -124,6 +124,9 @@ const filledSchema = z.object({
   fieldType: z.string(),
   options: z.array(z.string()).optional(),
   editable: z.boolean(),
+  /** Where the value came from and how sure the form brain was (answer-source.ts); the Mac worker's send rule reads them. Absent in older snapshots. */
+  source: z.enum(["profile", "dossier", "approved", "file", "letter", "policy", "unknown"]).optional(),
+  confidence: z.number().optional(),
 });
 
 export const applySnapshotSchema = z.object({
