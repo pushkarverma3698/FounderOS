@@ -17,7 +17,8 @@ import {
   storedAnswerConflict,
   type CandidateDossier,
 } from "./candidate-dossier.js";
-import { experienceBucketAction, noticePeriodAction } from "./form-answer-synonyms.js";
+import { factSheetAction } from "./fact-sheet.js";
+import { experienceBucketAction, noticePeriodAction, SKILL_SCOPED } from "./form-answer-synonyms.js";
 import { chooseSelfIdentification } from "./self-identification.js";
 
 export { summariseFormPlan, type FormPlanSummary, type UnansweredQuestion } from "./form-filled.js";
@@ -241,7 +242,8 @@ function matchStandardTextField(
     return textActionFor(field, profile.answers?.current_company, "matched current company field");
   }
   if (labelMatches(field.label, "coverLetter")) return textActionFor(field, row.coverLetterText, "matched cover-letter text field");
-  if (labelMatches(field.label, "yearsExperience") && (field.type === "text" || field.type === "number")) {
+  // "Years of experience with Go" is about one skill: the total is not its answer (the fact sheet holds skills).
+  if (labelMatches(field.label, "yearsExperience") && (field.type === "text" || field.type === "number") && !SKILL_SCOPED.test(normalizeQuestionKey(field.label))) {
     const years = profile.answers?.years_experience;
     return textActionFor(field, years === undefined ? undefined : String(years), "matched years-of-experience field");
   }
@@ -336,7 +338,7 @@ export function buildFormFillPlan(
       const explicit = explicitAnswerFor(field.label, profile, dossier);
       const direct = explicit
         ? textActionFor(field, explicit.value, explicit.source)
-        : noticePeriodAction(field, profile) ?? matchStandardTextField(field, profile, row);
+        : factSheetAction(field, profile) ?? noticePeriodAction(field, profile) ?? matchStandardTextField(field, profile, row);
       if (direct) {
         actions.push(fitToField(field, direct));
         continue;
@@ -344,7 +346,7 @@ export function buildFormFillPlan(
     }
 
     const bucket = isChoiceType && !explicitAnswerFor(field.label, profile, dossier)
-      ? noticePeriodAction(field, profile) ?? experienceBucketAction(field, profile, labelMatches(field.label, "yearsExperience"))
+      ? factSheetAction(field, profile) ?? noticePeriodAction(field, profile) ?? experienceBucketAction(field, profile, labelMatches(field.label, "yearsExperience"))
       : null;
     if (bucket) {
       actions.push(bucket);
