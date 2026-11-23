@@ -43,7 +43,8 @@ import { extractBoardToken } from "./board-token.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { getAdapter } from "./adapters/index.js";
 
-export { getApplyUrl } from "./apply-url.js";
+import { getApplyUrl } from "./apply-url.js";
+export { getApplyUrl };
 
 const log = childLogger({ module: "jobhunt:apply-packet" });
 
