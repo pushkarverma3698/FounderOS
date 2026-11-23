@@ -81,3 +81,20 @@ describe("buildEveningMessages", () => {
     expect(messages).toHaveLength(2);
   });
 });
+
+describe("no-link summary", () => {
+  it("adds ONE summary line to the last message only", () => {
+    const roles = Array.from({ length: EVENING_ROLES_PER_MESSAGE + 1 }, (_, i) => role(i + 1));
+    const msgs = buildEveningMessages("Tashi", roles, 6);
+    expect(msgs.length).toBe(2);
+    expect(msgs[0]?.text).not.toContain("no employer link");
+    expect(msgs[1]?.text.match(/no employer link/g)?.length).toBe(1);
+    expect(msgs[1]?.text).toContain("6 Himalayas/Jobicy rows had no employer link");
+  });
+  it("adds nothing for a count of zero", () => {
+    expect(buildEveningMessages("Tashi", [role(1)])[0]?.text).not.toContain("no employer link");
+  });
+  it("uses the singular for one row", () => {
+    expect(buildEveningMessages("Tashi", [role(1)], 1)[0]?.text).toContain("1 Himalayas/Jobicy row had no employer link");
+  });
+});

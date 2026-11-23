@@ -69,8 +69,13 @@ export function roleButtons(n: number, r: WaitingRole): JobsChatButton[][] {
   ];
 }
 
-/** All messages for one person, in send order. Empty when nothing waits: nothing is sent. */
-export function buildEveningMessages(name: string, roles: readonly WaitingRole[]): EveningMessage[] {
+/** The one digest line for rows left out because Himalayas or Jobicy gave no employer link. */
+export function noLinkSummary(count: number): string {
+  return `${count} Himalayas/Jobicy row${count === 1 ? "" : "s"} had no employer link, so ${count === 1 ? "it was" : "they were"} left out.`;
+}
+
+/** All messages for one person, in send order. Empty when nothing waits: nothing is sent. `noLinkCount` adds ONE summary line to the last message. */
+export function buildEveningMessages(name: string, roles: readonly WaitingRole[], noLinkCount = 0): EveningMessage[] {
   if (roles.length === 0) return [];
   const ordered = orderRoles(roles).map((role, i) => ({ role, n: i + 1, line: roleLine(i + 1, role) }));
   const chunks: (typeof ordered)[] = [];
@@ -90,6 +95,7 @@ export function buildEveningMessages(name: string, roles: readonly WaitingRole[]
 
   const who = `🌙 <b>${esc(name)}</b>`;
   return chunks.map((chunk, i) => {
+    const footer = noLinkCount > 0 && i === chunks.length - 1 ? `\n\n${noLinkSummary(noLinkCount)}` : "";
     const head = `${who}: ${roles.length} role${roles.length === 1 ? "" : "s"} waiting${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}`;
     const body: string[] = [];
     let section: WaitingRole["lane"] | null = null;
@@ -101,7 +107,7 @@ export function buildEveningMessages(name: string, roles: readonly WaitingRole[]
       body.push(line);
     }
     return {
-      text: `${head}\n${body.join("\n")}`,
+      text: `${head}\n${body.join("\n")}${footer}`,
       keyboard: chunk.flatMap(({ role, n }) => roleButtons(n, role)),
     };
   });
