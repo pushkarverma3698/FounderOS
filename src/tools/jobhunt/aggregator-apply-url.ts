@@ -7,8 +7,10 @@
  * the employer's form (Recruitee, Greenhouse, JOIN, a careers site). Measured 2026-10-19: 13/13
  * live postings redirected. One request, redirects not followed; anything else keeps the original.
  *
- * Himalayas and Jobicy are not handled: Himalayas returns 403 to any request from the VPS, and
- * Jobicy's apply button is an in-page form with no outbound link.
+ * Arbeitnow answers 403 to Node fetch unless `Accept` is sent (2026-11-23), hence a wildcard `Accept`.
+ * Himalayas and Jobicy are not handled: Himalayas returns 403 (Cloudflare) to `<job>/apply` even with
+ * a wildcard `Accept`, from the VPS and from a laptop (probed 2026-11-23), and Jobicy's apply button is an
+ * in-page form with no outbound link.
  */
 
 const ARBEITNOW_HOST = /^(?:www\.)?arbeitnow\.[a-z.]+$/i;
