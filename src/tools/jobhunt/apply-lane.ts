@@ -49,7 +49,9 @@ export function routeLane(input: LaneInput): LaneVerdict {
   if (input.kind === "failed") return failedVerdict(input.reason);
   const { summary, platform } = input;
   if (summary.hasCaptcha) {
-    return { lane: "hand_off", reason: "CAPTCHA or reCAPTCHA widget on the form; a person has to solve it" };
+    // The vendor label is in the reason so the Mac worker lease (mac-worker-rules.ts: captcha|bot check|turnstile) still matches.
+    const named = summary.captchaVendor ? `Bot check on the form (${summary.captchaVendor})` : "CAPTCHA or reCAPTCHA widget on the form";
+    return { lane: "hand_off", reason: `${named}; a person has to solve it` };
   }
   const letterQuestions = summary.requiredUnanswered.filter((q) => LETTER_QUESTION.test(q.label));
   const questions = summary.requiredUnanswered.filter((q) => !LETTER_QUESTION.test(q.label));
