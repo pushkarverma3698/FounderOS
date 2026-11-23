@@ -37,7 +37,7 @@ export async function resolveEmployerApplyUrl(url: string, fetchImpl: FetchLike 
   try {
     response = await fetchImpl(`${url.replace(/\/+$/, "")}/apply`, {
       redirect: "manual",
-      headers: { "User-Agent": USER_AGENT },
+      headers: { "User-Agent": USER_AGENT, Accept: "*/*" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
