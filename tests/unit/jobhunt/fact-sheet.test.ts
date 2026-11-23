@@ -170,7 +170,7 @@ describe("the category classifier and the editor markers", () => {
 
 describe("address_state and nationality only match address-style labels", () => {
   it.each(["State/Province", "Province", "State"])("%s fills", (label) => {
-    expect(one(field(label), filled).value).toBe("Noord-Test");
+    expect((one(field(label), filled) as { value?: string }).value).toBe("Noord-Test");
   });
   it.each([
     "Please state any accommodations you need",
