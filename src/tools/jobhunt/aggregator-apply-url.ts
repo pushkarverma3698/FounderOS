@@ -47,6 +47,14 @@ export function hasNoEmployerLink(url: string | null | undefined): boolean {
   return host !== null && (HIMALAYAS_HOST.test(host) || JOBICY_HOST.test(host));
 }
 
+/** Hand-off rows still on Himalayas or Jobicy are left out of what the founder is asked to act on; `noLink` counts them. */
+export function dropNoEmployerLink<T extends { readonly apply_lane: string | null; readonly url: string | null }>(
+  rows: readonly T[],
+): { readonly rows: T[]; readonly noLink: number } {
+  const kept = rows.filter((r) => !(r.apply_lane === "hand_off" && hasNoEmployerLink(r.url)));
+  return { rows: kept, noLink: rows.length - kept.length };
+}
+
 /** `<job page>/apply`, keeping the query string (Himalayas rows carry `?utm_source=api`) after the path. */
 function applyPath(url: string): string {
   const u = new URL(url);

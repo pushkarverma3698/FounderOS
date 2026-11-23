@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { hasNoEmployerLink, isArbeitnowUrl, resolveEmployerApplyUrl } from "../../../src/tools/jobhunt/aggregator-apply-url.js";
+import { dropNoEmployerLink, hasNoEmployerLink, isArbeitnowUrl, resolveEmployerApplyUrl } from "../../../src/tools/jobhunt/aggregator-apply-url.js";
 import { classifyFormUrl } from "../../../src/tools/jobhunt/form-platform.js";
 
 const NL = "https://www.arbeitnow.nl/jobs/companies/adesso-netherlands/senior-data-scientist-utrecht-196103";
@@ -106,5 +106,19 @@ describe("Himalayas and Jobicy", () => {
     expect(hasNoEmployerLink(EMPLOYER)).toBe(false);
     expect(hasNoEmployerLink(null)).toBe(false);
     expect(hasNoEmployerLink("https://nothimalayas.app/x")).toBe(false);
+  });
+});
+
+describe("dropNoEmployerLink", () => {
+  it("drops only hand-off rows still on Himalayas or Jobicy and counts them", () => {
+    const rows = [
+      { apply_lane: "hand_off", url: "https://himalayas.app/companies/a/jobs/b" },
+      { apply_lane: "needs_you", url: "https://jobicy.com/jobs/1-x" },
+      { apply_lane: "hand_off", url: "https://jobicy.com/jobs/2-y" },
+      { apply_lane: "hand_off", url: EMPLOYER },
+    ];
+    const out = dropNoEmployerLink(rows);
+    expect(out.noLink).toBe(2);
+    expect(out.rows.map((r) => r.url)).toEqual(["https://jobicy.com/jobs/1-x", EMPLOYER]);
   });
 });

@@ -101,3 +101,22 @@ export async function listWaitingLaneRows(profileId: string, now: Date): Promise
     )
     .orderBy(asc(jobApplications.apply_lane_at));
 }
+
+/** Every open role the shadow pass routed in the last 24h, including `auto` (ready to send): the apply queue's list. */
+export async function listQueueLaneRows(profileId: string, now: Date): Promise<JobApplication[]> {
+  const cutoff = new Date(now.getTime() - WINDOW_MS);
+  return getDb()
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.profile_id, profileId),
+        inArray(jobApplications.apply_lane, ["auto", "needs_you", "hand_off"]),
+        gte(jobApplications.apply_lane_at, cutoff),
+        isNull(jobApplications.applied_at),
+        isNull(jobApplications.skipped_at),
+        ne(jobApplications.liveness, "expired"),
+      ),
+    )
+    .orderBy(asc(jobApplications.apply_lane_at));
+}
