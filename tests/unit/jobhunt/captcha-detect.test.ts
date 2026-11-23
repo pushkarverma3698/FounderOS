@@ -72,6 +72,11 @@ const PAGES: Record<string, string> = {
   "/frc": `<!doctype html><body><form>${FORM}<div class="frc-captcha" data-sitekey="FC"></div></form></body>`,
   // SmartRecruiters-style: nothing in the static HTML, the loader is injected by script after load.
   "/injected": `<!doctype html><body><form>${FORM}</form><script>setTimeout(()=>{const s=document.createElement("script");s.src="https://challenges.cloudflare.com/turnstile/v0/api.js";document.head.appendChild(s);},50)</script></body>`,
+  // Nebius 2026-11-16: a OneTrust overlay covers the page (it intercepts the Submit click) and the Turnstile loader
+  // is added only after the visitor rejects cookies.
+  "/consent": `<!doctype html><body><form>${FORM}<button type="submit" id="go">Submit</button></form>
+    <div id="onetrust-consent-sdk"><div class="onetrust-pc-dark-filter" style="position:fixed;inset:0;z-index:99;background:#0008"></div>
+    <button id="onetrust-reject-all-handler" style="position:fixed;top:0;left:0;z-index:100" onclick="this.parentNode.remove();var s=document.createElement('script');s.src='https://challenges.cloudflare.com/turnstile/v0/api.js';document.head.appendChild(s)">Reject All</button></div></body>`,
   "/plain": `<!doctype html><body><form>${FORM}</form></body>`,
 };
 
@@ -112,6 +117,18 @@ describe("live DOM (Playwright)", () => {
     if (!browser) return;
     const caps = await scrape(path);
     expect(caps.map((c) => c.label)).toEqual([label]);
+  });
+
+  it("a cookie banner is declined: the held-back Turnstile loader shows and Submit becomes clickable (Nebius)", async () => {
+    if (!browser) return;
+    const page = await browser.newPage();
+    await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (r) => r.abort());
+    await page.goto(base + "/consent");
+    await expect(page.locator("#go").click({ trial: true, timeout: 600 })).rejects.toThrow(/intercepts pointer events/);
+    const caps = (await scrapePageFields(page, "greenhouse")).filter((f) => f.isCaptcha);
+    expect(caps.map((c) => c.label)).toEqual(["Cloudflare Turnstile"]);
+    await page.locator("#go").click({ trial: true, timeout: 2000 });
+    await page.close();
   });
 
   it("a plain form reports none", async () => {

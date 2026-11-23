@@ -30,6 +30,7 @@ import {
 
 import { fieldHoldsValue } from "./form-phone.js";
 import { filesFirst, recheckTypedValues, settleOnceAfterUploads } from "./form-fill-guard.js";
+import { dismissCookieBanner } from "./cookie-banner.js";
 import { awaitSubmitOutcome, holdForEmailCode, SUBMIT_CONFIRM_TIMEOUT_MS } from "./held-submit.js";
 
 const log = childLogger({ module: "jobhunt:form-runner" });
@@ -372,6 +373,7 @@ export async function submitApplicationForm(
       return { ok: true, platform: check.platform, clicked: false, confirmed: false, evidence: "dry run: every check passed, Submit not clicked", afterScreenshotPng: png };
     }
     const urlBefore = page.url();
+    await dismissCookieBanner(page); // its overlay intercepts the click (Nebius 2026-11-16, #1322)
     await button.click({ timeout: 10_000 });
 
     const outcome = await awaitSubmitOutcome(page, urlBefore, dialog, { watchForCode: rowId !== undefined });

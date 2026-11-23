@@ -11,6 +11,7 @@
  */
 
 import type { Page } from "playwright";
+import { dismissCookieBanner } from "./cookie-banner.js";
 
 export type CaptchaVendor = "recaptcha-enterprise" | "turnstile" | "hcaptcha" | "friendly-captcha";
 
@@ -52,6 +53,8 @@ export function detectCaptchaVendor(facts: CaptchaDomFacts): CaptchaVendor | nul
 
 /** Read the live DOM of the page and name the bot-check vendor on it, or null. */
 export async function probeCaptchaVendor(page: Page): Promise<CaptchaVendor | null> {
+  // A banner can hold the vendor's loader back until the visitor chooses (Nebius, Turnstile): decline it first.
+  await dismissCookieBanner(page);
   const first = await readOnce(page);
   if (first) return first;
   // A loader injected by script lands moments after load: look once more before calling the form clean.
