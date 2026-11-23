@@ -21,8 +21,8 @@ import { emptyStarredFields } from "./form-required-guard.js";
 import { noFieldsReason } from "./form-smartrecruiters.js";
 import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
-  classifyFormUrl,
-  resolveFormTargetUrl,
+  classifyFormTarget,
+  platformForTarget,
   revealPlatformForm,
   scrapePageFields,
   type FormPlatform,
@@ -250,9 +250,9 @@ export async function prepareApplicationForm(
   row: RowApplicationFacts,
   dossier?: CandidateDossier,
 ): Promise<PreparedFormResult | FormFailureResult> {
-  const check = classifyFormUrl(url);
+  const check = classifyFormTarget(url, company);
   if (!check.supported) return { ok: false, reason: check.reason, platform: null };
-  const targetUrl = resolveFormTargetUrl(url, company, check.platform);
+  const targetUrl = check.targetUrl;
   const browser = await launchHeadlessBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
@@ -309,10 +309,10 @@ export async function submitApplicationForm(
   /** Fill and run every pre-submit check, then stop before the click (readiness checks; never sends). */
   dryRun = false,
 ): Promise<SubmittedFormResult | FormFailureResult> {
-  const check = classifyFormUrl(url);
+  const check = classifyFormTarget(url, company);
   if (!check.supported) return { ok: false, reason: check.reason, platform: null };
 
-  const targetUrl = resolveFormTargetUrl(url, company, check.platform);
+  const targetUrl = check.targetUrl;
   const browser = await launchHeadlessBrowser();
   let keepOpen = false;
   try {
