@@ -170,12 +170,14 @@ describe("tailorCv — grounded technology vocabulary", () => {
     const dropped = BASE_CV.split("\n")
       .filter((line) => line.trim().length > 0)
       .filter((line) => !out.split("\n").includes(line));
-    expect(dropped).toEqual(["Engineer who builds agent orchestration on Postgres."]);
+    // The skills line may be REORDERED (matched terms first); its items must not change.
+    const skillsLine = out.split("\n").find((l) => l.includes("LangGraph")) ?? "";
+    expect(skillsLine.split(", ").sort()).toEqual(["Docker", "LangGraph", "PostgreSQL", "Python", "vector databases"]);
+    expect(dropped).toEqual(["Engineer who builds agent orchestration on Postgres.", "Python, Docker, PostgreSQL, LangGraph, vector databases"]);
 
     // And the model's paragraph is the only thing added.
     expect(out).toContain(GROUNDED_SUMMARY);
     expect(out).toContain("### Turicks — Founding Engineer");
-    expect(out).toContain("Python, Docker, PostgreSQL, LangGraph, vector databases");
   });
 
   it("refuses a base CV with no summary section, before spending a model call", async () => {

@@ -11,13 +11,13 @@ vi.mock("../../../src/infra/logger.js", () => ({
 const profile = { id: "p1" } as JobSearchProfile;
 const DESC = "We need a TypeScript engineer who knows Postgres, Kubernetes and AWS.";
 const row = (over: Record<string, unknown> = {}) => ({ id: "abcdef12-0000", company: "Acme", title: "Eng", track: "ai", description: DESC, ats_json: null, ...over });
-const GOOD = { success: true, tailoredMarkdown: "# CV", matchedSkills: ["typescript"], missingSkills: Array.from({ length: 14 }, (_, i) => `s${i}`), initialOverlapRatio: 0.42 };
+const GOOD = { success: true, tailoredMarkdown: "# Pushkar Verma\n\n## SKILLS\n\nTypeScript, Postgres", matchedSkills: ["TypeScript"], missingSkills: Array.from({ length: 14 }, (_, i) => `s${i}`), initialOverlapRatio: 0.42, track: "backend" };
 
 function mkDeps(over: Partial<TailorDeps> = {}) {
   const tailor = vi.fn(async () => GOOD);
   const writeFile = vi.fn(async (_p: string, _d: Buffer) => undefined);
   const recordAts = vi.fn(async (_id: string, _j: string) => undefined);
-  const deps: TailorDeps = { tailor, render: async () => Buffer.from("pdf"), fileExists: async () => false, writeFile, recordAts, ...over };
+  const deps: TailorDeps = { tailor, render: async () => Buffer.from("pdf"), pdfText: async () => "Pushkar Verma SKILLS TypeScript Postgres", fileExists: async () => false, writeFile, recordAts, ...over };
   return { deps, tailor, writeFile, recordAts };
 }
 
@@ -26,9 +26,30 @@ describe("tailorForRow", () => {
     const { deps, writeFile, recordAts } = mkDeps();
     const out = await tailorForRow(deps, row(), profile, "/art", { left: 5 });
     expect(writeFile).toHaveBeenCalledWith("/art/cv-acme-abcdef12.pdf", expect.any(Buffer));
-    expect(out).toMatchObject({ tailored: true, initialOverlapRatio: 0.42, matchedSkills: ["typescript"] });
+    expect(out).toMatchObject({ tailored: true, initialOverlapRatio: 0.42, matchedSkills: ["TypeScript"] });
     expect(out?.missingSkills).toHaveLength(10);
     expect(JSON.parse(recordAts.mock.calls[0]![1]).tailored).toBe(true);
+  });
+
+  it("records the chosen track and the score after tailoring", async () => {
+    const { deps } = mkDeps();
+    const out = await tailorForRow(deps, row(), profile, "/art", { left: 5 });
+    expect(out?.track).toBe("backend");
+    expect(out?.finalOverlapRatio).toBeGreaterThanOrEqual(0);
+    expect(formatAtsTag(buildAtsRecord({ ratio: 0.62, matched: ["a"], missing: [], tailored: true, finalRatio: 0.71 }))).toBe("ATS 62%→71%, tailored yes");
+    expect(formatAtsTag(buildAtsRecord({ ratio: 0.62, matched: ["a"], missing: [], tailored: false }))).toBe("ATS 62%, tailored no");
+    expect(parseAts(JSON.stringify(out))?.finalOverlapRatio).toBe(out?.finalOverlapRatio);
+  });
+
+  it("keeps the base CV and records 'failed pdf parse' when the PDF text lacks the name, a heading or a matched skill", async () => {
+    for (const text of ["", "SKILLS TypeScript", "Pushkar Verma TypeScript", "Pushkar Verma SKILLS Python"]) {
+      const { deps, writeFile } = mkDeps({ pdfText: async () => text });
+      const out = await tailorForRow(deps, row(), profile, "/art", { left: 5 });
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(out).toMatchObject({ tailored: false, tailor: "failed pdf parse" });
+    }
+    const { deps } = mkDeps({ pdfText: async () => { throw new Error("corrupt"); } });
+    expect((await tailorForRow(deps, row(), profile, "/art", { left: 5 }))?.tailor).toBe("failed pdf parse");
   });
 
   it("is idempotent: a recorded row or an existing file never calls the model again", async () => {
