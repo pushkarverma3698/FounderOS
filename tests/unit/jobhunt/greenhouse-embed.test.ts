@@ -1,6 +1,6 @@
 /**
  * Company careers pages that embed a Greenhouse board (`?gh_jid=`) render no form on the company's own domain, so the
- * form runner reported "no fillable form fields". The hosted board has the form: job-boards.greenhouse.io/<token>/jobs/<id>.
+ * form runner reported "no fillable form fields". The hosted board has the form: job-boards.greenhouse.io/embed/job_app?for=<token>&token=<id>.
  * Company names below are real registry rows (docs/strategy/data/free-ats-boards.csv).
  */
 import { describe, it, expect } from "vitest";
@@ -10,13 +10,13 @@ import { resolveFormTargetUrl, classifyFormTarget } from "../../../src/tools/job
 describe("greenhouseHostedUrl", () => {
   it("rewrites an embedded posting to the hosted form when the company is a known Greenhouse board", () => {
     expect(greenhouseHostedUrl("https://www.appviewx.com/careers/open-positions/?gh_jid=4567890", "AppViewX")).toBe(
-      "https://job-boards.greenhouse.io/appviewx/jobs/4567890",
+      "https://job-boards.greenhouse.io/embed/job_app?for=appviewx&token=4567890",
     );
   });
 
   it("matches the company name case-insensitively and ignoring punctuation", () => {
     expect(greenhouseHostedUrl("https://schubergphilis.com/en/careers/job?gh_jid=123", "schuberg philis")).toBe(
-      "https://job-boards.greenhouse.io/schubergphilis/jobs/123",
+      "https://job-boards.greenhouse.io/embed/job_app?for=schubergphilis&token=123",
     );
   });
 
@@ -47,7 +47,7 @@ describe("resolveFormTargetUrl with an embedded Greenhouse posting", () => {
 
   it("opens the hosted form instead of the company page", () => {
     expect(resolveFormTargetUrl(url, "AppViewX", "generic")).toBe(
-      "https://job-boards.greenhouse.io/appviewx/jobs/4567890",
+      "https://job-boards.greenhouse.io/embed/job_app?for=appviewx&token=4567890",
     );
   });
 
@@ -59,7 +59,7 @@ describe("resolveFormTargetUrl with an embedded Greenhouse posting", () => {
     expect(classifyFormTarget(url, "AppViewX")).toEqual({
       supported: true,
       platform: "greenhouse",
-      targetUrl: "https://job-boards.greenhouse.io/appviewx/jobs/4567890",
+      targetUrl: "https://job-boards.greenhouse.io/embed/job_app?for=appviewx&token=4567890",
     });
     expect(classifyFormTarget(url, "Nonexistent Co 12345")).toEqual({ supported: true, platform: "generic", targetUrl: url });
   });
