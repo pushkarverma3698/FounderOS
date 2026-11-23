@@ -52,14 +52,18 @@ export function newBoardsLine(newBoards: readonly DiscoveredBoard[]): string {
   return `\n<i>+${newBoards.length} new ${plural} now polled: ${names}${overflow}</i>`;
 }
 
-// 01:30 UTC = 07:00 IST, every THIRD day (founder decision, 2026-08-02). The
-// feed bills per job RETURNED, so cadence changes only how often we re-buy the
-// same posting: the 2026-08-02 sweep was billed for 32 of which ZERO were new,
-// and daily bought that inventory three times over ($14.05/mo against $4.68).
-export const JOB_SWEEP_CRON = "30 1 */3 * *";
+// DAILY at 18:30 Europe/Amsterdam (founder card #1341, 2026-11-23), so the paid
+// pull has landed before the 19:00 evening apply batch reads the queue. It was
+// every third day at 01:30 UTC (2026-08-02) to stop re-buying the same postings;
+// the cost control that matters is the dollar cap, which still gates every run
+// (`spend-gate.ts`), not the cadence. The cron was dropped when the kernel was
+// retired and never re-registered: the last paid run on record is 2026-08-12.
+// The zone is explicit because the server clock is UTC and DST moves 18:30.
+export const JOB_SWEEP_CRON = "30 18 * * *";
+export const JOB_SWEEP_TIME_ZONE = "Europe/Amsterdam";
 
 /**
- * Every third day — sweep every source pool, screen everything, send a BRIEF.
+ * Once a day — sweep every source pool, screen everything, send a BRIEF.
  *
  * Zero-LLM: the fetch is HTTP, every gate is pure code, and ranking is a set
  * intersection, so this runs unattended without touching the model budget.
@@ -78,10 +82,12 @@ export async function runJobIngestSweep(): Promise<void> {
   const { buildDailyBrief } = await import("./daily-brief.js");
   const { toTelegramSafe, splitForTelegram } = await import("./brief.js");
 
+  const startedAt = new Date();
   const result = await runPooledIngest({
     limit: JOB_INGEST_DAILY_LIMIT,
     includeIndeed: true,
   });
+  await logPaidRunCost(result.sweepId, startedAt, result.fetched);
 
   if (result.fetched === 0 && result.failures.length > 0) {
     log.warn({ failures: result.failures }, "Daily job ingest failed on every source");
@@ -118,7 +124,7 @@ export async function runJobIngestSweep(): Promise<void> {
     const { link, notice } = await publishSheet();
     setLastSheetLink(link);
     // The metered sweep has no alert of its own to carry the line — it runs
-    // every third day and the founder should hear from it either way.
+    // once a day and the founder should hear from it either way.
     const summary = notice
       ? notice
       : link
@@ -137,6 +143,25 @@ export async function runJobIngestSweep(): Promise<void> {
           `${(err as Error).message}\nThe screening results are recorded — ask for the job brief to read them.`,
       ),
     );
+  }
+}
+
+/**
+ * One line per paid run saying what it cost, read back from the ledger rows
+ * `recordQueryCost` just wrote (free-lane rows cost 0, so a window since the
+ * run began is the run). A refused run logs 0 and its reason is in the failure.
+ */
+async function logPaidRunCost(sweepId: string, startedAt: Date, fetched: number): Promise<void> {
+  try {
+    const { summariseSpend } = await import("../../db/job-run-queries.js");
+    const w = await summariseSpend(startedAt);
+    log.info(
+      { sweepId, estimatedCostUsd: w.costUsd, returned: w.returned, passed: w.passed, fetched },
+      "Paid sweep cost (estimated, ledger)",
+    );
+  } catch (err) {
+    // allow-failopen: a cost log line must never fail the sweep that already ran
+    log.warn({ err: (err as Error).message, sweepId }, "Paid sweep ran but its cost could not be read back");
   }
 }
 

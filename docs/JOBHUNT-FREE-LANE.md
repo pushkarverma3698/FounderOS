@@ -5,7 +5,7 @@
 A second job-supply lane that polls company job boards directly — Greenhouse,
 Lever and Ashby — through their public, unauthenticated JSON endpoints. No API
 key, no quota, no per-job price. It runs every 30 minutes alongside the metered
-Apify feed, which continues to run every third day.
+Apify feed, which runs once a day at 18:30 Europe/Amsterdam (before the 19:00 evening batch).
 
 It does not replace the metered feed. That feed reaches companies whose boards are
 not in this registry, and it returns description text Greenhouse withholds. This
