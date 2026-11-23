@@ -94,7 +94,8 @@ describe.skipIf(!up)("Mac worker lease (real Postgres)", () => {
     await seed(1, { apply_lane: "auto" });
     await seed(1, { apply_lane_at: new Date(NOW.getTime() - 49 * 3600 * 1000) });
     await seed(1, { mac_attempts: 3 });
-    await seed(1, { mac_lease_id: "held", mac_lease_until: new Date(NOW.getTime() + 60_000) });
+    // held past `later` below: a lease that lapsed there would tie with `good` on apply_lane_at and either could win
+    await seed(1, { mac_lease_id: "held", mac_lease_until: new Date(NOW.getTime() + 3 * TTL) });
     const row = await leaseNextRow([PROFILE], NOW, "lease-x", TTL);
     expect(row?.id).toBe(good);
     expect(row?.mac_attempts).toBe(1);
