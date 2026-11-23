@@ -304,3 +304,12 @@ export function emailCodeAutoreadEnabled(): boolean {
   const v = (process.env["EMAIL_CODE_AUTOREAD"] ?? "").trim().toLowerCase();
   return ["1", "true", "yes", "on"].includes(v);
 }
+
+/**
+ * Lowest ATS overlap (a percent, 0 to 100) a row may have and still stay on the auto or Mac lane.
+ * Read per call. Unset, junk or 0 means record only: nothing is held back.
+ */
+export function atsMinOverlap(): number {
+  const n = Number(process.env["APPLY_ATS_MIN_OVERLAP"]);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 100) : 0;
+}
