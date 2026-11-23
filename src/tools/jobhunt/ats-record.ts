@@ -14,6 +14,10 @@ const MAX_NOTE_CHARS = 200;
 export interface AtsRecord {
   /** 0 to 1, CV-to-posting overlap before tailoring. Absent when nothing was measured. */
   readonly initialOverlapRatio?: number;
+  /** 0 to 1, overlap of the tailored CV with the posting. Absent when tailoring did not produce a CV. */
+  readonly finalOverlapRatio?: number;
+  /** The track whose base CV was tailored. */
+  readonly track?: string;
   readonly matchedSkills: readonly string[];
   readonly missingSkills: readonly string[];
   readonly tailored: boolean;
@@ -29,10 +33,14 @@ export function buildAtsRecord(input: {
   readonly missing: readonly string[];
   readonly tailored: boolean;
   readonly tailor?: string;
+  readonly finalRatio?: number;
+  readonly track?: string;
 }): AtsRecord {
   const measured = input.matched.length + input.missing.length > 0;
   return {
     ...(measured ? { initialOverlapRatio: input.ratio } : {}),
+    ...(input.finalRatio !== undefined ? { finalOverlapRatio: input.finalRatio } : {}),
+    ...(input.track ? { track: input.track } : {}),
     matchedSkills: input.matched.slice(0, MAX_ATS_SKILLS),
     missingSkills: input.missing.slice(0, MAX_ATS_SKILLS),
     tailored: input.tailored,
@@ -49,6 +57,8 @@ export function parseAts(raw: string | null | undefined): AtsRecord | null {
     const list = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
     return {
       ...(typeof v.initialOverlapRatio === "number" ? { initialOverlapRatio: v.initialOverlapRatio } : {}),
+      ...(typeof v.finalOverlapRatio === "number" ? { finalOverlapRatio: v.finalOverlapRatio } : {}),
+      ...(typeof v.track === "string" ? { track: v.track } : {}),
       matchedSkills: list(v.matchedSkills),
       missingSkills: list(v.missingSkills),
       tailored: v.tailored,
@@ -60,10 +70,11 @@ export function parseAts(raw: string | null | undefined): AtsRecord | null {
   }
 }
 
-/** "ATS 62%, tailored yes" (or "ATS n/a, tailored no"); a failure note is appended when present. */
+/** "ATS 62%→71%, tailored yes" (or "ATS 62%, ..." when there is no second score; or "ATS n/a, tailored no"); a failure note is appended when present. */
 export function formatAtsTag(ats: AtsRecord | null | undefined): string {
   if (!ats) return "";
-  const score = ats.initialOverlapRatio === undefined ? "n/a" : `${pct(ats.initialOverlapRatio)}%`;
+  const first = ats.initialOverlapRatio === undefined ? "n/a" : `${pct(ats.initialOverlapRatio)}%`;
+  const score = ats.finalOverlapRatio === undefined || ats.initialOverlapRatio === undefined ? first : `${first}→${pct(ats.finalOverlapRatio)}%`;
   const note = ats.tailor ? ` (tailor: ${ats.tailor})` : "";
   return `ATS ${score}, tailored ${ats.tailored ? "yes" : "no"}${note}`;
 }

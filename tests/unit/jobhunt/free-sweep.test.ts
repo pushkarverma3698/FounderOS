@@ -106,6 +106,9 @@ const mockExportJobSheet = vi.fn(async () => ({
 vi.mock("../../../src/tools/jobhunt/sheet-export.js", () => ({
   exportJobSheet: mockExportJobSheet,
 }));
+vi.mock("../../../src/db/job-run-queries.js", () => ({
+  summariseSpend: async () => ({ runs: 0, returned: 0, screened: 0, passed: 0, costUsd: 0, failed: 0, fresh: 0 }),
+}));
 const mockRunPooledIngest = vi.fn(async () => ({
   fetched: 5,
   failures: [],

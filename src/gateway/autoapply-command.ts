@@ -8,7 +8,7 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { loadAutoSendHistory, recentAutoSends, type AutoSendLogEntry } from "../db/job-auto-send-queries.js";
 import { autoSendEnvOn, dailyCapFrom } from "../tools/jobhunt/auto-send-rules.js";
-import { readRuntimeSwitch, writeRuntimeSwitch } from "../tools/jobhunt/auto-send-switch.js";
+import { readRuntimeSwitch, readSwitchState, writeRuntimeSwitch, type SwitchState } from "../tools/jobhunt/auto-send-switch.js";
 import { listProfiles } from "../tools/jobhunt/profile-config.js";
 import { JOB_CALLBACK_PREFIX } from "../tools/jobhunt/job-ref.js";
 import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
@@ -44,6 +44,20 @@ export function renderAutoApplyStatus(s: AutoApplyStatus): string {
     for (const e of s.last) lines.push(`• ${e.at.toISOString().slice(0, 16).replace("T", " ")} UTC ${safeHtml(e.company)}, ${safeHtml(e.title)}: ${safeHtml(e.result)}`);
   }
   return lines.join("\n");
+}
+
+const STATE_LABEL: Record<SwitchState, string> = { on: "ON", off: "off", never_set: "off (never set)" };
+
+/** One line per profile, so a profile with no switch file (never set) is visible instead of absent. */
+export function renderSwitchOverview(entries: readonly { readonly profileId: string; readonly state: SwitchState }[], envOn: boolean): string {
+  const lines = ["<b>Auto-apply switches, every profile</b>", ...entries.map((e) => `• ${safeHtml(e.profileId)}: ${STATE_LABEL[e.state]}`)];
+  lines.push(`Server switch ${envOn ? "on" : "off"}. Sending needs both on.`);
+  return lines.join("\n");
+}
+
+async function overviewText(): Promise<string> {
+  const entries = await Promise.all(listProfiles().map(async (p) => ({ profileId: p.id, state: await readSwitchState(p.id) })));
+  return renderSwitchOverview(entries, autoSendEnvOn());
 }
 
 const AA_PREFIX = `${JOB_CALLBACK_PREFIX}aa:`;
@@ -107,6 +121,8 @@ export async function handleAutoApplySwitch(ctx: Context): Promise<void> {
     return;
   }
   const profileId = parsed.profile.id;
+  // Bare `/autoapply` or `/autoapply status` (no profile named) lists every profile's switch first.
+  if (verb === "status" && !parsed.explicit) await ctx.reply(await overviewText(), { parse_mode: "HTML" });
   if (verb !== "status") await writeRuntimeSwitch(profileId, verb === "on");
   const status = await statusFor(profileId);
   await ctx.reply(renderAutoApplyStatus(status), { parse_mode: "HTML", reply_markup: autoApplyKeyboard(status) });

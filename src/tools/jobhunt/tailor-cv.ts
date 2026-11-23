@@ -45,6 +45,8 @@ import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { verifyCvClaims } from "./cv-claim-guard.js";
 import { composeCv, splitCv } from "./cv-compose.js";
 import { describeClaimViolations } from "./cv-claim-summary.js";
+import { reorderForPosting } from "./cv-reorder.js";
+import { loadTrackCvs, pickClosestTrack } from "./track-pick.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
 
@@ -82,6 +84,8 @@ export interface TailorCvResult {
   readonly matchedSkills: readonly string[];
   readonly missingSkills: readonly string[];
   readonly initialOverlapRatio: number;
+  /** The track whose base CV was tailored (the closest to the posting). */
+  readonly track?: string;
   readonly error?: string;
 }
 
@@ -115,18 +119,24 @@ OUTPUT: the summary paragraph only. 2-4 sentences, at most 70 words. No heading,
 export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
   const profile = opts.profile ?? getProfile();
   const trackConfig = opts.track ? profile.tracks[opts.track] : undefined;
-  const track = opts.track ?? profile.trackPriority[0] ?? "ai";
+  let track = opts.track ?? profile.trackPriority[0] ?? "ai";
 
   let baseCvText = opts.cvText;
   if (!baseCvText) {
     // Explicit per-track CV path (e.g. Wife's mac-client/cv/cv-wife-*.md), then
     // the profile's base CV, then the default track-based lookup. Without this,
     // every profile's tailoring silently read Pushkar's CV_DIR/CV_PATH.
-    const explicitPaths = [
+    const explicitPaths: string[] = [
       ...(trackConfig?.cvPath ? [trackConfig.cvPath] : []),
       ...(profile.baseCvPath ? [profile.baseCvPath] : []),
     ];
-    const fullCv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
+    // The row's track is a screening guess: start from the track CV that already fits the posting best.
+    const closest = pickClosestTrack(opts.jobDescription, loadTrackCvs(profile, readFullCvText), track, profile.skillsDictionaryName);
+    if (closest) {
+      track = closest.track;
+      explicitPaths.length = 0;
+    }
+    const fullCv = closest ? { ok: true as const, text: closest.text } : readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
     if (!fullCv.ok) {
       return {
         success: false,
@@ -176,6 +186,7 @@ export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
       matchedSkills: overlap.matched,
       missingSkills: overlap.missing,
       initialOverlapRatio: overlap.ratio,
+      track,
       error: `Base CV is not tailorable: ${parts.error}`,
     };
   }
@@ -263,6 +274,7 @@ Output the corrected summary paragraph only.`,
           matchedSkills: overlap.matched,
           missingSkills: overlap.missing,
           initialOverlapRatio: overlap.ratio,
+      track,
           error: `CV still contains AI slop after revision: ${violations.map(v => v.matchedText).join(", ")}`
         };
       }
@@ -324,6 +336,7 @@ Output the corrected summary paragraph only.`,
           matchedSkills: overlap.matched,
           missingSkills: overlap.missing,
           initialOverlapRatio: overlap.ratio,
+      track,
           error: `CV repair reintroduced AI slop: ${repairedSlop.map((v) => v.matchedText).join(", ")}`,
         };
       }
@@ -341,16 +354,18 @@ Output the corrected summary paragraph only.`,
         matchedSkills: overlap.matched,
         missingSkills: overlap.missing,
         initialOverlapRatio: overlap.ratio,
+      track,
         error: describeClaimViolations(claimCheck.violations),
       };
     }
 
     return {
       success: true,
-      tailoredMarkdown: cleanedMarkdown,
+      tailoredMarkdown: reorderForPosting(cleanedMarkdown, overlap.matched, profile.skillsDictionaryName),
       matchedSkills: overlap.matched,
       missingSkills: overlap.missing,
       initialOverlapRatio: overlap.ratio,
+      track,
     };
   } catch (err) {
     const msg = (err as Error).message;
@@ -360,6 +375,7 @@ Output the corrected summary paragraph only.`,
       matchedSkills: overlap.matched,
       missingSkills: overlap.missing,
       initialOverlapRatio: overlap.ratio,
+      track,
       error: `LLM invocation failed: ${msg}`,
     };
   }
