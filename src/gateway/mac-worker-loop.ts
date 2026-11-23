@@ -7,7 +7,7 @@
  *
  * Send rule: Submit is clicked only when `canAutoSend` passes AND no challenge is visible, and only with `live`.
  * A visible challenge is reported (the VPS pings the founder), the tab stays open and is polled for up to 30 min.
- * Dry run (the default) fills and runs every check, then releases the lease as a failed "dry run" and never clicks.
+ * Dry run (the default) fills and runs every check, then reports `dry_run` (the server frees the lease without spending an attempt) and never clicks.
  */
 
 import { canAutoSend, type AutoSendDecision } from "../tools/jobhunt/auto-send-rules.js";
@@ -22,7 +22,7 @@ export const IDLE_POLL_MS = 60_000;
 export interface ResultInput {
   readonly rowId: string;
   readonly leaseId: string;
-  readonly outcome: "confirmed" | "challenge" | "code_needed" | "failed";
+  readonly outcome: "confirmed" | "challenge" | "code_needed" | "failed" | "unconfirmed" | "dry_run";
   readonly detail: string;
   readonly proofScreenshot?: string;
 }
@@ -123,7 +123,7 @@ async function settle(deps: LoopDeps, lease: MacLease, session: FormSession, fir
   if (res.kind === "challenge") {
     await report(deps, lease, "challenge", res.evidence);
     if (!(await waitForClear(deps, session))) {
-      await report(deps, lease, "failed", "UNCONFIRMED: a challenge after Submit was not cleared within 30 min; check the tab before retrying");
+      await report(deps, lease, "unconfirmed", "a challenge after Submit was not cleared within 30 min; check the tab before retrying");
       return false;
     }
     res = await session.afterChallenge();
@@ -136,13 +136,19 @@ async function settle(deps: LoopDeps, lease: MacLease, session: FormSession, fir
     await report(deps, lease, "code_needed", res.evidence);
     return false;
   }
-  await report(deps, lease, "failed", `UNCONFIRMED: Submit was clicked but nothing confirmed it. ${res.evidence} Check the tab before retrying.`);
+  await report(deps, lease, "unconfirmed", `Submit was clicked but nothing confirmed it. ${res.evidence} Check the tab before retrying.`);
   return false;
 }
 
 /** Reports `failed` and tells the caller to close the tab. */
 async function giveUp(deps: LoopDeps, lease: MacLease, detail: string): Promise<boolean> {
   await report(deps, lease, "failed", detail);
+  return true;
+}
+
+/** A dry run ends the lease without spending one of the row's attempts. */
+async function dryRun(deps: LoopDeps, lease: MacLease, detail: string): Promise<boolean> {
+  await report(deps, lease, "dry_run", detail);
   return true;
 }
 
@@ -155,7 +161,7 @@ async function run(deps: LoopDeps, lease: MacLease, packet: MacPacket, session: 
   if (!base.ok) return giveUp(deps, lease, `not sent: ${base.reason}`);
 
   if (await session.challengeVisible()) {
-    if (!deps.live) return giveUp(deps, lease, "dry run: a challenge is showing; live mode would report it and wait up to 30 min");
+    if (!deps.live) return dryRun(deps, lease, "a challenge is showing; live mode would report it and wait up to 30 min");
     await report(deps, lease, "challenge", "bot check visible on the form");
     if (!(await waitForClear(deps, session))) return giveUp(deps, lease, "challenge not cleared within 30 min");
   }
@@ -163,7 +169,7 @@ async function run(deps: LoopDeps, lease: MacLease, packet: MacPacket, session: 
   if (refusal) return giveUp(deps, lease, `not sent: ${refusal}`);
   const gate = sendGate(packet, fill.summary, await session.challengeVisible(), limits());
   if (!gate.ok) return giveUp(deps, lease, `not sent: ${gate.reason}`);
-  if (!deps.live) return giveUp(deps, lease, "dry run: every check passed, Submit not clicked");
+  if (!deps.live) return dryRun(deps, lease, "every check passed, Submit not clicked");
 
   deps.sentToday += 1;
   return settle(deps, lease, session, await session.submit());

@@ -7,7 +7,7 @@
  *   POST /apply/mac-worker/lease       200 {leaseId, rowId, leaseUntil}, or 204 when nothing is eligible
  *   GET  /apply/mac-worker/packet      ?rowId&leaseId: url, answers, plan, cv, auditKey
  *   GET  /apply/mac-worker/cv          ?rowId&leaseId: the resume PDF
- *   POST /apply/mac-worker/result      {rowId, leaseId, outcome: confirmed|challenge|failed|code_needed, detail, proofScreenshot?}
+ *   POST /apply/mac-worker/result      {rowId, leaseId, outcome: confirmed|challenge|failed|code_needed|unconfirmed|dry_run, detail, proofScreenshot?}
  *   POST /apply/mac-worker/heartbeat   200; macOnline() reads it
  *
  * Auth is its own bearer token (MAC_WORKER_TOKEN, compared in constant time), never the Mini App session. With the
@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { macWorkerToken } from "../core/config.js";
-import { extendLease, getLeasedRow, leaseNextRow, recordMacBeat, releaseLease } from "../db/mac-worker-queries.js";
+import { extendLease, getLeasedRow, leaseNextRow, markUnconfirmed, recordMacBeat, releaseLease, releaseWithoutAttempt } from "../db/mac-worker-queries.js";
 import type { JobApplication } from "../db/schema.js";
 import { logger } from "../infra/logger.js";
 import { jobsChatId, sendMessageTo, sendPhoto } from "../infra/telegram-send.js";
@@ -46,6 +46,8 @@ export interface MacWorkerDeps {
   readonly getLeased: typeof getLeasedRow;
   readonly extend: typeof extendLease;
   readonly release: typeof releaseLease;
+  readonly unconfirmed: typeof markUnconfirmed;
+  readonly releaseDry: typeof releaseWithoutAttempt;
   readonly beat: typeof recordMacBeat;
   readonly packet: typeof buildMacPacket;
   readonly cv: typeof resolveCv;
@@ -57,7 +59,7 @@ export interface MacWorkerDeps {
 export function defaultMacWorkerDeps(): MacWorkerDeps {
   return {
     now: () => new Date(), token: macWorkerToken, profileIds: () => listProfiles().map((p) => p.id),
-    lease: leaseNextRow, getLeased: getLeasedRow, extend: extendLease, release: releaseLease, beat: recordMacBeat,
+    lease: leaseNextRow, getLeased: getLeasedRow, extend: extendLease, release: releaseLease, unconfirmed: markUnconfirmed, releaseDry: releaseWithoutAttempt, beat: recordMacBeat,
     packet: buildMacPacket, cv: resolveCv, settle: settleConfirmed,
     notify: (html) => sendMessageTo(jobsChatId(), html, { parse_mode: "HTML" }),
     photo: (png, caption, filename) => sendPhoto(png, { chatId: jobsChatId(), caption, filename }),
@@ -129,6 +131,21 @@ async function handleResult(req: IncomingMessage, res: ServerResponse, deps: Mac
   if (body.outcome === "failed") {
     await deps.release(row.id, body.leaseId, `failed: ${detail || "no detail"}`, now);
     log.info({ rowId: row.id, detail }, "mac worker: failed, lease cleared");
+    return reply(res, 200, { ok: true });
+  }
+  if (body.outcome === "dry_run") {
+    await deps.releaseDry(row.id, body.leaseId, `dry run: ${detail || "no detail"}`, now);
+    return reply(res, 200, { ok: true });
+  }
+  if (body.outcome === "unconfirmed") {
+    await deps.unconfirmed(row.id, body.leaseId, detail || "no detail", now);
+    log.warn({ rowId: row.id, detail }, "mac worker: Submit clicked, not confirmed; row closed to the Mac lane");
+    try {
+      await deps.notify(`⚠️ ${label(row)}: Submit was clicked on the Mac but nothing confirmed it. Check your inbox before applying again.`);
+    } catch (err) {
+      // allow-failopen: the row is already closed to the Mac lane; a lost ping is logged and the digest still shows it.
+      log.error({ rowId: row.id, err: (err as Error).message }, "mac worker: could not send the unconfirmed ping");
+    }
     return reply(res, 200, { ok: true });
   }
   // challenge and code_needed: a person must act on the Mac, so the lease stays and is extended by a full 30 minutes.
