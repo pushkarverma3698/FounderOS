@@ -86,7 +86,10 @@ message (the order you filled them). Then wait. Do nothing else.
 
 ### Step 4: only when the founder answers in this chat
 
-- "submit 1, 3 and 5": for each named number, and only those, go to that tab, check the page is still the Submit page with
+- "submit 1, 3 and 5": for each named number, and only those, FIRST re-check the lease with
+  `GET $MAC_WORKER_URL/apply/mac-worker/packet?rowId=<rowId>&leaseId=<leaseId>` (same Authorization header). Anything but
+  HTTP 200 means the 12h hold lapsed and the row may have been re-leased: do NOT click Submit, close that tab, and tell the
+  founder that tab expired. On 200, go to that tab, check the page is still the Submit page with
   the fields you filled, click the one Submit button, wait for the employer's confirmation page or message, take a screenshot.
   If the confirmation is clear, report:
 
