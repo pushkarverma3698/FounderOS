@@ -35,7 +35,7 @@ describe("Mac worker API", () => {
   let deps: Deps;
   const m = {
     lease: vi.fn(), getLeased: vi.fn(), extend: vi.fn(), release: vi.fn(), beat: vi.fn(), packet: vi.fn(), cv: vi.fn(),
-    settle: vi.fn(), notify: vi.fn(), photo: vi.fn(),
+    settle: vi.fn(), notify: vi.fn(), photo: vi.fn(), unconfirmed: vi.fn(), releaseDry: vi.fn(),
   };
 
   const call = (method: string, path: string, init: { auth?: string | null; body?: unknown } = {}) => {
@@ -58,10 +58,12 @@ describe("Mac worker API", () => {
     m.release.mockResolvedValue(true);
     m.notify.mockResolvedValue(undefined);
     m.photo.mockResolvedValue(undefined);
+    m.unconfirmed.mockResolvedValue(true);
+    m.releaseDry.mockResolvedValue(true);
     m.settle.mockResolvedValue({ kind: "confirmed" });
     deps = {
       now: () => NOW, token: () => token, profileIds: () => ["pushkar-nl-tech"], lease: m.lease, getLeased: m.getLeased, extend: m.extend,
-      release: m.release, beat: m.beat, packet: m.packet, cv: m.cv, settle: m.settle, notify: m.notify, photo: m.photo,
+      release: m.release, unconfirmed: m.unconfirmed, releaseDry: m.releaseDry, beat: m.beat, packet: m.packet, cv: m.cv, settle: m.settle, notify: m.notify, photo: m.photo,
     } as unknown as Deps;
     server = createServer((req, res) => void handleMacWorkerRequest(req, res, deps));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -200,6 +202,21 @@ describe("Mac worker API", () => {
     expect(res.status).toBe(200);
     expect(m.release).toHaveBeenCalledWith(ROW_ID, LEASE, "failed: form changed", NOW);
     expect(m.settle).not.toHaveBeenCalled();
+  });
+
+  it("result unconfirmed: closes the row to the Mac lane (never a plain release) and pings the founder", async () => {
+    const res = await result("unconfirmed", { detail: "no banner" });
+    expect(res.status).toBe(200);
+    expect(m.unconfirmed).toHaveBeenCalledWith(ROW_ID, LEASE, "no banner", NOW);
+    expect(m.release).not.toHaveBeenCalled();
+    expect(m.settle).not.toHaveBeenCalled();
+    expect(m.notify.mock.calls[0]![0]).toContain("Check your inbox");
+  });
+
+  it("result dry_run: frees the lease without spending an attempt", async () => {
+    expect((await result("dry_run", { detail: "every check passed" })).status).toBe(200);
+    expect(m.releaseDry).toHaveBeenCalledWith(ROW_ID, LEASE, "dry run: every check passed", NOW);
+    expect(m.release).not.toHaveBeenCalled();
   });
 
   it("heartbeat records the beat", async () => {

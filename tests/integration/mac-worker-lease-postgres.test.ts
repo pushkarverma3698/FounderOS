@@ -15,7 +15,7 @@ import { like } from "drizzle-orm";
 import { closeDatabaseConnections, getDb } from "../../src/db/client.js";
 import { jobApplications } from "../../src/db/schema.js";
 import { TENANT } from "../../src/core/config.js";
-import { extendLease, getLastMacBeat, getLeasedRow, leaseNextRow, recordMacBeat, releaseLease } from "../../src/db/mac-worker-queries.js";
+import { extendLease, getLastMacBeat, getLeasedRow, leaseNextRow, markUnconfirmed, recordMacBeat, releaseLease, releaseWithoutAttempt } from "../../src/db/mac-worker-queries.js";
 
 async function postgresReachable(): Promise<boolean> {
   const url = process.env["DATABASE_URL"];
@@ -43,12 +43,13 @@ async function clean(): Promise<void> {
   await getDb().delete(jobApplications).where(like(jobApplications.dedupe_key, "macworker-test-%"));
 }
 
+let companySeq = 0;
 async function seed(n: number, over: Partial<typeof jobApplications.$inferInsert> = {}): Promise<string[]> {
   const rows = await getDb()
     .insert(jobApplications)
     .values(
       Array.from({ length: n }, (_, i) => ({
-        tenant_id: TENANT, dedupe_key: `${PREFIX}${randomUUID()}`, company: `Co ${i}`, title: "Engineer",
+        tenant_id: TENANT, dedupe_key: `${PREFIX}${randomUUID()}`, company: `Co ${companySeq++}-${i}`, title: "Engineer",
         sponsor_verdict: "unknown", salary_status: "unknown", profile_id: PROFILE, apply_lane: "hand_off",
         apply_lane_reason: CAPTCHA, apply_lane_at: new Date(NOW.getTime() - 1000 * (n - i)), ...over,
       })),
@@ -122,6 +123,44 @@ describe.skipIf(!up)("Mac worker lease (real Postgres)", () => {
     const again = await leaseNextRow([PROFILE], NOW, "lease-3", TTL);
     expect(again?.id).toBe(id);
     expect(again?.mac_result).toBe("failed: form changed");
+    await clean();
+  });
+
+  it("an unconfirmed result closes the row: the lease query never returns it again, even after the lease would lapse", async () => {
+    const [id] = await seed(1);
+    await leaseNextRow([PROFILE], NOW, "lease-u", TTL);
+    expect(await markUnconfirmed(id!, "lease-other", "no banner", NOW)).toBe(false);
+    expect(await markUnconfirmed(id!, "lease-u", "no banner", NOW)).toBe(true);
+    const later = new Date(NOW.getTime() + 10 * TTL);
+    expect(await leaseNextRow([PROFILE], later, "lease-again", TTL)).toBeNull();
+    await clean();
+  });
+
+  it("a dry-run release spends no attempt: the same row can be dry-run again and again", async () => {
+    const [id] = await seed(1);
+    for (let i = 0; i < 5; i++) {
+      const row = await leaseNextRow([PROFILE], NOW, `lease-d${i}`, TTL);
+      expect(row?.id).toBe(id);
+      expect(row?.mac_attempts).toBe(1);
+      expect(await releaseWithoutAttempt(id!, `lease-d${i}`, "dry run: ok", NOW)).toBe(true);
+    }
+    await clean();
+  });
+
+  it("the 30-day company cooldown: a company applied to (or unconfirmed) within 30 days is never leased", async () => {
+    const [cooledApplied] = await seed(1, { company: "Acme B.V." });
+    await seed(1, { company: "Acme", applied_at: new Date(NOW.getTime() - 5 * 24 * 3600 * 1000), stage: "applied" });
+    const [cooledUnconfirmed] = await seed(1, { company: "Globex Ltd" });
+    await seed(1, { company: "Globex", mac_result: "unconfirmed: no banner", mac_result_at: new Date(NOW.getTime() - 3600 * 1000), mac_attempts: 3 });
+    const [free] = await seed(1, { company: "Initech" });
+    const got: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const r = await leaseNextRow([PROFILE], NOW, `lease-c${i}`, TTL);
+      if (r) got.push(r.id);
+    }
+    expect(got).toEqual([free]);
+    expect(got).not.toContain(cooledApplied);
+    expect(got).not.toContain(cooledUnconfirmed);
     await clean();
   });
 

@@ -79,6 +79,8 @@ export interface FormPlanSummary {
   readonly unanswered: readonly UnansweredQuestion[];
   readonly requiredUnanswered: readonly UnansweredQuestion[];
   readonly hasCaptcha: boolean;
+  /** The vendor the scraper named ("reCAPTCHA Enterprise", "Cloudflare Turnstile"...); absent when the widget was unnamed. */
+  readonly captchaVendor?: string;
   readonly readyToSubmit: boolean;
   /** Every scraped field in the form's own order (no CAPTCHA widgets), with the value the bot filled when it did. The hand-off panel reads it. */
   readonly formFields?: readonly { readonly label: string; readonly fieldType: string; readonly value?: string }[];
@@ -89,7 +91,9 @@ export function summariseFormPlan(
   fields: readonly ScrapedField[] = [],
   verifiedSelectors?: ReadonlySet<string>,
 ): FormPlanSummary {
-  const hasCaptcha = fields.some((f) => f.isCaptcha || f.type === "captcha");
+  const captchaField = fields.find((f) => f.isCaptcha || f.type === "captcha");
+  const hasCaptcha = captchaField !== undefined;
+  const vendorLabel = captchaField && captchaField.label !== "CAPTCHA" && captchaField.label.trim() !== "" ? captchaField.label : undefined;
   const unanswered: UnansweredQuestion[] = [];
   const filledAnswers: FilledAnswer[] = [];
 
@@ -124,6 +128,7 @@ export function summariseFormPlan(
     unanswered: orderedUnanswered,
     requiredUnanswered,
     hasCaptcha,
+    ...(vendorLabel ? { captchaVendor: vendorLabel } : {}),
     readyToSubmit: requiredUnanswered.length === 0 && !hasCaptcha,
     formFields,
   };

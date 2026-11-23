@@ -12,7 +12,7 @@ const input: ScoreboardInput = {
   ],
   waitingLanes: ["needs_you", "needs_you", "hand_off", null],
   attempts: 3,
-  submitted: [{ via: "auto" }, { via: "auto" }, { via: "telegram" }, { via: "miniapp" }, { via: "by-hand" }],
+  submitted: [{ via: "auto" }, { via: "auto" }, { via: "telegram", codeVia: "email-autoread" }, { via: "miniapp", codeVia: "typed" }, { via: "by-hand" }],
   results: [
     { result: "confirmed", detail: "" },
     { result: "failed", detail: "captcha" },
@@ -33,6 +33,12 @@ describe("countScoreboard", () => {
   it("groups failures by reason with counts, biggest first, confirmed excluded", () => {
     expect(s.failed).toEqual([{ reason: "failed: captcha", count: 2 }, { reason: "unconfirmed: no proof page", count: 1 }]);
   });
+  it("counts emailed codes read automatically vs typed by the founder", () => {
+    expect(s.codes).toEqual({ auto: 1, typed: 1 });
+    const none = countScoreboard({ ...input, submitted: [{ via: "auto" }] });
+    expect(none.codes).toEqual({ auto: 0, typed: 0 });
+    expect(formatScoreboard("", none).join("\n")).not.toContain("Codes:");
+  });
   it("counts waiting by lane", () => {
     expect(s.waiting).toEqual({ needsYou: 2, handOff: 1 });
   });
@@ -49,6 +55,7 @@ describe("formatScoreboard", () => {
     expect(text).toContain("target 35–40 sent/day");
     expect(text).toContain("Caught 4 → routed within 2h 1 → filled 2 → sent 6 → confirmed 5");
     expect(text).toContain("VPS 3, after your click 2, by hand 1");
+    expect(text).toContain("Codes: 1 auto-read, 1 typed by you");
     expect(text).toContain("2 × failed: captcha");
     expect(text).toContain("Waiting: needs you 2, hand-off 1");
   });
