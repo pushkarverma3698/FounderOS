@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { EMAIL_POLL_MAX_MS, EMAIL_POLL_MS, pollEmailCode, type PollDeps } from "../../../src/tools/jobhunt/email-code-poll.js";
+
+const mockRead = vi.hoisted(() => vi.fn());
+vi.mock("../../../src/infra/providers/google-direct.js", () => ({ directReadEmails: mockRead }));
+import { EMAIL_POLL_MAX_MS, EMAIL_POLL_MS, pollEmailCode, readRecentMail, type PollDeps } from "../../../src/tools/jobhunt/email-code-poll.js";
 import type { CodeMail } from "../../../src/tools/jobhunt/email-code.js";
 
 const T0 = Date.parse("2026-11-22T10:00:00Z");
@@ -61,5 +64,14 @@ describe("pollEmailCode", () => {
     const h = harness([[codeMail("k3Jd9sLm", T0 + 5_000)]]);
     h.enter.mockRejectedValueOnce(new Error("boom"));
     expect(await pollEmailCode(input, h.deps)).toBe("error");
+  });
+});
+
+describe("readRecentMail", () => {
+  it("asks the provider for the full body, not the snippet", async () => {
+    mockRead.mockResolvedValue({ success: true, data: "1. From: a@example.com · Mon, 23 Nov 2026 10:00:00 +0000\n   Subject: s\n   body" });
+    const mails = await readRecentMail();
+    expect(mockRead).toHaveBeenCalledWith(expect.objectContaining({ full_body: true }));
+    expect(mails).toHaveLength(1);
   });
 });

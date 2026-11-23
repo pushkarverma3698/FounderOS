@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Copy to ~/Library/LaunchAgents/com.founderos.mac-worker.plist, replace the REPO_DIR / NODE_BIN / values, then:
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.founderos.mac-worker.plist
+     Runs in DRY RUN. Add <string>--live</string> after mac-worker.ts only once the founder approves real submits. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.founderos.mac-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>NODE_BIN</string>
+    <string>--import</string><string>tsx/esm</string>
+    <string>scripts/mac-worker.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MAC_WORKER_URL</key><string>https://VPS_BASE_URL</string>
+    <key>MAC_WORKER_TOKEN</key><string>PASTE_TOKEN_HERE</string>
+    <key>MAC_WORKER_CDP</key><string>http://127.0.0.1:9222</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/tmp/founderos-mac-worker.log</string>
+  <key>StandardErrorPath</key><string>/tmp/founderos-mac-worker.log</string>
+</dict>
+</plist>

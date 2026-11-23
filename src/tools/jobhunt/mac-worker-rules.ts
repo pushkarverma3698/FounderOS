@@ -51,7 +51,11 @@ export function bearerOf(header: string | string[] | undefined): string | undefi
   return m?.[1];
 }
 
-export const OUTCOMES = ["confirmed", "challenge", "failed", "code_needed"] as const;
+/** `mac_result` starts with this when Submit was clicked and nothing confirmed it; the lease query and cooldown read it. */
+export const MAC_UNCONFIRMED_PREFIX = "unconfirmed:";
+
+/** `unconfirmed`: Submit was clicked, outcome unknown (never retried). `dry_run`: a dry run ended, no attempt is spent. */
+export const OUTCOMES = ["confirmed", "challenge", "failed", "code_needed", "unconfirmed", "dry_run"] as const;
 export type MacOutcome = (typeof OUTCOMES)[number];
 
 export const resultBodySchema = z.object({
