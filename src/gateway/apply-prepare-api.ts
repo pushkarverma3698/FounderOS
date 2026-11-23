@@ -17,12 +17,17 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getApplicationById, HOME_SECTIONS, listApplyQueue } from "../db/apply-queries.js";
+import { listQueueLaneRows } from "../db/job-apply-lane-queries.js";
+import { getLastMacBeat } from "../db/mac-worker-queries.js";
 import type { JobApplication } from "../db/schema.js";
 import { logger } from "../infra/logger.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
 import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { computeStatus, type ApiDeps } from "./apply-api.js";
 import { homePageHeaders, renderHomePage } from "./apply-home.js";
+import { applyPageHeaders } from "./apply-page.js";
+import { buildQueue, type QueueDeps } from "./apply-queue-api.js";
+import { renderQueueShell } from "./apply-queue-page.js";
 import { prepareRow } from "./apply-prepare.js";
 import { clearOutcome, lockPhase, tryLockApply } from "./apply-session.js";
 import { authenticateMiniApp } from "./miniapp-auth.js";
@@ -36,12 +41,17 @@ export interface JobsApiDeps {
   /** The row by id, or null. Ownership is checked by the caller. */
   readonly getRow: (id: string, profile: JobSearchProfile) => Promise<JobApplication | null>;
   readonly prepare: typeof prepareRow;
+  /** The apply queue's rows and the Mac heartbeat (apply-queue-api.ts). */
+  readonly queue?: QueueDeps;
 }
+
+const DEFAULT_QUEUE: QueueDeps = { rows: (profile, now) => listQueueLaneRows(profile.id, now), macBeat: getLastMacBeat };
 
 export const defaultJobsApiDeps: JobsApiDeps = {
   listQueue: (profile) => listApplyQueue(profile.tenantId, profile.id, HOME_SECTIONS),
   getRow: (id, profile) => getApplicationById(id, profile.tenantId),
   prepare: prepareRow,
+  queue: DEFAULT_QUEUE,
 };
 
 /** Why the last prepare of a row did not produce a form, until the next prepare starts. Memory only, like the outcome map. */
@@ -173,8 +183,14 @@ export async function handleHomeRoutes(
     res.end(renderHomePage(nonce));
     return true;
   }
+  if (head === "queue" && parts.length === 1 && method === "GET") {
+    const nonce = randomBytes(16).toString("base64");
+    res.writeHead(200, applyPageHeaders(nonce));
+    res.end(renderQueueShell(nonce));
+    return true;
+  }
   if (head !== "api") return false;
-  const want = kind === "jobs" && parts.length === 2 ? "GET"
+  const want = (kind === "jobs" || kind === "queue") && parts.length === 2 ? "GET"
     : kind === "prepare" && parts.length === 3 ? "POST"
     : kind === "job-status" && parts.length === 3 ? "GET"
     : null;
@@ -192,7 +208,8 @@ export async function handleHomeRoutes(
     notFound(res);
     return true;
   }
-  if (kind === "jobs") await listJobs(res, who, deps, jobs);
+  if (kind === "queue") json(res, 200, await buildQueue(who.profile, deps, jobs.queue ?? DEFAULT_QUEUE));
+  else if (kind === "jobs") await listJobs(res, who, deps, jobs);
   else if (kind === "prepare") await startPrepare(res, rowId, who, deps, jobs);
   else await jobStatus(res, rowId, who, deps, jobs);
   return true;

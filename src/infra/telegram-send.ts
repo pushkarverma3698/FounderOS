@@ -89,7 +89,10 @@ function unreachableNotice(err: unknown): string {
 }
 
 /** A callback button, or a link button (the evening apply batch opens the answer page and the job posting). */
-export type JobsChatButton = { readonly text: string; readonly callback_data: string } | { readonly text: string; readonly url: string };
+export type JobsChatButton =
+  | { readonly text: string; readonly callback_data: string }
+  | { readonly text: string; readonly url: string }
+  | { readonly text: string; readonly web_app: { readonly url: string } };
 
 /**
  * Send a job-lane message to the jobs chat (JOBHUNT_CHAT_ID), the way `sendToChat` sends to the founder.
