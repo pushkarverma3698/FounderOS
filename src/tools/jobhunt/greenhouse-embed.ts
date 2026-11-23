@@ -1,7 +1,7 @@
 /**
  * Company careers pages that embed a Greenhouse board (`?gh_jid=<id>`) carry no form of their own: the employer's page
  * loads Greenhouse's iframe, so the form runner saw "no fillable form fields". The hosted board serves the same form at
- * `job-boards.greenhouse.io/<token>/jobs/<id>`.
+ * `job-boards.greenhouse.io/embed/job_app?for=<token>&token=<id>`.
  *
  * The board token is not in the embedded URL. It is known when the company is a Greenhouse board in the free registry,
  * the same registry the sweep polls (the row's `company` is that board's `name`, see free-ingest `toRawPosting`).
@@ -42,5 +42,7 @@ export function greenhouseHostedUrl(url: string, company: string): string | null
   if (jid === null || !/^\d+$/.test(jid)) return null;
   const token = greenhouseTokenFor(company);
   if (token === null) return null;
-  return `https://job-boards.greenhouse.io/${encodeURIComponent(token)}/jobs/${jid}`;
+  // The embed form URL, not /<token>/jobs/<id>: that page redirects back to the company site when the
+  // company set its own careers URL (checked 2026-11-23 on Schuberg Philis and Stripe).
+  return `https://job-boards.greenhouse.io/embed/job_app?for=${encodeURIComponent(token)}&token=${jid}`;
 }
