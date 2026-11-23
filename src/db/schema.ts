@@ -1142,6 +1142,8 @@ export const jobApplications = agentsSchema.table(
     apply_lane: text("apply_lane"),
     apply_lane_reason: text("apply_lane_reason"),
     apply_lane_at: timestamp("apply_lane_at", { withTimezone: true }),
+    /** ATS fit + tailoring result (tools/jobhunt/ats-record.ts), JSON text. Non-null means tailoring was tried once: never again. */
+    ats_json: text("ats_json"),
     liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
 
     /**
