@@ -124,7 +124,7 @@ export async function tailorForRow(
     const pdf = await deps.render(out.tailoredMarkdown);
     if (pdf.length === 0) throw new Error("PDF render produced 0 bytes");
     // An ATS reads the PDF, not the markdown: check the name, headings and matched skills survive the render.
-    const problem = checkPdfText(await deps.pdfText(pdf).catch(() => ""), out.tailoredMarkdown, matched, profile.skillsDictionaryName);
+    const problem = checkPdfText(await deps.pdfText(pdf).catch(() => "" /* allow-failopen: an unreadable PDF counts as failing the check, which keeps the base CV */), out.tailoredMarkdown, matched, profile.skillsDictionaryName);
     if (problem) {
       log.warn({ rowId: row.id, problem }, "Rendered PDF failed the ATS text check");
       throw new Error("pdf parse");
