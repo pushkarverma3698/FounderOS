@@ -49,10 +49,11 @@ describe("scheduler", () => {
       "pipeline-digest",
       "funding-grower",
       "import-boards-reminder",
+      "paid-sweep",
       "apply-evening-batch",
       "findings",
     ]);
-    expect(registered.map((r) => r.expr)).toEqual(["*/30 * * * *", "0 9 * * *", "0 9 * * 1", "0 2 * * *", "0 10 1 * *", "0 19 * * *", "30 9 * * *"]);
+    expect(registered.map((r) => r.expr)).toEqual(["*/30 * * * *", "0 9 * * *", "0 9 * * 1", "0 2 * * *", "0 10 1 * *", "30 18 * * *", "0 19 * * *", "30 9 * * *"]);
     expect(registered.at(-1)?.tz).toBeTruthy(); // findings run in the founder's timezone
   });
 });

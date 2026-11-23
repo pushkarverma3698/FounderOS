@@ -13,7 +13,7 @@ import { appTimeZone } from "../core/time.js";
 import { childLogger } from "../infra/logger.js";
 import { runMaintenanceChild } from "../infra/child-run.js";
 import { sendToChat } from "../infra/telegram-send.js";
-import { FREE_SWEEP_CRON, runFreeSweep } from "../tools/jobhunt/sweep-runner.js";
+import { FREE_SWEEP_CRON, JOB_SWEEP_CRON, JOB_SWEEP_TIME_ZONE, runFreeSweep, runJobIngestSweep } from "../tools/jobhunt/sweep-runner.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 import { realAutoSendHook } from "../gateway/auto-send-hook.js";
 import { realShadowDeps, runShadowApply, shadowApplyEnabled } from "../tools/jobhunt/shadow-apply.js";
@@ -72,6 +72,8 @@ export const JOBS_CRONS: readonly JobsCron[] = [
   { name: "pipeline-digest", expr: "0 9 * * 1", run: runPipelineDigest },
   { name: "funding-grower", expr: "0 2 * * *", run: runFundingGrowerSweep },
   { name: "import-boards-reminder", expr: "0 10 1 * *", run: sendImportBoardsReminder },
+  // The one paid (Apify) sweep: 18:30 Amsterdam, so it lands before the 19:00 batch below. Spend-capped in spend-gate.ts.
+  { name: "paid-sweep", expr: JOB_SWEEP_CRON, run: runJobIngestSweep, timezone: JOB_SWEEP_TIME_ZONE },
   // 09:30 in appTimeZone(): the server is on UTC, so a bare "30 9" would fire at 15:00 IST.
   // 19:00 Amsterdam, DST-safe because node-cron evaluates the expression in that zone. Off unless APPLY_EVENING_BATCH=on.
   { name: "apply-evening-batch", expr: EVENING_CRON, run: () => runEveningBatch(), timezone: EVENING_TIME_ZONE },

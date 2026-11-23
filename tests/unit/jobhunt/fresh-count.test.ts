@@ -204,15 +204,10 @@ describe("the ledger records yield per QUERY, not just per sweep", () => {
 });
 
 describe("sweep cadence", () => {
-  it("runs every third day, not daily", () => {
-    // Founder decision, 2026-08-02. Pinned as a constant rather than left as a
-    // string at the call site: reverting to daily is a one-character edit that
-    // triples the bill, and nothing else in the system would notice.
-    expect(JOB_SWEEP_CRON).toBe("30 1 */3 * *");
-  });
-
-  it("still lands at 07:00 IST, before the founder's day starts", () => {
-    const [minute, hour] = JOB_SWEEP_CRON.split(" ");
-    expect(`${hour}:${minute}`).toBe("1:30");
+  it("runs once a day at 18:30 Amsterdam (founder card #1341), ahead of the 19:00 batch", () => {
+    // Pinned as constants rather than a string at the call site: the dollar cap
+    // (spend-gate.ts) is what bounds the bill, so the cadence is a deliberate
+    // choice and any change to it should have to edit this test.
+    expect(JOB_SWEEP_CRON).toBe("30 18 * * *");
   });
 });

@@ -4,7 +4,7 @@ vi.mock("../../../src/infra/logger.js", () => ({
   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
   childLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
-vi.mock("../../../src/tools/jobhunt/sweep-runner.js", () => ({ FREE_SWEEP_CRON: "*/30 * * * *", runFreeSweep: vi.fn() }));
+vi.mock("../../../src/tools/jobhunt/sweep-runner.js", () => ({ FREE_SWEEP_CRON: "*/30 * * * *", runFreeSweep: vi.fn(), JOB_SWEEP_CRON: "30 18 * * *", JOB_SWEEP_TIME_ZONE: "Europe/Amsterdam", runJobIngestSweep: vi.fn() }));
 
 const { JOBS_CRONS, startJobsScheduler } = await import("../../../src/jobs/scheduler.js");
 
