@@ -71,4 +71,28 @@ describe("daily queue digest", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(waiting).not.toHaveBeenCalled();
   });
+
+  it("leaves Himalayas/Jobicy hand-offs out of the counts and says so in ONE line (#1327)", async () => {
+    process.env["APPLY_EVENING_BATCH"] = "on";
+    const send = vi.fn(async (_m: { text: string }) => {});
+    const noLink = [
+      { ...r("hand_off", "Form not usable: no fields"), url: "https://himalayas.app/companies/a/jobs/b?utm_source=api" },
+      { ...r("hand_off", "Form not usable: no fields"), url: "https://jobicy.com/jobs/1-x" },
+    ];
+    await runEveningBatch(new Date("2026-11-23T18:00:00Z"), {
+      profiles: () => [{ id: "p1", candidateName: "Pushkar Verma" } as JobSearchProfile],
+      waiting: async () => [],
+      answerUrl: () => null,
+      queue: { rows: async () => [...ROWS, ...noLink] as unknown as JobApplication[], link: async () => link },
+      send,
+      claim: () => true,
+      release: () => {},
+    });
+    delete process.env["APPLY_EVENING_BATCH"];
+    const text = (send.mock.calls[0] as unknown as [{ text: string }])[0].text;
+    expect(text).toContain("7 roles waiting");
+    expect(text).toContain("2 need you on the site");
+    expect(text.match(/no employer link/g)?.length).toBe(1);
+    expect(text).toContain("2 Himalayas/Jobicy rows had no employer link");
+  });
 });

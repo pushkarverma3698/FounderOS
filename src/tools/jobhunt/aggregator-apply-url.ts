@@ -8,12 +8,16 @@
  * live postings redirected. One request, redirects not followed; anything else keeps the original.
  *
  * Arbeitnow answers 403 to Node fetch unless `Accept` is sent (2026-11-23), hence a wildcard `Accept`.
- * Himalayas and Jobicy are not handled: Himalayas returns 403 (Cloudflare) to `<job>/apply` even with
- * a wildcard `Accept`, from the VPS and from a laptop (probed 2026-11-23), and Jobicy's apply button is an
- * in-page form with no outbound link.
+ * Himalayas gets the same attempt, but expect it to fail: 2026-11-23 a laptop got a Cloudflare managed
+ * challenge (403, `cf-mitigated: challenge`) on both the job page and `<job>/apply`, with the wildcard
+ * `Accept` too, and its API's `applicationLink` is the Himalayas page itself. Jobicy is not attempted: its
+ * apply button is an in-page form and neither page nor API carries an employer link. A row still on one of
+ * these two hosts has no employer link: `hasNoEmployerLink` names it so the evening digest can drop it.
  */
 
 const ARBEITNOW_HOST = /^(?:www\.)?arbeitnow\.[a-z.]+$/i;
+const HIMALAYAS_HOST = /^(?:www\.)?himalayas\.app$/i;
+const JOBICY_HOST = /^(?:www\.)?jobicy\.com$/i;
 const TIMEOUT_MS = 10_000;
 const USER_AGENT = "founderos-aggregator/1.0 (+jobhunt)";
 
@@ -32,12 +36,38 @@ export function isArbeitnowUrl(url: string): boolean {
   return host !== null && ARBEITNOW_HOST.test(host);
 }
 
+function isHimalayasUrl(url: string): boolean {
+  const host = hostOf(url);
+  return host !== null && HIMALAYAS_HOST.test(host);
+}
+
+/** True for a Himalayas or Jobicy page: the role has no employer form to prepare or open. */
+export function hasNoEmployerLink(url: string | null | undefined): boolean {
+  const host = url ? hostOf(url) : null;
+  return host !== null && (HIMALAYAS_HOST.test(host) || JOBICY_HOST.test(host));
+}
+
+/** Hand-off rows still on Himalayas or Jobicy are left out of what the founder is asked to act on; `noLink` counts them. */
+export function dropNoEmployerLink<T extends { readonly apply_lane: string | null; readonly url: string | null }>(
+  rows: readonly T[],
+): { readonly rows: T[]; readonly noLink: number } {
+  const kept = rows.filter((r) => !(r.apply_lane === "hand_off" && hasNoEmployerLink(r.url)));
+  return { rows: kept, noLink: rows.length - kept.length };
+}
+
+/** `<job page>/apply`, keeping the query string (Himalayas rows carry `?utm_source=api`) after the path. */
+function applyPath(url: string): string {
+  const u = new URL(url);
+  u.pathname = `${u.pathname.replace(/\/+$/, "")}/apply`;
+  return u.toString();
+}
+
 /** The employer's form URL, or `url` unchanged when it is not Arbeitnow or the redirect is missing. */
 export async function resolveEmployerApplyUrl(url: string, fetchImpl: FetchLike = fetch): Promise<string> {
-  if (!isArbeitnowUrl(url)) return url;
+  if (!isArbeitnowUrl(url) && !isHimalayasUrl(url)) return url;
   let response: Response;
   try {
-    response = await fetchImpl(`${url.replace(/\/+$/, "")}/apply`, {
+    response = await fetchImpl(applyPath(url), {
       redirect: "manual",
       headers: { "User-Agent": USER_AGENT, Accept: "*/*" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -48,6 +78,6 @@ export async function resolveEmployerApplyUrl(url: string, fetchImpl: FetchLike 
   }
   if (response.status < 300 || response.status >= 400) return url;
   const location = response.headers.get("location") ?? "";
-  if (!/^https?:\/\//i.test(location) || isArbeitnowUrl(location)) return url;
+  if (!/^https?:\/\//i.test(location) || isArbeitnowUrl(location) || isHimalayasUrl(location)) return url;
   return location;
 }

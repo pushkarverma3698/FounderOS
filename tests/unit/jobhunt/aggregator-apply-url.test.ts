@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { isArbeitnowUrl, resolveEmployerApplyUrl } from "../../../src/tools/jobhunt/aggregator-apply-url.js";
+import { dropNoEmployerLink, hasNoEmployerLink, isArbeitnowUrl, resolveEmployerApplyUrl } from "../../../src/tools/jobhunt/aggregator-apply-url.js";
 import { classifyFormUrl } from "../../../src/tools/jobhunt/form-platform.js";
 
 const NL = "https://www.arbeitnow.nl/jobs/companies/adesso-netherlands/senior-data-scientist-utrecht-196103";
@@ -78,5 +78,47 @@ describe("classifyFormUrl on aggregator pages", () => {
   });
   it("classifies a resolved employer link by its own platform", () => {
     expect(classifyFormUrl(EMPLOYER)).toEqual({ supported: true, platform: "recruitee" });
+  });
+});
+
+describe("Himalayas and Jobicy", () => {
+  const HI = "https://himalayas.app/companies/acme/jobs/backend-engineer?utm_source=api";
+  it("tries the /apply redirect for Himalayas, keeping the query after the path", async () => {
+    const fetchImpl = vi.fn(async () => redirect(302, EMPLOYER));
+    expect(await resolveEmployerApplyUrl(HI, fetchImpl)).toBe(EMPLOYER);
+    expect(fetchImpl).toHaveBeenCalledWith("https://himalayas.app/companies/acme/jobs/backend-engineer/apply?utm_source=api", expect.objectContaining({ redirect: "manual" }));
+  });
+  it("keeps the Himalayas URL on the Cloudflare 403 seen from the VPS and a laptop", async () => {
+    expect(await resolveEmployerApplyUrl(HI, async () => new Response("challenge", { status: 403 }))).toBe(HI);
+  });
+  it("keeps the URL when the redirect points back at Himalayas", async () => {
+    expect(await resolveEmployerApplyUrl(HI, async () => redirect(302, "https://himalayas.app/login"))).toBe(HI);
+  });
+  it("never requests Jobicy: it has no employer link to follow", async () => {
+    const fetchImpl = vi.fn();
+    const url = "https://jobicy.com/jobs/163127-applied-ai-engineer";
+    expect(await resolveEmployerApplyUrl(url, fetchImpl)).toBe(url);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it("names rows still on either host as having no employer link", () => {
+    expect(hasNoEmployerLink(HI)).toBe(true);
+    expect(hasNoEmployerLink("https://jobicy.com/jobs/1-x")).toBe(true);
+    expect(hasNoEmployerLink(EMPLOYER)).toBe(false);
+    expect(hasNoEmployerLink(null)).toBe(false);
+    expect(hasNoEmployerLink("https://nothimalayas.app/x")).toBe(false);
+  });
+});
+
+describe("dropNoEmployerLink", () => {
+  it("drops only hand-off rows still on Himalayas or Jobicy and counts them", () => {
+    const rows = [
+      { apply_lane: "hand_off", url: "https://himalayas.app/companies/a/jobs/b" },
+      { apply_lane: "needs_you", url: "https://jobicy.com/jobs/1-x" },
+      { apply_lane: "hand_off", url: "https://jobicy.com/jobs/2-y" },
+      { apply_lane: "hand_off", url: EMPLOYER },
+    ];
+    const out = dropNoEmployerLink(rows);
+    expect(out.noLink).toBe(2);
+    expect(out.rows.map((r) => r.url)).toEqual(["https://jobicy.com/jobs/1-x", EMPLOYER]);
   });
 });

@@ -62,6 +62,19 @@ describe("runEveningBatch", () => {
     expect(first[0].text).not.toContain("Tashi");
   });
 
+  it("drops unresolved Himalayas/Jobicy hand-off rows and says so in ONE line", async () => {
+    const hi = { ...row(3, "p1", "hand_off"), url: "https://himalayas.app/companies/a/jobs/b?utm_source=api" };
+    const jo = { ...row(4, "p1", "hand_off"), url: "https://jobicy.com/jobs/1-x" };
+    const { d, send } = deps({ p1: [row(1, "p1", "needs_you"), hi, jo] });
+    await runEveningBatch(NOW, d);
+    const text = (send.mock.calls[0] as unknown as [{ text: string }])[0].text;
+    expect(text).toContain("1 role waiting");
+    expect(text).not.toContain("Co3");
+    expect(text).not.toContain("Co4");
+    expect(text.match(/no employer link/g)?.length).toBe(1);
+    expect(text).toContain("2 Himalayas/Jobicy rows had no employer link");
+  });
+
   it("does not send twice on the same day (restart or double fire)", async () => {
     const { d, send } = deps({ p1: [row(1, "p1", "needs_you")] });
     await runEveningBatch(NOW, d);

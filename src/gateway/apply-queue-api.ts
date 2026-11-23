@@ -8,6 +8,7 @@
  */
 
 import type { JobApplication } from "../db/schema.js";
+import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
 import { QUEUE_GROUPS, QUEUE_GROUP_TITLE, countQueue, queueGroupOf, type QueueGroup } from "../tools/jobhunt/apply-queue.js";
 import { macOnline } from "../tools/jobhunt/mac-worker-rules.js";
@@ -38,7 +39,8 @@ const clip = (t: string): string => (t.length > MAX_REASON_CHARS ? `${t.slice(0,
 export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: QueueDeps) {
   const now = new Date(deps.now());
   const cfg = readApplyLinkConfig(deps.env);
-  const open = (await q.rows(profile, now)).filter((r) => r.profile_id === profile.id);
+  // Same rule as the evening digest: Himalayas/Jobicy hand-offs have no employer link, so they are not listed.
+  const open = dropNoEmployerLink((await q.rows(profile, now)).filter((r) => r.profile_id === profile.id)).rows;
   const items: QueueItem[] = [];
   for (const r of open) {
     const group = queueGroupOf(r);

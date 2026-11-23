@@ -19,14 +19,21 @@ export function autoSendSwitchPath(profileId: string): string {
   return join(dirname(applyProfilePathFor(profileId)), `auto-send-${profileId}.json`);
 }
 
-export async function readRuntimeSwitch(profileId: string): Promise<boolean> {
+/** `never_set` is a profile with no switch file at all (nobody has ever run `/autoapply on|off` for it); it acts as off. */
+export type SwitchState = "on" | "off" | "never_set";
+
+export async function readSwitchState(profileId: string): Promise<SwitchState> {
   try {
     const parsed = fileSchema.safeParse(JSON.parse(await fs.readFile(autoSendSwitchPath(profileId), "utf8")));
-    return parsed.success && parsed.data.on;
-  } catch {
+    return parsed.success && parsed.data.on ? "on" : "off";
+  } catch (err) {
     // allow-failopen: this is a kill switch, so an unreadable file reads as OFF, the safe side.
-    return false;
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "never_set" : "off";
   }
+}
+
+export async function readRuntimeSwitch(profileId: string): Promise<boolean> {
+  return (await readSwitchState(profileId)) === "on";
 }
 
 export async function writeRuntimeSwitch(profileId: string, on: boolean, now: Date = new Date()): Promise<void> {

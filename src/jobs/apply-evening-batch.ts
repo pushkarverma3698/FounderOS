@@ -18,6 +18,7 @@ import { childLogger } from "../infra/logger.js";
 import { jobsChatId, sendToJobsChat } from "../infra/telegram-send.js";
 import { listProfiles, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
+import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { parseAts } from "../tools/jobhunt/ats-record.js";
 import { countScoreboard, dayWindow, formatScoreboard, isEmptyScoreboard } from "../tools/jobhunt/apply-scoreboard.js";
 import { buildEveningMessages, type EveningMessage, type WaitingRole } from "./apply-evening-format.js";
@@ -123,12 +124,16 @@ const toRole = (row: JobApplication, answerUrl: string | null): WaitingRole => (
 async function batchFor(profile: JobSearchProfile, now: Date, d: EveningDeps): Promise<EveningMessage[]> {
   const first = profile.candidateName.trim().split(/\s+/)[0] ?? profile.candidateName;
   const board = d.scoreboard ? await d.scoreboard(profile.id, first, now) : [];
+  const boardMsgs = board.map((text): EveningMessage => ({ text, keyboard: [] }));
   if (d.queue) {
-    const digest = buildQueueDigest(first, await d.queue.rows(profile.id, now), await d.queue.link(now));
-    return [...board.map((text): EveningMessage => ({ text, keyboard: [] })), ...(digest ? [digest] : [])];
+    const { rows, noLink } = dropNoEmployerLink(await d.queue.rows(profile.id, now));
+    if (noLink > 0) log.info({ profile: profile.id, noLink }, "Evening batch dropped rows with no employer link");
+    const digest = buildQueueDigest(first, rows, await d.queue.link(now), noLink);
+    return [...boardMsgs, ...(digest ? [digest] : [])];
   }
-  const rows = await d.waiting(profile.id, now);
-  return [...board.map((text): EveningMessage => ({ text, keyboard: [] })), ...buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))))];
+  const { rows, noLink } = dropNoEmployerLink(await d.waiting(profile.id, now));
+  if (noLink > 0) log.info({ profile: profile.id, noLink }, "Evening batch dropped rows with no employer link");
+  return [...boardMsgs, ...buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))), noLink)];
 }
 
 /** Send each profile's batch. Returns how many profiles got one. One profile failing never blocks the others. */
