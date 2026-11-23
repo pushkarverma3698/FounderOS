@@ -78,6 +78,8 @@ const answersSchema = z
     university: z.string().optional(),
     github: z.string().optional(),
     referral_source: z.string().optional(),
+    /** The fact sheet (`fact-sheet.ts`): founder-typed values for questions the fields above do not cover; trusted by auto-send. */
+    fact_sheet: z.record(z.string()).optional(),
     /** Voluntary EEO answers by category (`self-identification.ts`); a category not set is declined. */
     self_identification: z.record(z.string()).optional(),
   })

@@ -54,8 +54,12 @@ export function bearerOf(header: string | string[] | undefined): string | undefi
 /** `mac_result` starts with this when Submit was clicked and nothing confirmed it; the lease query and cooldown read it. */
 export const MAC_UNCONFIRMED_PREFIX = "unconfirmed:";
 
-/** `unconfirmed`: Submit was clicked, outcome unknown (never retried). `dry_run`: a dry run ended, no attempt is spent. */
-export const OUTCOMES = ["confirmed", "challenge", "failed", "code_needed", "unconfirmed", "dry_run"] as const;
+/**
+ * `unconfirmed`: Submit was clicked, outcome unknown (never retried). `dry_run`: a dry run ended, no attempt is spent.
+ * `filled_to_submit` and `submitted` are the Claude hand-off lane's (claude-lane-rules.ts): filled and waiting for the
+ * founder's yes (never applied), then sent with his yes and confirmed.
+ */
+export const OUTCOMES = ["confirmed", "challenge", "failed", "code_needed", "unconfirmed", "dry_run", "filled_to_submit", "submitted"] as const;
 export type MacOutcome = (typeof OUTCOMES)[number];
 
 export const resultBodySchema = z.object({
@@ -64,6 +68,9 @@ export const resultBodySchema = z.object({
   outcome: z.enum(OUTCOMES),
   detail: z.string().max(1000).default(""),
   proofScreenshot: z.string().max(MAC_MAX_PROOF_CHARS).optional(),
+  /** filled_to_submit only: the open Submit page and the labels of the fields left blank. */
+  link: z.string().max(2000).optional(),
+  blanks: z.array(z.string().max(300)).max(100).optional(),
 });
 export type MacResultBody = z.infer<typeof resultBodySchema>;
 
