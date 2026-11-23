@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoApplyKeyboard, parseAutoApplyCallback, parseAutoApplyVerb, renderAutoApplyStatus } from "../../../src/gateway/autoapply-command.js";
+import { autoApplyKeyboard, parseAutoApplyCallback, parseAutoApplyVerb, renderAutoApplyStatus, renderSwitchOverview } from "../../../src/gateway/autoapply-command.js";
 
 describe("/autoapply", () => {
   it("parses on, off, status and bare as status; junk is null", () => {
@@ -43,5 +43,15 @@ describe("/autoapply buttons", () => {
     expect(on.split("\n")[0]).toContain("ON");
     expect(on).not.toContain("Both must be on");
     expect(renderAutoApplyStatus({ ...base, envOn: true, runtimeOn: false })).toContain("Both must be on");
+  });
+  it("lists every profile's switch, a profile with no file as off (never set)", () => {
+    const html = renderSwitchOverview(
+      [{ profileId: "pushkar-nl-tech", state: "on" }, { profileId: "wife-nl-finance", state: "never_set" }, { profileId: "p3", state: "off" }],
+      true,
+    );
+    expect(html).toContain("pushkar-nl-tech: ON");
+    expect(html).toContain("wife-nl-finance: off (never set)");
+    expect(html).toContain("p3: off");
+    expect(html).toContain("Server switch on");
   });
 });

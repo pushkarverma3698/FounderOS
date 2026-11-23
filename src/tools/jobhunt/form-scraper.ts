@@ -9,13 +9,13 @@
 
 import type { Page } from "playwright";
 import type { ScrapedField, ScrapedFieldKind } from "./form-brain.js";
-import { classifyFormUrl, resolveFormTargetUrl, type FormPlatform } from "./form-platform.js";
+import { classifyFormUrl, classifyFormTarget, resolveFormTargetUrl, type FormPlatform } from "./form-platform.js";
 import { cssEscapeAttr, idSelector, installEvaluateShim, readComboboxOptions, stampSelector } from "./form-combobox.js";
 import { CAPTCHA_WIDGET, probeCaptchaVendor, VENDOR_LABEL } from "./captcha-detect.js";
 import { revealSmartRecruitersForm } from "./form-smartrecruiters.js";
 
 
-export { classifyFormUrl, resolveFormTargetUrl, type FormPlatform, type PlatformCheck } from "./form-platform.js";
+export { classifyFormUrl, classifyFormTarget, resolveFormTargetUrl, type FormPlatform, type PlatformCheck } from "./form-platform.js";
 
 /** Minimal structural DOM types for browser `evaluate` callbacks (Node tsconfig omits `lib: ["dom"]`). */
 interface DomElement {
