@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { autoSendSwitchPath, readRuntimeSwitch, writeRuntimeSwitch } from "../../../src/tools/jobhunt/auto-send-switch.js";
+import { autoSendSwitchPath, readRuntimeSwitch, readSwitchState, writeRuntimeSwitch } from "../../../src/tools/jobhunt/auto-send-switch.js";
 
 let dir = "";
 let saved: string | undefined;
@@ -33,5 +33,19 @@ describe("runtime switch", () => {
     expect(await readRuntimeSwitch("p1")).toBe(false);
     writeFileSync(autoSendSwitchPath("p1"), JSON.stringify({ on: "yes" }));
     expect(await readRuntimeSwitch("p1")).toBe(false);
+  });
+});
+
+describe("readSwitchState", () => {
+  it("tells a never-set profile from an explicit off", async () => {
+    expect(await readSwitchState("wife-nl-finance")).toBe("never_set");
+    await writeRuntimeSwitch("p1", false);
+    expect(await readSwitchState("p1")).toBe("off");
+    await writeRuntimeSwitch("p1", true);
+    expect(await readSwitchState("p1")).toBe("on");
+  });
+  it("reads a corrupt file as off, not never set", async () => {
+    writeFileSync(autoSendSwitchPath("p1"), "{not json");
+    expect(await readSwitchState("p1")).toBe("off");
   });
 });

@@ -15,12 +15,14 @@ import path from "node:path";
 import type { JobApplication } from "../db/schema.js";
 import { dataRoot } from "../core/data-root.js";
 import { childLogger } from "../infra/logger.js";
-import { sendToJobsChat } from "../infra/telegram-send.js";
+import { jobsChatId, sendToJobsChat } from "../infra/telegram-send.js";
 import { listProfiles, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
+import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { parseAts } from "../tools/jobhunt/ats-record.js";
 import { countScoreboard, dayWindow, formatScoreboard, isEmptyScoreboard } from "../tools/jobhunt/apply-scoreboard.js";
 import { buildEveningMessages, type EveningMessage, type WaitingRole } from "./apply-evening-format.js";
+import { buildQueueDigest, type QueueLink } from "./apply-queue-digest.js";
 
 const log = childLogger({ module: "apply-evening-batch" });
 
@@ -38,6 +40,11 @@ export interface EveningDeps {
   readonly answerUrl: (row: JobApplication, now: Date) => string | null;
   /** The profile's daily scoreboard messages (HTML); empty when the day recorded nothing. Optional. */
   readonly scoreboard?: (profileId: string, name: string, now: Date) => Promise<readonly string[]>;
+  /** When set, ONE counts message with a button to the Mini App queue replaces the per-role cards. */
+  readonly queue?: {
+    readonly rows: (profileId: string, now: Date) => Promise<readonly JobApplication[]>;
+    readonly link: (now: Date) => Promise<QueueLink>;
+  };
   readonly send: (message: EveningMessage) => Promise<void>;
   /** True when this caller won today's marker for the profile. */
   readonly claim: (profileId: string, now: Date) => boolean;
@@ -71,7 +78,7 @@ function releaseMarker(profileId: string, now: Date): void {
 }
 
 async function realDeps(): Promise<EveningDeps> {
-  const { listWaitingLaneRows } = await import("../db/job-apply-lane-queries.js");
+  const { listWaitingLaneRows, listQueueLaneRows } = await import("../db/job-apply-lane-queries.js");
   return {
     profiles: listProfiles,
     waiting: listWaitingLaneRows,
@@ -85,6 +92,17 @@ async function realDeps(): Promise<EveningDeps> {
       const { start, end } = dayWindow(now, EVENING_TIME_ZONE);
       const board = countScoreboard(await loadScoreboardInput(profileId, start, end, now));
       return isEmptyScoreboard(board) ? [] : formatScoreboard(name, board);
+    },
+    queue: {
+      rows: listQueueLaneRows,
+      link: async (now) => {
+        const { applyQueueUrl } = await import("../gateway/apply-queue-page.js");
+        const { opensInTelegram } = await import("../gateway/apply-handoff-card.js");
+        const { getLastMacBeat } = await import("../db/mac-worker-queries.js");
+        const { macOnline } = await import("../tools/jobhunt/mac-worker-rules.js");
+        const url = applyQueueUrl();
+        return { url, inTelegram: url !== null && opensInTelegram(jobsChatId(), url), macOnline: macOnline(await getLastMacBeat(), now) };
+      },
     },
     send: (m) => sendToJobsChat(m.text, "HTML", m.keyboard),
     claim: claimMarker,
@@ -104,10 +122,18 @@ const toRole = (row: JobApplication, answerUrl: string | null): WaitingRole => (
 });
 
 async function batchFor(profile: JobSearchProfile, now: Date, d: EveningDeps): Promise<EveningMessage[]> {
-  const rows = await d.waiting(profile.id, now);
   const first = profile.candidateName.trim().split(/\s+/)[0] ?? profile.candidateName;
   const board = d.scoreboard ? await d.scoreboard(profile.id, first, now) : [];
-  return [...board.map((text): EveningMessage => ({ text, keyboard: [] })), ...buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))))];
+  const boardMsgs = board.map((text): EveningMessage => ({ text, keyboard: [] }));
+  if (d.queue) {
+    const { rows, noLink } = dropNoEmployerLink(await d.queue.rows(profile.id, now));
+    if (noLink > 0) log.info({ profile: profile.id, noLink }, "Evening batch dropped rows with no employer link");
+    const digest = buildQueueDigest(first, rows, await d.queue.link(now), noLink);
+    return [...boardMsgs, ...(digest ? [digest] : [])];
+  }
+  const { rows, noLink } = dropNoEmployerLink(await d.waiting(profile.id, now));
+  if (noLink > 0) log.info({ profile: profile.id, noLink }, "Evening batch dropped rows with no employer link");
+  return [...boardMsgs, ...buildEveningMessages(first, rows.map((r) => toRole(r, d.answerUrl(r, now))), noLink)];
 }
 
 /** Send each profile's batch. Returns how many profiles got one. One profile failing never blocks the others. */
