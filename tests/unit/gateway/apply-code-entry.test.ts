@@ -120,6 +120,23 @@ describe("runCodeEntry", () => {
     expect(io.settled).toHaveBeenCalledTimes(1);
   });
 
+  it("audit row says who supplied the code: typed by default, email-autoread when the poller entered it", async () => {
+    mockEnter.mockResolvedValue({ kind: "confirmed", evidence: "Confirmed", screenshotPng: png });
+    await runCodeEntry(ROW_ID, "miniapp", "AB12cd34", recorder().io);
+    expect((mockWriteAuditEntry.mock.calls[0]?.[0] as { payload: { codeVia: string } }).payload.codeVia).toBe("typed");
+    mockWriteAuditEntry.mockClear();
+    saveApplySnapshot(snapshot);
+    await runCodeEntry(ROW_ID, "telegram", "AB12cd34", recorder().io, "email-autoread");
+    const payload = (mockWriteAuditEntry.mock.calls[0]?.[0] as { payload: { codeVia: string; via: string } }).payload;
+    expect(payload).toMatchObject({ via: "telegram", codeVia: "email-autoread" });
+  });
+
+  it("a send with no code step leaves codeVia off the audit row", async () => {
+    const { settleConfirmed } = await import("../../../src/gateway/apply-submit.js");
+    await settleConfirmed(row as never, "auto", "https://example.com/apply", recorder().io);
+    expect((mockWriteAuditEntry.mock.calls[0]?.[0] as { payload: object }).payload).not.toHaveProperty("codeVia");
+  });
+
   it("a wrong code changes nothing: not applied, no unconfirmed click, no chat line, still re-enterable", async () => {
     mockEnter.mockResolvedValue({ kind: "code-needed", evidence: "That code was not accepted.", screenshotPng: png });
     const { io, texts } = recorder();

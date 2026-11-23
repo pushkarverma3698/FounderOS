@@ -112,6 +112,55 @@ describe("googleapis adapter — read", () => {
   });
 });
 
+describe("googleapis adapter — read, full body", () => {
+  const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64url");
+  const headers = [
+    { name: "From", value: "no-reply@us.greenhouse-mail.io" },
+    { name: "Subject", value: "Security code for your application" },
+    { name: "Date", value: "Mon, 23 Nov 2026 10:00:00 +0000" },
+  ];
+  const long = `${"x".repeat(400)} Paste this code: Ab12Cd34`;
+
+  it("keeps metadata format by default (snippet only)", async () => {
+    listMock.mockResolvedValue({ data: { messages: [{ id: "m1" }] } });
+    getMock.mockResolvedValue({ data: { id: "m1", snippet: "snip", payload: { headers } } });
+    await directReadEmails({ query: "q", max_results: 1 });
+    expect(getMock.mock.calls[0]![0]).toMatchObject({ format: "metadata" });
+  });
+
+  it("full_body reads format full and returns the text/plain part past the snippet", async () => {
+    listMock.mockResolvedValue({ data: { messages: [{ id: "m1" }] } });
+    getMock.mockResolvedValue({
+      data: {
+        id: "m1",
+        snippet: "xxxx",
+        payload: {
+          mimeType: "multipart/alternative",
+          headers,
+          parts: [
+            { mimeType: "text/html", body: { data: b64("<p>html only copy</p>") } },
+            { mimeType: "text/plain", body: { data: b64(long) } },
+          ],
+        },
+      },
+    });
+    const r = await directReadEmails({ query: "q", max_results: 1, full_body: true });
+    expect(getMock.mock.calls[0]![0]).toMatchObject({ format: "full" });
+    expect(getMock.mock.calls[0]![0]).not.toHaveProperty("metadataHeaders");
+    expect(String(r.data)).toContain("Paste this code: Ab12Cd34");
+    expect(String(r.data)).not.toContain("html only copy");
+  });
+
+  it("full_body falls back to stripped html when there is no text/plain part", async () => {
+    listMock.mockResolvedValue({ data: { messages: [{ id: "m1" }] } });
+    getMock.mockResolvedValue({
+      data: { id: "m1", snippet: "", payload: { mimeType: "text/html", headers, body: { data: b64("<div>Your code is <b>Zz99Yy88</b></div>") } } },
+    });
+    const r = await directReadEmails({ query: "q", max_results: 1, full_body: true });
+    expect(String(r.data)).toContain("Your code is Zz99Yy88");
+  });
+});
+
 describe("googleapis adapter — calendar", () => {
   it("maps an inserted event to { event_id, title, date, html_link }", async () => {
     insertMock.mockResolvedValue({ data: { id: "ev-1", htmlLink: "http://cal/ev-1" } });

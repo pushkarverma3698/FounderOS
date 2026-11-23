@@ -68,7 +68,7 @@ export async function pollEmailCode(input: PollInput, deps: PollDeps): Promise<P
 
 /** The real reader: Gmail via the provider, parsed to mails. Failures read as null. */
 export async function readRecentMail(accountKey?: string): Promise<readonly CodeMail[] | null> {
-  const res = await directReadEmails({ query: EMAIL_CODE_QUERY, max_results: 10, ...(accountKey ? { account_key: accountKey } : {}) });
+  const res = await directReadEmails({ query: EMAIL_CODE_QUERY, max_results: 10, full_body: true, ...(accountKey ? { account_key: accountKey } : {}) });
   if (!res.success || typeof res.data !== "string") return null;
   return parseEmailList(res.data);
 }
