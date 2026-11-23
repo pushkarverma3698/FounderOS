@@ -8,6 +8,9 @@ const order: string[] = [];
 vi.mock("../../../src/tools/jobhunt/sweep-runner.js", () => ({
   FREE_SWEEP_CRON: "*/30 * * * *",
   runFreeSweep: vi.fn(async () => { order.push("sweep"); }),
+  JOB_SWEEP_CRON: "30 18 * * *",
+  JOB_SWEEP_TIME_ZONE: "Europe/Amsterdam",
+  runJobIngestSweep: vi.fn(),
 }));
 const runShadowApply = vi.fn(async () => { order.push("shadow"); return { routed: [], opened: 0 }; });
 vi.mock("../../../src/tools/jobhunt/shadow-apply.js", async () => {
