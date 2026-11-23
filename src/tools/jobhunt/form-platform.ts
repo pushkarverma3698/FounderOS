@@ -2,7 +2,7 @@
  * FounderOS — ATS platform detection and form URL resolution (split from form-scraper.ts for the 400-line cap).
  */
 
-import { getApplyUrl } from "./apply-packet.js";
+import { getApplyUrl } from "./apply-url.js";
 
 export type FormPlatform =
   | "greenhouse"
