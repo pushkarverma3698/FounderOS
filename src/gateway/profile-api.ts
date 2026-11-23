@@ -29,6 +29,7 @@ import {
   type AnswerState,
   type SaveResult,
 } from "../tools/jobhunt/answer-store.js";
+import { FACT_CATEGORIES, FACT_FIELD_KEYS, SKILL_KEY, SKILL_PREFIX, factSheetStatus, skillYears } from "../tools/jobhunt/fact-sheet.js";
 import { getProfile } from "../tools/jobhunt/profile-config.js";
 import type { SelfIdCategory } from "../tools/jobhunt/self-identification.js";
 import { logger } from "../infra/logger.js";
@@ -73,6 +74,17 @@ const EEO: ReadonlyArray<readonly [SelfIdCategory, string]> = [
   ["sexual_orientation", "Sexual orientation"],
 ];
 
+/** The fact sheet section: a marker per category, the plain fields with their values, and the saved skills. */
+function factSheetState(answers: Obj): Obj {
+  const a = answers as NonNullable<import("../tools/jobhunt/apply-profile.js").ApplyProfile["answers"]>;
+  const sheet = obj(answers["fact_sheet"]);
+  return {
+    status: factSheetStatus({ answers: a }),
+    fields: FACT_FIELD_KEYS.map((key) => ({ key, label: FACT_CATEGORIES.find((c) => c.key === key)?.label ?? key, value: show(sheet[key]) })),
+    skills: skillYears(a).map(([skill, years]) => ({ skill, years })),
+  };
+}
+
 export interface ProfileEditorDeps {
   readonly now: () => number;
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -99,7 +111,7 @@ export async function buildEditorState(profileId: string): Promise<Obj> {
   const base = { profileId, candidateName: getProfile(profileId).candidateName };
   const read = await readAnswerState(profileId);
   const backups = (await listAnswerBackups(profileId)).map((b) => ({ id: b.ts, profile: b.json, dossier: b.md }));
-  if (!read.state) return { ...base, broken: read.reason ?? "unreadable", version: "broken", core: [], eeo: [], learned: [], coreFacts: [], backups };
+  if (!read.state) return { ...base, broken: read.reason ?? "unreadable", version: "broken", core: [], eeo: [], factSheet: { status: [], fields: [], skills: [] }, learned: [], coreFacts: [], backups };
   const answers = obj(read.state.profile["answers"]);
   const selfId = obj(answers["self_identification"]);
   return {
@@ -107,6 +119,7 @@ export async function buildEditorState(profileId: string): Promise<Obj> {
     version: answerVersion(read.state),
     core: CORE.map((c) => ({ field: c.field, label: c.label, kind: c.kind, value: show(answers[c.field]), ...(c.options ? { options: c.options } : {}) })),
     eeo: EEO.map(([cat, label]) => ({ field: EEO_PREFIX + cat, label, value: show(selfId[cat]) })),
+    factSheet: factSheetState(answers),
     learned: await listLearnedAnswers(profileId),
     coreFacts: coreFactsOf(read.state.dossierMarkdown),
     backups,
@@ -159,8 +172,37 @@ function planSetCore(b: Body): Plan {
   };
 }
 
+/** One fact-sheet value (a plain category or one skill's years); an empty value clears it. */
+function planSetFact(b: Body): Plan {
+  const key = typeof b["key"] === "string" ? b["key"] : "";
+  const value = typeof b["value"] === "string" ? b["value"].trim() : "";
+  const isSkill = SKILL_KEY.test(key) && key.length <= SKILL_PREFIX.length + 40;
+  if (!isSkill && !FACT_FIELD_KEYS.includes(key)) return { error: `${key || "that"} is not a fact-sheet field` };
+  if (value.length > MAX_VALUE_CHARS) return { error: `keep it under ${MAX_VALUE_CHARS} characters` };
+  if (isSkill && value !== "" && !/^\d{1,2}(\.\d)?$/.test(value)) return { error: "years must be a number, like 5" };
+  const name = isSkill ? key.slice(SKILL_PREFIX.length).replace(/-/g, " ") : (FACT_CATEGORIES.find((c) => c.key === key)?.label ?? key);
+  return {
+    summary: (changed) => (!changed ? `${name} was already that` : value ? `${name}: ${value}` : `${name} cleared`),
+    run: (id, base) =>
+      saveAnswers(
+        id,
+        (s) => {
+          const answers = { ...obj(s.profile["answers"]) };
+          const sheet = { ...obj(answers["fact_sheet"]) } as Record<string, unknown>;
+          if (value) sheet[key] = value;
+          else delete sheet[key];
+          if (JSON.stringify(sheet) === JSON.stringify(obj(answers["fact_sheet"]))) return null;
+          return { profile: { ...s.profile, answers: { ...answers, fact_sheet: sheet } }, dossierMarkdown: s.dossierMarkdown };
+        },
+        { precondition: stillAt(base) },
+      ),
+  };
+}
+
 function plan(b: Body): Plan {
   switch (b["op"]) {
+    case "setFact":
+      return planSetFact(b);
     case "setCore":
       return planSetCore(b);
     case "upsertLearned": {
