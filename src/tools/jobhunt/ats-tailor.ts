@@ -17,6 +17,8 @@ import { childLogger } from "../../infra/logger.js";
 import { tailoredCvPath, MIN_DESCRIPTION_CHARS } from "./apply-packet.js";
 import { buildAtsRecord, parseAts, type AtsRecord } from "./ats-record.js";
 import { renderCvToPdf } from "./cv-renderer.js";
+import { checkPdfText, extractPdfText } from "./pdf-check.js";
+import { overlapScore } from "./overlap.js";
 import type { JobSearchProfile } from "./profile-config.js";
 import { tailorCv } from "./tailor-cv.js";
 
@@ -32,6 +34,8 @@ export type TailorRow = Pick<JobApplication, "id" | "company" | "title" | "track
 export interface TailorDeps {
   readonly tailor: typeof tailorCv;
   readonly render: (markdown: string) => Promise<Buffer>;
+  /** Plain text of a rendered PDF, as an ATS parser would read it. */
+  readonly pdfText: (pdf: Buffer) => Promise<string>;
   readonly fileExists: (filePath: string) => Promise<boolean>;
   readonly writeFile: (filePath: string, data: Buffer) => Promise<void>;
   readonly recordAts: (id: string, atsJson: string) => Promise<void>;
@@ -50,6 +54,7 @@ export function tailorPerRunCap(env: NodeJS.ProcessEnv = process.env): number {
 export function realTailorDeps(): TailorDeps {
   return {
     tailor: tailorCv,
+    pdfText: extractPdfText,
     render: async (md) => (await renderCvToPdf(md)).pdfBuffer,
     fileExists: async (p) => {
       try {
@@ -108,20 +113,29 @@ export async function tailorForRow(
   let ratio = 0;
   let matched: readonly string[] = [];
   let missing: readonly string[] = [];
+  let cvTrack: string | undefined;
   try {
     const out = await deps.tailor({ jobDescription: description, companyName: row.company, jobTitle: row.title, track: row.track, profile });
     ratio = out.initialOverlapRatio;
     matched = out.matchedSkills;
     missing = out.missingSkills;
+    cvTrack = out.track;
     if (!out.success || !out.tailoredMarkdown) throw new Error(out.error ?? "CV tailoring failed");
     const pdf = await deps.render(out.tailoredMarkdown);
     if (pdf.length === 0) throw new Error("PDF render produced 0 bytes");
+    // An ATS reads the PDF, not the markdown: check the name, headings and matched skills survive the render.
+    const problem = checkPdfText(await deps.pdfText(pdf).catch(() => ""), out.tailoredMarkdown, matched, profile.skillsDictionaryName);
+    if (problem) {
+      log.warn({ rowId: row.id, problem }, "Rendered PDF failed the ATS text check");
+      throw new Error("pdf parse");
+    }
     await deps.writeFile(target, pdf);
-    return save(deps, row.id, buildAtsRecord({ ratio, matched, missing, tailored: true }));
+    const finalRatio = overlapScore(description, out.tailoredMarkdown, profile.skillsDictionaryName).ratio;
+    return save(deps, row.id, buildAtsRecord({ ratio, matched, missing, tailored: true, finalRatio, track: cvTrack }));
   } catch (err) {
     // allow-failopen: a tailor failure keeps the base CV and is recorded; it must never block the send.
     const reason = (err as Error).message;
     log.warn({ rowId: row.id, reason }, "Tailoring failed; the base CV stays");
-    return save(deps, row.id, buildAtsRecord({ ratio, matched, missing, tailored: false, tailor: `failed ${reason}` }));
+    return save(deps, row.id, buildAtsRecord({ ratio, matched, missing, tailored: false, tailor: `failed ${reason}`, track: cvTrack }));
   }
 }
