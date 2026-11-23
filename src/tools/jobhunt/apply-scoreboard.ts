@@ -30,7 +30,7 @@ export interface ScoreboardInput {
   /** Auto-send attempt rows written today (the click happened or was about to). */
   readonly attempts: number;
   /** job_application_submitted rows today (written only on a confirmed send), with how it was sent. */
-  readonly submitted: readonly { readonly via: SubmitVia | null }[];
+  readonly submitted: readonly { readonly via: SubmitVia | null; /** "email-autoread" or "typed" when an emailed code was needed. */ readonly codeVia?: string | null }[];
   /** job_auto_send_result rows today. */
   readonly results: readonly { readonly result: string; readonly detail: string }[];
 }
@@ -42,6 +42,8 @@ export interface Scoreboard {
   readonly sent: number;
   readonly sentBy: { readonly vps: number; readonly afterClick: number; readonly byHand: number };
   readonly confirmed: number;
+  /** Confirmed sends that needed an emailed code: read from Gmail vs typed by the founder. */
+  readonly codes: { readonly auto: number; readonly typed: number };
   readonly clicks: number;
   readonly failed: readonly { readonly reason: string; readonly count: number }[];
   readonly waiting: { readonly needsYou: number; readonly handOff: number };
@@ -72,6 +74,7 @@ export function countScoreboard(i: ScoreboardInput): Scoreboard {
     sent: vps + afterClick + byHand,
     sentBy: { vps, afterClick, byHand },
     confirmed: i.submitted.length,
+    codes: { auto: i.submitted.filter((x) => x.codeVia === "email-autoread").length, typed: i.submitted.filter((x) => x.codeVia === "typed").length },
     clicks: afterClick,
     failed: [...reasons].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
     waiting: {
@@ -92,6 +95,7 @@ function lines(name: string, s: Scoreboard): string[] {
     `Caught ${s.caught} → routed within 2h ${s.routedWithin2h} → filled ${s.filled} → sent ${s.sent} → confirmed ${s.confirmed}`,
     `Sent by: ${by}`,
     `Your clicks: ${s.clicks}`,
+    ...(s.codes.auto + s.codes.typed > 0 ? [`Codes: ${s.codes.auto} auto-read, ${s.codes.typed} typed by you`] : []),
     `Waiting: needs you ${s.waiting.needsYou}, hand-off ${s.waiting.handOff}`,
   ];
   if (s.failed.length === 0) out.push("Failed: 0");

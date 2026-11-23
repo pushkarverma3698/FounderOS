@@ -29,6 +29,8 @@ export interface SendEmailInput {
 export interface ReadEmailsInput {
   query: string;
   max_results: number;
+  /** Read the full plain-text body (Gmail `format: full`, text/plain else stripped html) instead of the snippet. Read-only. */
+  full_body?: boolean;
   account_key?: string;
   department?: string;
 }
