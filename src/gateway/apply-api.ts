@@ -22,6 +22,7 @@ import { sendPhoto } from "../infra/telegram-send.js";
 import { loadApplySnapshot, parseApplyToken, readApplyLinkConfig, verifyApplyToken, type ApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { heldCodeInfo, CODE_PATTERN, namesHiddenBotCheck } from "../tools/jobhunt/held-submit.js";
 import { runCodeEntry, runSubmit, settleSubmittedByHand, type SubmitIo } from "./apply-submit.js";
+import { parseTaps, recordQueueTaps } from "./apply-queue-taps.js";
 import {
   clearOutcome, endSession, lockPhase, outcomeFor, recordOutcome, tryLockApply, unconfirmedClickAt, unconfirmedEvidenceFor, type ApplySender,
 } from "./apply-session.js";
@@ -50,6 +51,8 @@ export interface ApiDeps {
   readonly enterCode?: typeof runCodeEntry;
   /** Marks an unconfirmed row applied after the founder sent it himself; defaults to the real one. */
   readonly markByHand?: typeof settleSubmittedByHand;
+  /** Records the queue page's tap count for a send (apply-queue-taps.ts); defaults to the real one. */
+  readonly recordTaps?: typeof recordQueueTaps;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
 }
 
@@ -193,21 +196,21 @@ async function runApiSubmit(snap: ApplySnapshot, held: () => void, deps: ApiDeps
   }
 }
 
-/** The page's snapshot stamp from the body; a 413 or 400 is already sent when this returns null. */
-async function readCreatedAt(req: IncomingMessage, res: ServerResponse): Promise<number | null> {
+/** The page's snapshot stamp (and the queue page's tap count) from the body; a 413 or 400 is already sent when this returns null. */
+async function readStamp(req: IncomingMessage, res: ServerResponse): Promise<{ createdAt: number; taps: number | null } | null> {
   const raw = await readBody(req);
   if (raw === TOO_LARGE) {
     json(res, 413, { error: "request too large" });
     return null;
   }
-  let createdAt: unknown;
+  let body: { createdAt?: unknown; taps?: unknown } = {};
   try {
-    createdAt = (JSON.parse(raw) as { createdAt?: unknown }).createdAt;
+    body = JSON.parse(raw) as typeof body;
   } catch {
     // allow-failopen: an unreadable body is the same 400 as a body without the stamp.
-    createdAt = undefined;
+    body = {};
   }
-  if (typeof createdAt === "number") return createdAt;
+  if (typeof body.createdAt === "number") return { createdAt: body.createdAt, taps: parseTaps(body.taps) };
   json(res, 400, { error: "createdAt is required" });
   return null;
 }
@@ -215,8 +218,9 @@ async function readCreatedAt(req: IncomingMessage, res: ServerResponse): Promise
 const STALE_DETAIL = "This page is out of date. Reload it to see the latest form.";
 
 async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
-  const createdAt = await readCreatedAt(req, res);
-  if (createdAt === null) return;
+  const stamp = await readStamp(req, res);
+  if (stamp === null) return;
+  const createdAt = stamp.createdAt;
   const snap = a.snap;
   const now = deps.now();
   const status = computeStatus(a.rowId, snap, now);
@@ -229,14 +233,16 @@ async function submitEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAu
   if (!held) return json(res, 409, { state: "submitting", detail: "Another run is on this application.", missingRequired: [] });
   recordOutcome(a.rowId, a.profileId, "submitting", "Submitting the application.");
   log.info({ rowId: a.rowId }, "apply api: submit accepted");
+  if (stamp.taps !== null) await (deps.recordTaps ?? recordQueueTaps)(a.rowId, createdAt, stamp.taps);
   json(res, 202, { state: "submitting", detail: "Submitting the application. This takes about a minute.", missingRequired: [] });
   void runApiSubmit(snap, held, deps);
 }
 
 /** "I submitted it": the founder sent an unconfirmed application from his own browser. Marks it applied, nothing is sent. */
 async function submittedEndpoint(req: IncomingMessage, res: ServerResponse, a: OkAuth, deps: ApiDeps): Promise<void> {
-  const createdAt = await readCreatedAt(req, res);
-  if (createdAt === null) return;
+  const stamp = await readStamp(req, res);
+  if (stamp === null) return;
+  const createdAt = stamp.createdAt;
   const snap = a.snap;
   const now = deps.now();
   const status = computeStatus(a.rowId, snap, now);
