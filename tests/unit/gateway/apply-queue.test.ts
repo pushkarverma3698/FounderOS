@@ -61,7 +61,7 @@ function initData(userId: number): string {
 interface QueueBody {
   counts: Record<string, number>;
   macOnline: boolean;
-  items: Array<{ id: string; group: string; company: string; answerUrl?: string; createdAt?: number; canSend: boolean }>;
+  items: Array<{ id: string; group: string; company: string; jobUrl: string; answerUrl?: string; createdAt?: number; canSend: boolean }>;
 }
 
 describe("apply queue Mini App", () => {
@@ -121,6 +121,16 @@ describe("apply queue Mini App", () => {
     expect(html).toContain(`<script nonce="${nonce}">`);
     expect(html).not.toContain("ReadyCo");
     expect(APPLY_QUEUE_SCRIPT).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+  });
+
+  it("never hands a non-http(s) job URL to the page's href", async () => {
+    ROWS.push({ ...lane(8, "pushkar-nl-tech", "EvilCo", "hand_off", "Workday: needs an account"), url: "javascript:alert(1)" });
+    try {
+      const evil = (await queue()).items.find((i) => i.company === "EvilCo")!;
+      expect(evil.jobUrl).toBe("");
+    } finally {
+      ROWS.pop();
+    }
   });
 
   it("404s a missing, forged or unknown-user header with the same body", async () => {

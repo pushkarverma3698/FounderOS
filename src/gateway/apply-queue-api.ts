@@ -11,6 +11,7 @@ import type { JobApplication } from "../db/schema.js";
 import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
 import { QUEUE_GROUPS, QUEUE_GROUP_TITLE, countQueue, queueGroupOf, type QueueGroup } from "../tools/jobhunt/apply-queue.js";
+import { sanitizeTelegramUrl } from "../tools/jobhunt/telegram-format.js";
 import { macOnline } from "../tools/jobhunt/mac-worker-rules.js";
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { computeStatus, type ApiDeps } from "./apply-api.js";
@@ -34,6 +35,7 @@ export interface QueueDeps {
   readonly macBeat: () => Promise<Date | null>;
 }
 
+// jobUrl is a scraped URL that lands in an href, so only http(s) passes (sanitizeTelegramUrl).
 const clip = (t: string): string => (t.length > MAX_REASON_CHARS ? `${t.slice(0, MAX_REASON_CHARS - 1)}…` : t);
 
 export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: QueueDeps) {
@@ -48,7 +50,7 @@ export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: Qu
     const snap = loadApplySnapshot(r.id, deps.root);
     const mine = snap !== null && snap.profileId === profile.id && cfg.ok;
     items.push({
-      id: r.id, group, company: r.company, title: r.title, jobUrl: r.url ?? "", reason: clip((r.apply_lane_reason ?? "").trim()),
+      id: r.id, group, company: r.company, title: r.title, jobUrl: sanitizeTelegramUrl(r.url) ?? "", reason: clip((r.apply_lane_reason ?? "").trim()),
       ...(mine ? { answerUrl: buildApplyUrl(cfg, r.id, profile.id, now.getTime()), createdAt: snap.createdAt } : {}),
       canSend: group === "ready" && mine && computeStatus(r.id, snap, now.getTime())?.state === "ready",
     });
