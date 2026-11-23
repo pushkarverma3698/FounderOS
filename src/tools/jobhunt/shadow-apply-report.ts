@@ -3,6 +3,7 @@
  */
 
 import type { ApplyLane } from "./apply-lane.js";
+import { formatAtsTag, type AtsRecord } from "./ats-record.js";
 import { esc } from "./telegram-format.js";
 
 export interface ShadowRoutedRow {
@@ -11,6 +12,7 @@ export interface ShadowRoutedRow {
   readonly profileId: string;
   readonly lane: ApplyLane;
   readonly reason: string;
+  readonly ats?: AtsRecord;
 }
 
 const MAX_MESSAGE_CHARS = 3500;
@@ -22,7 +24,7 @@ export function formatShadowSummary(rows: readonly ShadowRoutedRow[]): string[] 
   const count = (lane: ApplyLane): number => rows.filter((r) => r.lane === lane).length;
   const header = `<b>Shadow apply: ${rows.length} prepared — auto ${count("auto")}, needs you ${count("needs_you")}, hand-off ${count("hand_off")}</b>`;
   const lines = rows.map(
-    (r) => `• <b>${esc(r.company)}</b>, ${esc(r.title)} (${esc(r.profileId)}): ${LANE_LABEL[r.lane]} — ${esc(r.reason)}`,
+    (r) => `• <b>${esc(r.company)}</b>, ${esc(r.title)} (${esc(r.profileId)}): ${LANE_LABEL[r.lane]} — ${esc(r.reason)}${r.ats ? ` [${esc(formatAtsTag(r.ats))}]` : ""}`,
   );
   const messages: string[] = [];
   let current = header;

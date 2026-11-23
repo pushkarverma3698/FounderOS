@@ -18,6 +18,7 @@ import { childLogger } from "../infra/logger.js";
 import { sendToJobsChat } from "../infra/telegram-send.js";
 import { listProfiles, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig } from "../tools/jobhunt/apply-link.js";
+import { parseAts } from "../tools/jobhunt/ats-record.js";
 import { countScoreboard, dayWindow, formatScoreboard, isEmptyScoreboard } from "../tools/jobhunt/apply-scoreboard.js";
 import { buildEveningMessages, type EveningMessage, type WaitingRole } from "./apply-evening-format.js";
 
@@ -98,6 +99,7 @@ const toRole = (row: JobApplication, answerUrl: string | null): WaitingRole => (
   url: row.url ?? null,
   lane: row.apply_lane === "needs_you" ? "needs_you" : "hand_off",
   reason: row.apply_lane_reason ?? "",
+  ats: parseAts(row.ats_json),
   answerUrl,
 });
 

@@ -55,6 +55,11 @@ export async function recordLane(id: string, lane: string, reason: string, now: 
     .where(eq(jobApplications.id, id));
 }
 
+/** Store the ATS fit + tailoring result. Written once per row; its presence is the "already tried" marker. */
+export async function recordAts(id: string, atsJson: string): Promise<void> {
+  await getDb().update(jobApplications).set({ ats_json: atsJson }).where(eq(jobApplications.id, id));
+}
+
 export interface LaneReasonRow {
   readonly id: string;
   readonly company: string;
