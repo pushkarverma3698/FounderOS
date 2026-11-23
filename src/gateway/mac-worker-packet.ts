@@ -9,6 +9,7 @@
 import * as fs from "node:fs/promises";
 import type { JobApplication } from "../db/schema.js";
 import { jobsChatId } from "../infra/telegram-send.js";
+import type { AnswerSource } from "../tools/jobhunt/answer-source.js";
 import { loadApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { getApplyUrl } from "../tools/jobhunt/apply-packet.js";
 import { applyProfilePathFor, readApplyProfile } from "../tools/jobhunt/apply-profile.js";
@@ -25,7 +26,8 @@ export interface MacPacket {
   readonly url: string;
   readonly answers: readonly HandoffRow[];
   readonly plan: {
-    readonly filledAnswers: readonly { readonly label: string; readonly value: string }[];
+    /** `source` and `confidence` let the Mac apply the same auto-send trust rule (answer-source.ts) the VPS would. */
+    readonly filledAnswers: readonly { readonly label: string; readonly value: string; readonly fieldType: string; readonly source?: AnswerSource; readonly confidence?: number }[];
     readonly requiredUnanswered: readonly { readonly label: string }[];
   } | null;
   readonly cv: { readonly filename: string; readonly bytes: number };
@@ -58,7 +60,10 @@ export async function buildMacPacket(row: JobApplication): Promise<PacketOutcome
   const answers = buildHandoffRows(loaded.profile, dossier, snap?.summary.formFields, { company: row.company, title: row.title, url });
   const plan = snap
     ? {
-        filledAnswers: snap.summary.filledAnswers.filter((f) => f.fieldType !== "file").map((f) => ({ label: f.label, value: f.value })),
+        filledAnswers: snap.summary.filledAnswers.filter((f) => f.fieldType !== "file").map((f) => ({
+          label: f.label, value: f.value, fieldType: f.fieldType,
+          ...(f.source !== undefined ? { source: f.source } : {}), ...(f.confidence !== undefined ? { confidence: f.confidence } : {}),
+        })),
         requiredUnanswered: snap.summary.unanswered.filter((q) => q.required).map((q) => ({ label: q.label })),
       }
     : null;
