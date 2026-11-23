@@ -54,6 +54,7 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_TEAM_ID: ${{ secrets.SLACK_TEAM_ID }}
           LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          MAC_WORKER_TOKEN: ${{ secrets.MAC_WORKER_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -116,6 +117,7 @@ jobs:
             emit SLACK_BOT_TOKEN              "$SLACK_BOT_TOKEN"
             emit SLACK_TEAM_ID                "$SLACK_TEAM_ID"
             emit LANGCHAIN_API_KEY            "$LANGCHAIN_API_KEY"
+            emit MAC_WORKER_TOKEN             "$MAC_WORKER_TOKEN"
           } | timeout 10m ssh \
                 -i "$KEY_FILE" \
                 -p "${DEPLOY_PORT:-22}" \

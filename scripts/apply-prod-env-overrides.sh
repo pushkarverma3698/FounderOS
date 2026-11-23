@@ -19,6 +19,7 @@
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
 #   SLACK_BOT_TOKEN / SLACK_TEAM_ID — MCP bridge Slack server (optional)
+#   MAC_WORKER_TOKEN     — bearer for /apply/mac-worker/* (unset = API answers 404)
 #   LANGCHAIN_API_KEY    — LangSmith tracing (optional; sets LANGCHAIN_TRACING_V2=true when present)
 set -euo pipefail
 
@@ -285,6 +286,15 @@ if [ -n "${LANGCHAIN_API_KEY:-}" ]; then
   mv .env.patched .env
   chmod 600 .env
   echo "==> Patched .env: LANGCHAIN_API_KEY + LANGCHAIN_TRACING_V2=true set (LangSmith tracing)"
+fi
+
+# Mac worker bearer (#1324): a GitHub secret, so a deploy never wipes it.
+if [ -n "${MAC_WORKER_TOKEN:-}" ]; then
+  grep -v -E '^MAC_WORKER_TOKEN=' .env > .env.patched || true
+  printf 'MAC_WORKER_TOKEN=%s\n' "$MAC_WORKER_TOKEN" >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: MAC_WORKER_TOKEN set"
 fi
 
 # MCP bridge Slack secrets — separate GitHub secrets so they rotate without
