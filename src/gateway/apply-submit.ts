@@ -39,6 +39,8 @@ import { safeHtml } from "./safe-html.js";
 const log = childLogger({ module: "gateway:apply-submit" });
 
 export type SubmitVia = "telegram" | "miniapp" | "auto" | "mac";
+/** Who supplied the emailed code: the founder typed it, or the Gmail poller read it (EMAIL_CODE_AUTOREAD). */
+export type CodeVia = "typed" | "email-autoread";
 
 export interface SubmitIo {
   readonly text: (html: string, keyboard?: InlineKeyboard) => Promise<void>;
@@ -68,12 +70,12 @@ export const codeNeededMessage = (row: JobApplication): string =>
 const refuse = (toast: string, html?: string): SubmitResult => ({ kind: "refused", toast, ...(html ? { html } : {}) });
 
 /** Writes the audit row for a confirmed send. The application is already out, so a failure is logged loudly, not thrown. */
-async function auditConfirmed(row: JobApplication, via: SubmitVia | "by-hand", targetUrl: string): Promise<void> {
+async function auditConfirmed(row: JobApplication, via: SubmitVia | "by-hand", targetUrl: string, codeVia?: CodeVia): Promise<void> {
   try {
     const audit = await writeAuditEntry({
       action: "job_application_submitted",
       idempotency_key: auditKeyFor(row.id),
-      payload: { rowId: row.id, profileId: row.profile_id, company: row.company, title: row.title, targetUrl, via },
+      payload: { rowId: row.id, profileId: row.profile_id, company: row.company, title: row.title, targetUrl, via, ...(codeVia ? { codeVia } : {}) },
       tenant_id: TENANT,
     });
     if (!audit.written) log.warn({ rowId: row.id }, "apply submit: audit row already existed (a concurrent send won the race)");
@@ -150,7 +152,7 @@ function autoreadCode(row: JobApplication, sentAt: number, via: SubmitVia, io: S
     const release = tryLockApply(row.id, Date.now(), "submit");
     if (!release) throw new Error("row busy (a code is already being entered)");
     try {
-      await runCodeEntry(row.id, via, code, io);
+      await runCodeEntry(row.id, via, code, io, "email-autoread");
     } finally {
       release();
     }
@@ -165,9 +167,9 @@ function autoreadCode(row: JobApplication, sentAt: number, via: SubmitVia, io: S
 }
 
 /** Applied, the audit row and the chat line for a confirmed send. Also the Mac worker's confirmed result (mac-worker-api.ts). */
-export async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo): Promise<SubmitResult> {
+export async function settleConfirmed(row: JobApplication, via: SubmitVia, targetUrl: string, io: SubmitIo, codeVia?: CodeVia): Promise<SubmitResult> {
   await markRowApplied(row);
-  await auditConfirmed(row, via, targetUrl);
+  await auditConfirmed(row, via, targetUrl, codeVia);
   endSession(row.id);
   await io.settled();
   await io.text(`✅ <b>Application submitted and marked applied</b> — ${safeHtml(row.company)} (${safeHtml(row.title)}). It's off today's queue.`);
@@ -192,7 +194,7 @@ export type CodeResult =
   | { readonly kind: "code-needed" | "confirmed" | "unconfirmed"; readonly row: JobApplication; readonly detail: string };
 
 /** The founder typed the emailed code. The caller holds the row's lock and has authenticated him. */
-export async function runCodeEntry(rowId: string, via: SubmitVia, code: string, io: SubmitIo): Promise<CodeResult> {
+export async function runCodeEntry(rowId: string, via: SubmitVia, code: string, io: SubmitIo, codeVia: CodeVia = "typed"): Promise<CodeResult> {
   const row = await getApplicationById(rowId, getProfile().tenantId);
   if (!row) return { kind: "none", detail: "That role is no longer on file." };
   const entered: CodeEntryResult = await enterEmailCode(rowId, code);
@@ -204,7 +206,7 @@ export async function runCodeEntry(rowId: string, via: SubmitVia, code: string, 
     await io.photo(entered.screenshotPng, `${row.company} — post-code (${entered.kind})`, `apply-code-${row.id.slice(0, 8)}.png`);
   }
   if (entered.kind === "confirmed") {
-    const done = await settleConfirmed(row, via, targetUrl, io);
+    const done = await settleConfirmed(row, via, targetUrl, io, codeVia);
     return { kind: "confirmed", row, detail: done.kind === "confirmed" ? done.detail : "" };
   }
   if (entered.kind === "code-needed") return { kind: "code-needed", row, detail: entered.evidence };

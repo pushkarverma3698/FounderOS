@@ -29,12 +29,12 @@ export async function loadScoreboardInput(profileId: string, start: Date, end: D
     logRows(RESULT_ACTION),
     listWaitingLaneRows(profileId, now),
   ]);
-  const p = (r: { payload: unknown }) => (r.payload ?? {}) as { via?: string; result?: string; detail?: string };
+  const p = (r: { payload: unknown }) => (r.payload ?? {}) as { via?: string; codeVia?: string; result?: string; detail?: string };
   return {
     caught,
     waitingLanes: waiting.map((w) => w.apply_lane),
     attempts: attempts.length,
-    submitted: submitted.map((r) => ({ via: p(r).via ?? null })),
+    submitted: submitted.map((r) => ({ via: p(r).via ?? null, codeVia: p(r).codeVia ?? null })),
     results: results.map((r) => ({ result: p(r).result ?? "unknown", detail: p(r).detail ?? "" })),
   };
 }

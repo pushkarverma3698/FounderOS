@@ -164,8 +164,9 @@ export async function directReadEmails(input: ReadEmailsInput): Promise<ToolResu
       const got = await client.users.messages.get({
         userId: "me",
         id,
-        format: "metadata",
-        metadataHeaders: ["From", "Subject", "Date"],
+        ...(input.full_body
+          ? { format: "full" }
+          : { format: "metadata", metadataHeaders: ["From", "Subject", "Date"] }),
       });
       messages.push(emailFromGwsGet(got.data as Record<string, unknown>));
     }

@@ -35,6 +35,15 @@ describe("resolveEmployerApplyUrl", () => {
     expect(fetchImpl).toHaveBeenCalledWith(`${NL}/apply`, expect.objectContaining({ redirect: "manual" }));
   });
 
+  it("sends Accept: */* — Arbeitnow answers 403 to a request without it", async () => {
+    let seen: RequestInit | undefined;
+    await resolveEmployerApplyUrl(NL, async (_url, init) => {
+      seen = init;
+      return redirect(302, EMPLOYER);
+    });
+    expect((seen?.headers as Record<string, string>).Accept).toBe("*/*");
+  });
+
   it("leaves non-Arbeitnow URLs alone without a request", async () => {
     const fetchImpl = vi.fn();
     const url = "https://jobs.lever.co/acme/123";
