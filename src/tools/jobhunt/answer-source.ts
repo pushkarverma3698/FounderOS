@@ -10,23 +10,25 @@
  *   approved  the question bank: an answer the candidate gave and approved
  *   file      the resume or cover-letter upload
  *   letter    the cover-letter text, written and fact-checked by the letter writer
+ *   factsheet a value the founder typed once into the Mini App fact sheet (fact-sheet.ts), "fact sheet (<key>)"
  *   policy    the "decline to self-identify" default, a fixed rule and never a guess
  *   unknown   anything else; never qualifies
  */
 
-export type AnswerSource = "profile" | "dossier" | "approved" | "file" | "letter" | "policy" | "unknown";
+export type AnswerSource = "profile" | "dossier" | "approved" | "file" | "letter" | "policy" | "factsheet" | "unknown";
 
 /** Sources that count as "an answer he approved or stated". */
-export const TRUSTED_SOURCES: ReadonlySet<AnswerSource> = new Set(["profile", "dossier", "approved", "file", "letter", "policy"]);
+export const TRUSTED_SOURCES: ReadonlySet<AnswerSource> = new Set(["profile", "dossier", "approved", "file", "letter", "policy", "factsheet"]);
 
 /** Fills that name his right to work, a visa or a self-identification: only these sources may answer them. */
 const SENSITIVE_LABEL =
   /visa|sponsor|work (?:authori[sz]ation|permit)|right to work|eligib|legally|citizen|gender|ethnic|race|disabilit|veteran|hispanic|lgbt|sexual|pronoun/i;
-const SENSITIVE_SOURCES: ReadonlySet<AnswerSource> = new Set(["profile", "dossier", "approved", "policy"]);
+const SENSITIVE_SOURCES: ReadonlySet<AnswerSource> = new Set(["profile", "dossier", "approved", "policy", "factsheet"]);
 
 export function answerSourceOf(why: string): AnswerSource {
   if (/^explicitly answered in candidate question bank/.test(why) || why.startsWith("question_bank (")) return "approved";
   if (why.startsWith("dossier Q&A (") || why.startsWith("dossier fact (") || why.startsWith("dossier/profile rule (")) return "dossier";
+  if (/^fact sheet \([a-z_.0-9-]+\)$/.test(why)) return "factsheet";
   if (why === "matched cover-letter text field") return "letter";
   if (why === "cover-letter file upload field" || why === "resume/CV upload field") return "file";
   if (why.startsWith("voluntary self-identification") && why.includes("declined: no ")) return "policy";
