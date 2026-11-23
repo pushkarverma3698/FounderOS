@@ -3,6 +3,7 @@
  */
 
 import { getApplyUrl } from "./apply-url.js";
+import { greenhouseHostedUrl } from "./greenhouse-embed.js";
 
 export type FormPlatform =
   | "greenhouse"
@@ -63,6 +64,8 @@ export function classifyFormUrl(url: string): PlatformCheck {
 export function resolveFormTargetUrl(url: string, company: string, platform: FormPlatform): string {
   const mapped = getApplyUrl(url, company);
   if (mapped) return mapped;
+  const hosted = greenhouseHostedUrl(url, company);
+  if (hosted) return hosted;
   if (platform === "ashby") {
     try {
       const u = new URL(url);
@@ -75,4 +78,20 @@ export function resolveFormTargetUrl(url: string, company: string, platform: For
     }
   }
   return url;
+}
+
+export type FormTargetCheck =
+  | { readonly supported: true; readonly platform: FormPlatform; readonly targetUrl: string }
+  | { readonly supported: false; readonly reason: string };
+
+/**
+ * Classify a posting and resolve the page to open. The platform is that of the resolved page: an embedded Greenhouse
+ * board (`?gh_jid=` on a company domain) classifies as "generic" but opens the hosted Greenhouse form.
+ */
+export function classifyFormTarget(url: string, company: string): FormTargetCheck {
+  const check = classifyFormUrl(url);
+  if (!check.supported) return check;
+  const targetUrl = resolveFormTargetUrl(url, company, check.platform);
+  const resolved = classifyFormUrl(targetUrl);
+  return { supported: true, platform: resolved.supported ? resolved.platform : check.platform, targetUrl };
 }
