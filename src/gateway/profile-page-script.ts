@@ -159,6 +159,57 @@ export const PROFILE_PAGE_SCRIPT = String.raw`(function () {
     return card;
   }
 
+  function factSheet(fs) {
+    var done = fs.status.filter(function (s) { return s.filled; }).length;
+    heading("Fact sheet (" + done + " of " + fs.status.length + " filled)");
+    root.appendChild(el("p", "sub", "Fill these once. Forms use them as your own answers. Core answers and self-identification are edited above."));
+    var card = el("div", "card");
+    var ul = el("ul", "facts");
+    fs.status.forEach(function (s) {
+      var where = s.home === "answers" ? " (edit under Core answers)" : "";
+      ul.appendChild(el("li", "", (s.filled ? "\u2713 " : "\u25CB ") + s.label + where));
+    });
+    card.appendChild(ul);
+    root.appendChild(card);
+    fs.fields.forEach(function (f) {
+      var c = fieldCard({ label: f.label, field: f.key, value: f.value, kind: "text" }, "");
+      var save = c.querySelector("button");
+      var input = c.querySelector("input");
+      var err = c.querySelector(".err");
+      save.onclick = function () { send({ op: "setFact", key: f.key, value: input.value }, err, [save]); };
+      root.appendChild(c);
+    });
+    fs.skills.forEach(function (k) {
+      var c = fieldCard({ label: "Years with " + k.skill, field: "", value: k.years, kind: "number" }, "Empty clears it. 0 answers No to yes/no questions.");
+      var save = c.querySelector("button");
+      var input = c.querySelector("input");
+      var err = c.querySelector(".err");
+      save.onclick = function () { send({ op: "setFact", key: "skill_years." + slug(k.skill), value: input.value }, err, [save]); };
+      root.appendChild(c);
+    });
+    var add = el("div", "card");
+    title(add, "Add a skill");
+    var name = el("input");
+    name.type = "text";
+    name.placeholder = "Skill, like Python";
+    var yrs = el("input");
+    yrs.type = "text";
+    yrs.inputMode = "decimal";
+    yrs.placeholder = "Years, like 5";
+    var err2 = el("p", "err");
+    var btn = el("button", "", "Add skill");
+    var row = el("div", "row");
+    row.appendChild(btn);
+    [name, yrs, err2, row].forEach(function (n) { add.appendChild(n); });
+    btn.onclick = function () {
+      var s = slug(name.value);
+      if (!s) { err2.textContent = "Type the skill name."; return; }
+      send({ op: "setFact", key: "skill_years." + s, value: yrs.value }, err2, [btn]);
+    };
+    root.appendChild(add);
+  }
+  function slug(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40); }
+
   function heading(text) { root.appendChild(el("h2", "", text)); }
 
   function draw() {
@@ -174,6 +225,7 @@ export const PROFILE_PAGE_SCRIPT = String.raw`(function () {
       heading("Voluntary self-identification");
       state.eeo.forEach(function (f) { root.appendChild(fieldCard({ label: f.label, field: f.field, value: f.value, kind: "text" }, "Leave empty to use the form's decline option.")); });
     }
+    if (!state.broken && state.factSheet) factSheet(state.factSheet);
     if (!state.broken) {
       heading("Learned answers (" + state.learned.length + ")");
       state.learned.forEach(function (l) { root.appendChild(learnedCard(l)); });

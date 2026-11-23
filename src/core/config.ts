@@ -299,6 +299,14 @@ export function macWorkerToken(): string | undefined {
   return v ? v : undefined;
 }
 
+/**
+ * Workday rows join the Claude hand-off lane only when this is 1/true/yes/on. Default off: the founder picks the Workday
+ * route in #1325. Not a secret.
+ */
+export function claudeLaneWorkdayEnabled(): boolean {
+  return /^(1|true|yes|on)$/i.test(process.env["CLAUDE_LANE_WORKDAY"]?.trim() ?? "");
+}
+
 /** Read the emailed apply security code from Gmail (read-only) and enter it. OFF unless set to 1/true/yes/on. */
 export function emailCodeAutoreadEnabled(): boolean {
   const v = (process.env["EMAIL_CODE_AUTOREAD"] ?? "").trim().toLowerCase();
