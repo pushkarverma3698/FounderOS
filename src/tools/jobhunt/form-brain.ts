@@ -61,7 +61,7 @@ const LABEL_GROUPS: Readonly<Record<string, readonly string[]>> = {
   linkedin: ["linkedin"],
   website: ["website", "portfolio", "personal site"],
   coverLetter: ["cover letter", "motivation letter", "motivational letter", "motivatiebrief", "sollicitatiebrief"],
-  resume: ["resume", "cv", "curriculum vitae"],
+  resume: ["resume", "cv", "curriculum vitae", "lebenslauf"],
   location: ["location", "based in", "where are you based", "where will you be based", "current location", "address", "adres"],
   country: ["country", "country of residence", "woonland", "geboorteland"],
   currentCompany: ["current company", "current employer", "employer", "company name", "huidige werkgever", "bedrijf"],
@@ -81,7 +81,8 @@ export function labelMatches(label: string, group: keyof typeof LABEL_GROUPS): b
   if (group === "fullName") {
     return n === "name" || LABEL_GROUPS.fullName!.some((phrase) => phrase !== "name" && n.includes(phrase));
   }
-  return LABEL_GROUPS[group]!.some((phrase) => n.includes(phrase));
+  // A 2-letter phrase ("cv") must be a whole word: "recv" or "dvcv" is not a CV.
+  return LABEL_GROUPS[group]!.some((phrase) => (phrase.length <= 2 ? ` ${n} `.includes(` ${phrase} `) : n.includes(phrase)));
 }
 
 const ELIGIBILITY_PHRASES: readonly string[] = [
