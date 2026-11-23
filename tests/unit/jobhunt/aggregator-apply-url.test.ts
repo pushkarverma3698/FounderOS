@@ -36,10 +36,12 @@ describe("resolveEmployerApplyUrl", () => {
   });
 
   it("sends Accept: */* — Arbeitnow answers 403 to a request without it", async () => {
-    const fetchImpl = vi.fn(async () => redirect(302, EMPLOYER));
-    await resolveEmployerApplyUrl(NL, fetchImpl);
-    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
-    expect((init.headers as Record<string, string>).Accept).toBe("*/*");
+    let seen: RequestInit | undefined;
+    await resolveEmployerApplyUrl(NL, async (_url, init) => {
+      seen = init;
+      return redirect(302, EMPLOYER);
+    });
+    expect((seen?.headers as Record<string, string>).Accept).toBe("*/*");
   });
 
   it("leaves non-Arbeitnow URLs alone without a request", async () => {
