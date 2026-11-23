@@ -153,8 +153,8 @@ describe("processLease", () => {
 
   it("a crash anywhere reports failed instead of throwing", async () => {
     const h = harness({});
-    h.deps.openSession = async () => { throw new Error("cdp down"); };
-    await expect(processLease(h.deps, LEASE)).resolves.toBeUndefined();
+    const deps = { ...h.deps, openSession: async (): Promise<FormSession> => { throw new Error("cdp down"); } };
+    await expect(processLease(deps, LEASE)).resolves.toBeUndefined();
     expect(h.results[0]).toMatchObject({ outcome: "failed" });
     expect(h.results[0]!.detail).toMatch(/cdp down/);
   });
