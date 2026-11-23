@@ -22,7 +22,6 @@ import { noFieldsReason } from "./form-smartrecruiters.js";
 import { chooseComboboxOption, installEvaluateShim, typeIntoCombobox } from "./form-combobox.js";
 import {
   classifyFormTarget,
-  platformForTarget,
   revealPlatformForm,
   scrapePageFields,
   type FormPlatform,
