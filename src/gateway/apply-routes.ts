@@ -29,7 +29,7 @@ import {
 } from "../tools/jobhunt/apply-link.js";
 import { collectAnswers } from "./apply-answers.js";
 import { refillFromPage } from "./apply-flow.js";
-import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE } from "./apply-api.js";
+import { defaultPhotoTo, handleApplyApi, readBody, TOO_LARGE, type ApiDeps } from "./apply-api.js";
 import { APPLY_PAGE_HEADERS, applyPageHeaders, escapeHtml, renderApplyPage, renderNoticePage } from "./apply-page.js";
 import { botSender, clearOutcome, tryLockApply, type AnsweredEntry, type ApplySender } from "./apply-session.js";
 import { runCodeEntry, runSubmit, type settleSubmittedByHand } from "./apply-submit.js";
@@ -59,6 +59,8 @@ export interface ApplyRouteDeps {
   /** Marks an unconfirmed row applied after the founder sent it himself; defaults to the real one. */
   readonly markByHand?: typeof settleSubmittedByHand;
   readonly photoTo: (chatId: string, png: Buffer, caption: string, filename: string) => Promise<void>;
+  /** Records the queue page's tap count with a send; defaults to the real one (apply-queue-taps.ts). */
+  readonly recordTaps?: ApiDeps["recordTaps"];
   /** The Mini App job list wiring (apply-prepare-api.ts); defaults to the database. */
   readonly jobs?: JobsApiDeps;
   /** The hand-off panel's I/O (apply-handoff-routes.ts); defaults to the profile files and the database. */

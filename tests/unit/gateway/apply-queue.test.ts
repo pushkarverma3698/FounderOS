@@ -31,6 +31,9 @@ const { startJobsHealthServer } = await import("../../../src/jobs/health.js");
 const { saveApplySnapshot } = await import("../../../src/tools/jobhunt/apply-link.js");
 const { clearAutoApplySessionsForTests } = await import("../../../src/gateway/apply-session.js");
 const { APPLY_QUEUE_SCRIPT } = await import("../../../src/gateway/apply-queue-script.js");
+const { orderQueue, oneQuestionOf, macNoteFor } = await import("../../../src/gateway/apply-queue-api.js");
+const { parseTaps } = await import("../../../src/gateway/apply-queue-taps.js");
+const { applyFieldName } = await import("../../../src/gateway/apply-page.js");
 
 const lane = (n: number, profile: string, company: string, apply_lane: string, apply_lane_reason: string): JobApplication =>
   ({ id: id(n), profile_id: profile, tenant_id: "turicks", company, title: `${company} Engineer`, url: `https://jobs.example.test/${n}`, apply_lane, apply_lane_reason }) as unknown as JobApplication;
@@ -61,7 +64,7 @@ function initData(userId: number): string {
 interface QueueBody {
   counts: Record<string, number>;
   macOnline: boolean;
-  items: Array<{ id: string; group: string; company: string; jobUrl: string; answerUrl?: string; createdAt?: number; canSend: boolean }>;
+  items: Array<{ id: string; group: string; company: string; jobUrl: string; answerUrl?: string; createdAt?: number; canSend: boolean; macNote?: string; question?: { label: string; field: string; draft?: string; options?: string[] } }>;
 }
 
 describe("apply queue Mini App", () => {
@@ -70,6 +73,13 @@ describe("apply queue Mini App", () => {
   let base: string;
   let beat: Date | null;
   const submit = vi.fn(async (..._args: unknown[]) => ({ kind: "confirmed" as const, row: {} as never, detail: "Application submitted and marked applied." }));
+  const recordTaps = vi.fn(async (..._args: unknown[]) => undefined);
+  const record = vi.fn(async (..._args: unknown[]) => undefined);
+  // The re-fill after a Save: the row now has no open question and a newer snapshot, as the real one leaves it.
+  const refill = vi.fn(async (snap: ApplySnapshot, _posted: unknown, held: () => void) => {
+    saveApplySnapshot({ ...snap, summary: { ...snap.summary, unanswered: [] }, createdAt: snap.createdAt + 1000 }, root);
+    held();
+  });
   const call = (p: string, method = "GET", data?: string, body?: unknown) =>
     fetch(`${base}${p}`, {
       method,
@@ -82,9 +92,12 @@ describe("apply queue Mini App", () => {
     vi.stubGlobal("fetch", (globalThis as { __realFetch?: typeof fetch }).__realFetch);
     root = fs.mkdtempSync(path.join(os.tmpdir(), "founderos-apply-queue-"));
     saveApplySnapshot(snap(1, "ReadyCo"), root);
-    saveApplySnapshot(snap(3, "AskCo"), root);
+    saveApplySnapshot({ ...snap(3, "AskCo"), summary: { ...snap(3, "AskCo").summary, unanswered: [{ label: "Why us?", required: true, fieldType: "textarea", triedAnswer: "Because of the mission." }] } }, root);
     saveApplySnapshot(snap(5, "SiteCo", "workday"), root);
     submit.mockClear();
+    recordTaps.mockClear();
+    record.mockClear();
+    refill.mockClear();
     beat = null;
     clearAutoApplySessionsForTests();
     server = startJobsHealthServer(0, {
@@ -93,6 +106,9 @@ describe("apply queue Mini App", () => {
       root,
       senderFor: () => ({ text: async () => undefined }),
       submit: submit as never,
+      recordTaps: recordTaps as never,
+      record: record as never,
+      refill: refill as never,
       jobs: {
         listQueue: async () => [],
         getRow: async () => null,
@@ -121,6 +137,7 @@ describe("apply queue Mini App", () => {
     expect(html).toContain(`<script nonce="${nonce}">`);
     expect(html).not.toContain("ReadyCo");
     expect(APPLY_QUEUE_SCRIPT).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+    expect(() => new Function(APPLY_QUEUE_SCRIPT)).not.toThrow();
   });
 
   it("never hands a non-http(s) job URL to the page's href", async () => {
@@ -182,5 +199,86 @@ describe("apply queue Mini App", () => {
     expect(stale.status).toBe(409);
     const wife = await call(`${p}/submit`, "POST", initData(222), { createdAt: ready.createdAt });
     expect(wife.status).toBe(404);
+  });
+
+  it("orders ready first, sendable before not, oldest snapshot first, then by company", () => {
+    const it = (company: string, group: string, canSend: boolean, createdAt?: number) =>
+      ({ id: company, group, company, title: "t", jobUrl: "", reason: "", canSend, ...(createdAt ? { createdAt } : {}) }) as never;
+    const out = orderQueue([it("Z-site", "site", false), it("B", "ready", true, 20), it("A-nosnap", "ready", false), it("C", "ready", true, 10), it("Ask", "answer", false), it("M", "mac", false)]);
+    expect(out.map((i) => i.company)).toEqual(["C", "B", "A-nosnap", "Ask", "M", "Z-site"]);
+  });
+
+  it("offers an inline question only when exactly one required, editable question is open", () => {
+    const base = snap(3, "AskCo");
+    const withQs = (unanswered: ApplySnapshot["summary"]["unanswered"]): ApplySnapshot => ({ ...base, summary: { ...base.summary, unanswered } });
+    const q = { label: "Why us?", required: true, fieldType: "textarea" };
+    expect(oneQuestionOf(withQs([q]))).toEqual({ label: "Why us?", field: applyFieldName("Why us?"), fieldType: "textarea" });
+    expect(oneQuestionOf(withQs([{ ...q, triedAnswer: "Mission" }]))?.draft).toBe("Mission");
+    expect(oneQuestionOf(withQs([q, { ...q, label: "Second" }]))).toBeUndefined();
+    expect(oneQuestionOf(withQs([{ ...q, required: false }]))).toBeUndefined();
+    expect(oneQuestionOf(withQs([{ ...q, fieldType: "file" }]))).toBeUndefined();
+    expect(oneQuestionOf(null)).toBeUndefined();
+  });
+
+  it("labels a Mac row with the click when the worker is on and Mac offline when its heartbeat is stale", async () => {
+    expect(macNoteFor(true)).toBe("Click the check on your Mac.");
+    expect(macNoteFor(false)).toMatch(/^Mac offline/);
+    const mac = async () => (await queue()).items.find((i) => i.company === "MacCo")!.macNote;
+    expect(await mac()).toMatch(/^Mac offline/);
+    beat = new Date(NOW - 5 * 60 * 1000);
+    expect(await mac()).toBe("Click the check on your Mac.");
+    beat = new Date(NOW - 31 * 60 * 1000);
+    expect(await mac()).toMatch(/^Mac offline/);
+  });
+
+  it("carries the one-answer row's question with its draft and the answer page's field name", async () => {
+    const ask = (await queue()).items.find((i) => i.company === "AskCo")!;
+    expect(ask).toMatchObject({ group: "answer", canSend: false, question: { label: "Why us?", field: applyFieldName("Why us?"), draft: "Because of the mission." } });
+  });
+
+  it("Save posts the answer page's own form, then the refilled row can be Sent with the new stamp", async () => {
+    const ask = (await queue()).items.find((i) => i.company === "AskCo")!;
+    const p = new URL(ask.answerUrl!).pathname;
+    const form = new URLSearchParams({ [ask.question!.field]: "Edited answer" }).toString();
+    const saved = await fetch(`${base}${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
+    expect(saved.status).toBe(200);
+    expect(record).toHaveBeenCalledWith("pushkar-nl-tech", "Why us?", "Edited answer");
+    await vi.waitFor(() => expect(refill).toHaveBeenCalledTimes(1));
+    const after = (await queue()).items.find((i) => i.company === "AskCo")!;
+    expect(after.createdAt).toBe(ask.createdAt! + 1000);
+    expect(after).toMatchObject({ canSend: true });
+    expect(after.question).toBeUndefined();
+    const sent = await call(`${p}/submit`, "POST", initData(111), { createdAt: after.createdAt, taps: 3 });
+    expect(sent.status).toBe(202);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(submit.mock.calls[0]?.[0]).toBe(id(3));
+    expect(recordTaps).toHaveBeenCalledWith(id(3), after.createdAt, 3);
+  });
+
+  it("a double tap on Send runs the shared Submit once (row lock), and the tap count is recorded once", async () => {
+    let finish: () => void = () => undefined;
+    submit.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve({ kind: "confirmed" as const, row: {} as never, detail: "ok" }); }));
+    const ready = (await queue()).items.find((i) => i.company === "ReadyCo")!;
+    const p = new URL(ready.answerUrl!).pathname;
+    const [a, b] = await Promise.all([
+      call(`${p}/submit`, "POST", initData(111), { createdAt: ready.createdAt, taps: 1 }),
+      call(`${p}/submit`, "POST", initData(111), { createdAt: ready.createdAt, taps: 1 }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    finish();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(recordTaps).toHaveBeenCalledTimes(1);
+    expect(recordTaps).toHaveBeenCalledWith(id(1), ready.createdAt, 1);
+  });
+
+  it("records no tap count when the body carries none or nonsense, and still sends", async () => {
+    expect([parseTaps(1), parseTaps(0), parseTaps(51), parseTaps(-1), parseTaps(1.5), parseTaps("2"), parseTaps(undefined)]).toEqual([1, 0, null, null, null, null, null]);
+    const ready = (await queue()).items.find((i) => i.company === "ReadyCo")!;
+    const res = await call(`${new URL(ready.answerUrl!).pathname}/submit`, "POST", initData(111), { createdAt: ready.createdAt, taps: "many" });
+    expect(res.status).toBe(202);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(recordTaps).not.toHaveBeenCalled();
   });
 });

@@ -46,10 +46,13 @@ const CSS =
   ".val{white-space:pre-wrap;overflow-wrap:anywhere}button.alt{background:transparent;color:inherit;border:1px solid #b9c0cb}" +
   "#mini{background:#fff;border:1px solid #dde1e7;border-radius:10px;padding:12px;margin:0 0 12px}" +
   "button.copy{width:auto;padding:6px 14px;margin-top:6px;font-size:.9rem}a.go{display:block;text-align:center;font-weight:600;padding:14px;border-radius:10px;background:#1f6feb;color:#fff;text-decoration:none;margin:8px 0}" +
+  ".row{display:flex;gap:8px}.row button{width:auto;flex:1}.pos{text-align:center;color:#5b6573;font-size:.9rem;margin:0 0 8px}" +
+  ".big{font-size:1.15rem}.ok{background:#e7f6ec;border:1px solid #8fd1a3;border-radius:10px;padding:10px;margin:8px 0 0}" +
+  ".bad{background:#fdeceb;border:1px solid #f1a9a4;border-radius:10px;padding:10px;margin:8px 0 0}.deck .q{min-height:150px}" +
   "ul{padding-left:20px;margin:0}li{margin:2px 0}.foot{color:#5b6573;font-size:.85rem;margin-top:24px}" +
   "@media(prefers-color-scheme:dark){body{background:#0f1319;color:#e6e9ee}.q{background:#171c24;border-color:#2a313c}" +
   "input[type=text],select,textarea{background:#0f1319;border-color:#3a4350}#mini{background:#171c24;border-color:#2a313c}" +
-  ".sub,.hint,.note,.foot,.opt{color:#9aa4b2}.warn{background:#2b2211;border-color:#6b5320}}";
+  ".sub,.hint,.note,.foot,.opt,.pos{color:#9aa4b2}.ok{background:#12301b;border-color:#2e6b42}.bad{background:#341615;border-color:#7a2f2b}.warn{background:#2b2211;border-color:#6b5320}}";
 
 const STYLE_HASH = createHash("sha256").update(CSS).digest("base64");
 

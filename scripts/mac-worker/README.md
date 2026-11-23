@@ -15,3 +15,7 @@ A visible check is reported to Telegram and the tab waits up to 30 minutes for y
 
 A dry run releases each row with a `failed: dry run` note and uses one of its 3 lease attempts.
 `mac-client/` stays until 5 confirmed sends.
+
+## Claude hand-off lane (#1330)
+
+Rows the TS worker cannot fill (multi-step wizards, custom career sites, "no fillable form fields"; Workday only with `CLAUDE_LANE_WORKDAY=1` on the VPS) are filled to the final Submit page by a Claude Code scheduled task in this same Chrome profile. The prompt is `claude-handoff-routine.md`. It leases through `lease-claude`, reports `filled_to_submit`, and clicks Submit only after the founder's yes in the Remote Control chat.

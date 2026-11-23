@@ -95,7 +95,7 @@ export function noticePeriodAction(field: ScrapedField, profile: ApplyProfile): 
 }
 
 /** "Years of experience" skills questions ("with Python") are about one skill, not the total, so they stay asks. */
-const SKILL_SCOPED = /\b(?:with|using|experience (?:in|as|on))\b/;
+export const SKILL_SCOPED = /\b(?:with|using|experience (?:in|as|on))\b/;
 
 /** Years-of-experience bucket for a closed list, or null. */
 export function experienceBucketAction(field: ScrapedField, profile: ApplyProfile, isYearsLabel: boolean): FormFillAction | null {
