@@ -42,6 +42,7 @@ export async function challengeShowing(page: Page): Promise<boolean> {
   return (await page.evaluate(CHALLENGE_SCRIPT)) as boolean;
 }
 
+// TODO: replace with form-runner's findSubmitControl once it is exported (it is unexported there today).
 async function findSubmit(page: Page): Promise<Locator | null> {
   const inputs = page.locator('button[type="submit"]:visible, input[type="submit"]:visible');
   const n = await inputs.count();

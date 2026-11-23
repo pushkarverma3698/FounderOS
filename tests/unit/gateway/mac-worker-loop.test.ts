@@ -86,13 +86,13 @@ describe("processLease", () => {
     expect(h.calls.at(-1)).toBe("close");
   });
 
-  it("dry run (the default): fills, never clicks Submit, releases the lease as failed with a dry-run detail", async () => {
+  it("dry run (the default): fills, never clicks Submit, reports dry_run (no attempt spent)", async () => {
     const h = harness({}, { live: false });
     await processLease(h.deps, LEASE);
     expect(h.calls).not.toContain("submit");
     expect(h.results).toHaveLength(1);
-    expect(h.results[0]).toMatchObject({ outcome: "failed" });
-    expect(h.results[0]!.detail).toMatch(/dry run/i);
+    expect(h.results[0]).toMatchObject({ outcome: "dry_run" });
+    expect(h.results[0]!.detail).toMatch(/Submit not clicked/i);
   });
 
   it("visible challenge: reports challenge, waits until it clears, then submits and confirms", async () => {
@@ -143,11 +143,11 @@ describe("processLease", () => {
     expect(h.calls).toContain("afterChallenge");
   });
 
-  it("clicked but unconfirmed: reported failed with the unconfirmed marker, tab left open", async () => {
+  it("clicked but unconfirmed: reported as `unconfirmed` (never `failed`, which would allow a re-lease), tab left open", async () => {
     const h = harness({ submit: { kind: "unconfirmed", evidence: "no banner" } });
     await processLease(h.deps, LEASE);
-    expect(h.results[0]).toMatchObject({ outcome: "failed" });
-    expect(h.results[0]!.detail).toMatch(/UNCONFIRMED/);
+    expect(h.results[0]).toMatchObject({ outcome: "unconfirmed" });
+    expect(h.results[0]!.detail).toMatch(/Submit was clicked/);
     expect(h.calls).not.toContain("close");
   });
 
