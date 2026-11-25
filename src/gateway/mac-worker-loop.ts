@@ -27,7 +27,14 @@ export interface ResultInput {
   readonly proofScreenshot?: string;
 }
 
-export interface MacLease { readonly leaseId: string; readonly rowId: string }
+export interface MacLease {
+  readonly leaseId: string;
+  readonly rowId: string;
+  /** Known once the packet is in; only used for the local log line, never sent. */
+  readonly company?: string;
+}
+
+const LOG_DETAIL_CHARS = 200;
 
 export interface MacApi {
   heartbeat(): Promise<void>;
@@ -114,8 +121,14 @@ async function waitForClear(deps: LoopDeps, session: FormSession): Promise<boole
   return false;
 }
 
-const report = (deps: LoopDeps, lease: MacLease, outcome: ResultInput["outcome"], detail: string, proof?: Buffer): Promise<void> =>
-  deps.api.result({ rowId: lease.rowId, leaseId: lease.leaseId, outcome, detail, ...(proof ? { proofScreenshot: proof.toString("base64") } : {}) });
+/** The one local line per outcome that the launchd log shows: row, company, outcome, a clipped detail. No proof, no answers. */
+const outcomeLine = (lease: MacLease, outcome: ResultInput["outcome"], detail: string): string =>
+  `result row=${lease.rowId} company=${lease.company ?? "-"} outcome=${outcome} detail=${detail.replace(/\s+/g, " ").slice(0, LOG_DETAIL_CHARS)}`;
+
+const report = (deps: LoopDeps, lease: MacLease, outcome: ResultInput["outcome"], detail: string, proof?: Buffer): Promise<void> => {
+  deps.log(outcomeLine(lease, outcome, detail));
+  return deps.api.result({ rowId: lease.rowId, leaseId: lease.leaseId, outcome, detail, ...(proof ? { proofScreenshot: proof.toString("base64") } : {}) });
+};
 
 /** What to do with the page after a Submit click settled. Returns true when the tab should be closed. */
 async function settle(deps: LoopDeps, lease: MacLease, session: FormSession, first: SubmitResult): Promise<boolean> {
@@ -176,11 +189,13 @@ async function run(deps: LoopDeps, lease: MacLease, packet: MacPacket, session: 
 }
 
 /** One leased row, end to end. Never throws: a crash is reported as failed so the lease is released. */
-export async function processLease(deps: LoopDeps, lease: MacLease): Promise<void> {
+export async function processLease(deps: LoopDeps, first: MacLease): Promise<void> {
+  let lease = first;
   let session: FormSession | null = null;
   let close = true;
   try {
     const packet = await deps.api.packet(lease);
+    lease = { ...lease, company: packet.company };
     const cvPath = await deps.writeCv(packet, await deps.api.cv(lease));
     session = await deps.openSession(packet, cvPath);
     close = await run(deps, lease, packet, session);

@@ -10,7 +10,7 @@
 import type { JobApplication } from "../db/schema.js";
 import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig, type ApplySnapshot } from "../tools/jobhunt/apply-link.js";
-import { QUEUE_GROUPS, QUEUE_GROUP_TITLE, countQueue, queueGroupOf, type QueueGroup } from "../tools/jobhunt/apply-queue.js";
+import { QUEUE_GROUPS, QUEUE_GROUP_TITLE, queueGroupOf, type QueueGroup } from "../tools/jobhunt/apply-queue.js";
 import { sanitizeTelegramUrl } from "../tools/jobhunt/telegram-format.js";
 import { macOnline } from "../tools/jobhunt/mac-worker-rules.js";
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
@@ -55,6 +55,9 @@ const clip = (t: string): string => (t.length > MAX_REASON_CHARS ? `${t.slice(0,
 
 export const macNoteFor = (online: boolean): string => (online ? "Click the check on your Mac." : "Mac offline. This waits until it is back on.");
 
+/** True when the snapshot still has a required question nobody answered. No snapshot means nothing known to be open. */
+export const hasOpenRequiredQuestion = (snap: ApplySnapshot | null): boolean => (snap?.summary.unanswered ?? []).some((q) => q.required);
+
 /** The one open required question of a snapshot, when there is exactly one and the page can take an answer to it. */
 export function oneQuestionOf(snap: ApplySnapshot | null): QueueQuestion | undefined {
   const open = snap?.summary.unanswered.filter((q) => q.required) ?? [];
@@ -79,6 +82,13 @@ export function orderQueue(items: readonly QueueItem[]): QueueItem[] {
     || (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity) || a.company.localeCompare(b.company));
 }
 
+/** Counts from the items as grouped here, so the headline numbers always match the lists. */
+function countItems(items: readonly QueueItem[]): Record<QueueGroup, number> {
+  const counts: Record<QueueGroup, number> = { ready: 0, answer: 0, mac: 0, site: 0 };
+  for (const i of items) counts[i.group] += 1;
+  return counts;
+}
+
 export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: QueueDeps) {
   const now = new Date(deps.now());
   const cfg = readApplyLinkConfig(deps.env);
@@ -87,9 +97,11 @@ export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: Qu
   const macOk = macOnline(await q.macBeat(), now);
   const items: QueueItem[] = [];
   for (const r of open) {
-    const group = queueGroupOf(r);
-    if (!group) continue;
+    const lane = queueGroupOf(r);
+    if (!lane) continue;
     const snap = loadApplySnapshot(r.id, deps.root);
+    // A Mac row the worker cannot finish (open required question) waits for his answer, not for a click on the Mac.
+    const group: QueueGroup = lane === "mac" && hasOpenRequiredQuestion(snap) ? "answer" : lane;
     const mine = snap !== null && snap.profileId === profile.id && cfg.ok;
     items.push({
       id: r.id, group, company: r.company, title: r.title, jobUrl: sanitizeTelegramUrl(r.url) ?? "", reason: clip((r.apply_lane_reason ?? "").trim()),
@@ -100,7 +112,7 @@ export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: Qu
     });
   }
   return {
-    counts: countQueue(open),
+    counts: countItems(items),
     groups: QUEUE_GROUPS.map((id) => ({ id, title: QUEUE_GROUP_TITLE[id] })),
     items: orderQueue(items),
     macOnline: macOk,
