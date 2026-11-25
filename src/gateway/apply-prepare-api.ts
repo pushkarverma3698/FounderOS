@@ -26,6 +26,7 @@ import { getProfile, type JobSearchProfile } from "../tools/jobhunt/profile-conf
 import { computeStatus, type ApiDeps } from "./apply-api.js";
 import { homePageHeaders, renderHomePage } from "./apply-home.js";
 import { applyPageHeaders } from "./apply-page.js";
+import { listClaudeFilledRows } from "../db/claude-lane-queries.js";
 import { buildQueue, type QueueDeps } from "./apply-queue-api.js";
 import { renderQueueShell } from "./apply-queue-page.js";
 import { prepareRow } from "./apply-prepare.js";
@@ -45,7 +46,7 @@ export interface JobsApiDeps {
   readonly queue?: QueueDeps;
 }
 
-const DEFAULT_QUEUE: QueueDeps = { rows: (profile, now) => listQueueLaneRows(profile.id, now), macBeat: getLastMacBeat };
+const DEFAULT_QUEUE: QueueDeps = { rows: (profile, now) => listQueueLaneRows(profile.id, now), macBeat: getLastMacBeat, filled: listClaudeFilledRows };
 
 export const defaultJobsApiDeps: JobsApiDeps = {
   listQueue: (profile) => listApplyQueue(profile.tenantId, profile.id, HOME_SECTIONS),

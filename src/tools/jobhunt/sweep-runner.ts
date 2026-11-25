@@ -25,6 +25,7 @@ import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 import type { DiscoveredBoard } from "./board-token.js";
 import { initialHeartbeat } from "./sweep-heartbeat.js";
 import { clearLaneHeartbeats, saveLaneHeartbeat } from "../../db/job-heartbeat-queries.js";
+import { summariseSweepFailures } from "./cost.js";
 // The per-candidate half of the free sweep, split out 2026-09-08 for the
 // 400-line budget. `publishSheet` went with it because the free lane is its
 // main caller; the metered sweep below imports it back.
@@ -96,7 +97,7 @@ export async function runJobIngestSweep(): Promise<void> {
     // rejects the WHOLE message on an unparseable entity — the alert must not
     // fail on the alert's own content.
     await sendToJobsChat(
-      toTelegramSafe(`⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`),
+      toTelegramSafe(`⚠ Job sweep failed — nothing was screened today.\n${summariseSweepFailures(result.failures).join("\n")}`),
     );
     return;
   }

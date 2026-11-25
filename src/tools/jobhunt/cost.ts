@@ -97,3 +97,25 @@ export function estimateQueryCost(
 export function toLedgerAmount(usd: number): string {
   return usd.toFixed(6);
 }
+
+/**
+ * An Apify error that means the request was refused at the door: the token was
+ * rejected (401) or not allowed (403). No run was started, so nothing was billed.
+ * Matches the text `runActorSync` produces: "... returned HTTP 401: {body}".
+ */
+export function isApifyAuthRefusal(error: string | null | undefined): boolean {
+  return !!error && /returned HTTP (401|403)\b/.test(error);
+}
+
+/**
+ * The failure lines for the founder's alert. Auth refusals collapse into ONE line
+ * naming the cause (14 identical raw JSON bodies tell him nothing extra); every
+ * other failure is kept as it was.
+ */
+export function summariseSweepFailures(failures: readonly string[]): string[] {
+  const auth = failures.filter((f) => isApifyAuthRefusal(f));
+  if (auth.length === 0) return [...failures];
+  const code = /returned HTTP (401|403)\b/.exec(auth[0]!)![1];
+  const line = `Apify token rejected (${code}) on ${auth.length} call(s) — replace it. Nothing was billed.`;
+  return [line, ...failures.filter((f) => !isApifyAuthRefusal(f))];
+}
