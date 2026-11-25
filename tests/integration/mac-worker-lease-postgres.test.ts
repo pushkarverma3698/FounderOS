@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { closeDatabaseConnections, getDb } from "../../src/db/client.js";
 import { jobApplications } from "../../src/db/schema.js";
 import { TENANT } from "../../src/core/config.js";
@@ -162,6 +162,16 @@ describe.skipIf(!up)("Mac worker lease (real Postgres)", () => {
     expect(got).toEqual([free]);
     expect(got).not.toContain(cooledApplied);
     expect(got).not.toContain(cooledUnconfirmed);
+    await clean();
+  });
+
+  it("skip: a row the caller rejects (open required question) is never leased and spends no attempt", async () => {
+    const [open, fine] = await seed(2);
+    const got = await leaseNextRow([PROFILE], NOW, "lease-s1", TTL, (id) => id === open);
+    expect(got?.id).toBe(fine);
+    expect(await leaseNextRow([PROFILE], NOW, "lease-s2", TTL, (id) => id === open)).toBeNull();
+    const rows = await getDb().select({ attempts: jobApplications.mac_attempts }).from(jobApplications).where(eq(jobApplications.id, open!));
+    expect(rows[0]?.attempts).toBe(0);
     await clean();
   });
 

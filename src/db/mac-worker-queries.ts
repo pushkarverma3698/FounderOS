@@ -22,12 +22,14 @@ const noLiveLease = (now: Date) => or(isNull(jobApplications.mac_lease_until), l
 /**
  * Lease the oldest eligible row: a hand_off row whose reason names a CAPTCHA or bot check, for a profile that is on
  * (`profileIds`), not applied, skipped or expired, with no live lease and attempts left. Null when nothing is eligible.
+ * `skip` (from the caller, so this file reads no snapshots) drops rows the worker cannot finish, such as an open required question.
  */
 export async function leaseNextRow(
   profileIds: readonly string[],
   now: Date,
   leaseId: string,
   ttlMs: number,
+  skip?: (rowId: string) => boolean,
 ): Promise<JobApplication | null> {
   if (profileIds.length === 0) return null;
   const db = getDb();
@@ -53,7 +55,9 @@ export async function leaseNextRow(
     .where(eligible)
     .orderBy(asc(jobApplications.apply_lane_at))
     .limit(200);
-  const allowed = candidates.filter((c) => !cooled.get(c.profile ?? "")?.has(normaliseCompanyName(c.company))).map((c) => c.id);
+  const allowed = candidates
+    .filter((c) => !cooled.get(c.profile ?? "")?.has(normaliseCompanyName(c.company)) && !skip?.(c.id))
+    .map((c) => c.id);
   if (allowed.length === 0) return null;
   const candidate = db
     .select({ id: jobApplications.id })
