@@ -34,6 +34,7 @@ interface Script {
 function harness(script: Script, opts: { live?: boolean } = {}) {
   const results: ResultInput[] = [];
   const calls: string[] = [];
+  const logs: string[] = [];
   let clock = 0;
   const probes = [...(script.challenge ?? [false])];
   const session: FormSession = {
@@ -54,11 +55,28 @@ function harness(script: Script, opts: { live?: boolean } = {}) {
   };
   const deps: LoopDeps = {
     api, live: opts.live ?? true, dailyCap: 10, now: () => new Date(clock), sleep: async (ms) => void (clock += ms),
-    writeCv: async () => "/tmp/cv.pdf", openSession: async () => session, log: () => undefined,
+    writeCv: async () => "/tmp/cv.pdf", openSession: async () => session, log: (m) => void logs.push(m),
     sentToday: 0, stop: () => false,
   };
-  return { deps, results, calls };
+  return { deps, results, calls, logs };
 }
+
+describe("outcome log lines", () => {
+  it("one line per reported outcome: row, company, outcome, detail clipped to 200 chars, no proof bytes", async () => {
+    const h = harness({ fill: { ok: false, reason: "x".repeat(500) } });
+    await processLease(h.deps, LEASE);
+    const lines = h.logs.filter((l) => l.startsWith("result "));
+    expect(lines).toEqual([`result row=${ROW} company=Acme outcome=failed detail=${"x".repeat(200)}`]);
+  });
+
+  it("a confirmed row logs its outcome without the screenshot", async () => {
+    const h = harness({});
+    await processLease(h.deps, LEASE);
+    const lines = h.logs.filter((l) => l.startsWith("result "));
+    expect(lines).toEqual([`result row=${ROW} company=Acme outcome=confirmed detail=thanks`]);
+    expect(h.logs.join("\n")).not.toContain(Buffer.from("png").toString("base64"));
+  });
+});
 
 describe("sendGate", () => {
   const limits = { dailyCap: 10, sentToday: 0, now: new Date(0) };
