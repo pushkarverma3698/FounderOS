@@ -21,15 +21,18 @@ export interface QueueLink {
 }
 
 /** `noLinkCount` adds ONE line for Himalayas/Jobicy rows left out because they have no employer link. */
-export function buildQueueDigest(name: string, rows: readonly QueueLaneFields[], link: QueueLink, noLinkCount = 0): EveningMessage | null {
-  const c = countQueue(rows);
+export function buildQueueDigest(name: string, rows: readonly (QueueLaneFields & { readonly id?: string })[], link: QueueLink, noLinkCount = 0, filledIds: ReadonlySet<string> = new Set()): EveningMessage | null {
+  // A filled tab is also a hand_off row; it counts once, as filled.
+  const filledCount = filledIds.size;
+  const c = countQueue(rows.filter((r) => !r.id || !filledIds.has(r.id)));
   const total = queueTotal(c);
-  if (total === 0) return null;
-  const lines = [`🌙 <b>${esc(name)}</b>: ${total} role${total === 1 ? "" : "s"} waiting`];
+  if (total === 0 && filledCount === 0) return null;
+  const lines = [`🌙 <b>${esc(name)}</b>: ${total + filledCount} role${total + filledCount === 1 ? "" : "s"} waiting`];
   if (c.ready > 0) lines.push(`✅ ${c.ready} ready to send`);
   if (c.answer > 0) lines.push(`✍ ${c.answer} need${c.answer === 1 ? "s" : ""} one answer`);
   if (c.mac > 0) lines.push(`🖱 ${c.mac} need${c.mac === 1 ? "s" : ""} a click on your Mac${link.macOnline ? "" : " (Mac offline)"}`);
   if (c.site > 0) lines.push(`🌐 ${c.site} need${c.site === 1 ? "s" : ""} you on the site`);
+  if (filledCount > 0) lines.push(`📝 ${filledCount} filled tab${filledCount === 1 ? " waits" : "s wait"} for your yes`);
   if (noLinkCount > 0) lines.push(noLinkSummary(noLinkCount));
   if (!link.url) lines.push("The queue link is not configured, so open the Jobs list from the menu.");
   const button: JobsChatButton | null = link.url
