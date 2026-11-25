@@ -14,7 +14,17 @@
 import { HttpStatusError } from "./free-ats-transport.js";
 import type { FreeAts } from "./free-boards.js";
 
+/** Thrown (never retried) when a request's turn would start past the sweep's pacing budget. */
+export class PacingBudgetError extends Error {
+  constructor() {
+    super("Workday pacing budget spent");
+    this.name = "PacingBudgetError";
+  }
+}
+
 export interface RequestGateOptions {
+  /** Time from sweep start after which no new request may start. Counted from `reset()`. */
+  readonly budgetMs?: number;
   readonly baseGapMs: number;
   readonly maxGapMs: number;
   readonly maxCooldownMs: number;
@@ -25,6 +35,8 @@ export interface RequestGateOptions {
 export interface RequestGate {
   /** Run `fn` once it is this caller's turn; feeds the outcome back into the pacing. */
   run<T>(fn: () => Promise<T>): Promise<T>;
+  /** Start a sweep: base gap, no cooldown, budget counted from now. */
+  reset(): void;
   /** Current spacing, for tests and logs. */
   gapMs(): number;
 }
@@ -35,12 +47,15 @@ export function createRequestGate(opts: RequestGateOptions): RequestGate {
   let gap = opts.baseGapMs;
   let nextAt = 0;
   let cooldownUntil = 0;
+  let budgetEnd = Infinity; // unbounded until the first reset()
 
   async function acquire(): Promise<void> {
-    const at = Math.max(now(), nextAt);
+    const at = Math.max(now(), nextAt, cooldownUntil);
+    if (at > budgetEnd) throw new PacingBudgetError();
     nextAt = at + gap;
     for (let wait = at - now(); wait > 0; wait = Math.max(at, cooldownUntil) - now()) {
       await sleep(wait);
+      if (Math.max(at, cooldownUntil) > budgetEnd) throw new PacingBudgetError();
     }
   }
 
@@ -65,6 +80,12 @@ export function createRequestGate(opts: RequestGateOptions): RequestGate {
         throw err;
       }
     },
+    reset() {
+      gap = opts.baseGapMs;
+      nextAt = 0;
+      cooldownUntil = 0;
+      budgetEnd = opts.budgetMs === undefined ? Infinity : now() + opts.budgetMs;
+    },
     gapMs: () => gap,
   };
 }
@@ -74,6 +95,7 @@ export const workdayGate: RequestGate = createRequestGate({
   baseGapMs: 300,
   maxGapMs: 4_000,
   maxCooldownMs: 30_000,
+  budgetMs: 15 * 60_000, // half the 30-minute sweep slot; later requests fail fast
 });
 
 /** Run a board request through its platform's gate (only Workday has one). */

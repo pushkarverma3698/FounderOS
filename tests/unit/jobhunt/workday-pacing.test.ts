@@ -8,7 +8,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 const { sweepBoards } = await import("../../../src/tools/jobhunt/free-ats-source.js");
-const { createRequestGate, attemptsFor } = await import("../../../src/tools/jobhunt/workday-pacing.js");
+const { createRequestGate, attemptsFor, workdayGate } = await import("../../../src/tools/jobhunt/workday-pacing.js");
 import { HttpStatusError } from "../../../src/tools/jobhunt/free-ats-transport.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -47,6 +47,33 @@ describe("workday pacing", () => {
     expect(rateLimited).toBe(0);
     expect(sweep.failures).toEqual([]);
     expect(sweep.boardsPolled).toBe(40);
+  });
+});
+
+describe("sweep budget and reset", () => {
+  it("persistent 429s finish 390 boards inside 20 min, and the next sweep starts at the base gap", async () => {
+    mockFetch.mockImplementation(async () => ({
+      ok: false, status: 429, json: async () => ({}), headers: new Headers(), body: { cancel: async () => {} },
+    }));
+    const boards = Array.from({ length: 390 }, (_, i) => wdBoard(i));
+    const t0 = Date.now();
+    const first = sweepBoards(boards);
+    await vi.runAllTimersAsync();
+    const sweep = await first;
+    expect(Date.now() - t0).toBeLessThan(20 * 60_000);
+    expect(sweep.failures).toHaveLength(390);
+    expect(sweep.failures.some((f) => f.includes("Workday pacing budget spent"))).toBe(true);
+
+    let gapAtStart = -1;
+    mockFetch.mockReset();
+    mockFetch.mockImplementation(async () => {
+      gapAtStart = workdayGate.gapMs();
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ total: 0, jobPostings: [] }) };
+    });
+    const second = sweepBoards([wdBoard(1000)]);
+    await vi.runAllTimersAsync();
+    expect((await second).failures).toEqual([]);
+    expect(gapAtStart).toBe(300);
   });
 });
 

@@ -31,7 +31,7 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, NotJsonError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
-import { paced, attemptsFor } from "./workday-pacing.js";
+import { paced, attemptsFor, workdayGate, PacingBudgetError } from "./workday-pacing.js";
 import { DEAD_BOARD_STREAK, planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
 import { describeFailedBoards, retiredBoards, type BoardReason } from "./board-failure.js";
 import { getAdapter } from "./adapters/index.js";
@@ -195,6 +195,7 @@ export type BoardFetch =
  * is taken as final.
  */
 function isRetryable(err: unknown): boolean {
+  if (err instanceof PacingBudgetError) return false;
   if (err instanceof NotJsonError) return false; // the same page comes back; three asks is three times the traffic
   return err instanceof HttpStatusError ? RETRYABLE_STATUSES.has(err.status) : true;
 }
@@ -294,6 +295,7 @@ export async function sweepBoards(
   boards: readonly FreeBoard[],
   health?: BoardHealthDeps,
 ): Promise<BoardSweep> {
+  workdayGate.reset();
   const plan = health ? await planBoardPolls(boards, health) : { poll: boards, skipped: [] };
 
   // Grouped by platform so each is bounded at its own rate (PLATFORM_CONCURRENCY).
