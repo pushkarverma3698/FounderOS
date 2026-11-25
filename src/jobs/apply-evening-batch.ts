@@ -44,8 +44,8 @@ export interface EveningDeps {
   readonly queue?: {
     readonly rows: (profileId: string, now: Date) => Promise<readonly JobApplication[]>;
     readonly link: (now: Date) => Promise<QueueLink>;
-    /** How many tabs Claude filled that wait for his yes (#1330). Optional. */
-    readonly filledCount?: (profileId: string) => Promise<number>;
+    /** Ids of the tabs Claude filled that wait for his yes (#1330). Optional. */
+    readonly filledIds?: (profileId: string) => Promise<ReadonlySet<string>>;
   };
   readonly send: (message: EveningMessage) => Promise<void>;
   /** True when this caller won today's marker for the profile. */
@@ -97,7 +97,7 @@ async function realDeps(): Promise<EveningDeps> {
     },
     queue: {
       rows: listQueueLaneRows,
-      filledCount: async (profileId) => (await (await import("../db/claude-lane-queries.js")).listClaudeFilledRows(profileId)).length,
+      filledIds: async (profileId) => new Set((await (await import("../db/claude-lane-queries.js")).listClaudeFilledRows(profileId)).map((f) => f.rowId)),
       link: async (now) => {
         const { applyQueueUrl } = await import("../gateway/apply-queue-page.js");
         const { opensInTelegram } = await import("../gateway/apply-handoff-card.js");
@@ -131,7 +131,7 @@ async function batchFor(profile: JobSearchProfile, now: Date, d: EveningDeps): P
   if (d.queue) {
     const { rows, noLink } = dropNoEmployerLink(await d.queue.rows(profile.id, now));
     if (noLink > 0) log.info({ profile: profile.id, noLink }, "Evening batch dropped rows with no employer link");
-    const digest = buildQueueDigest(first, rows, await d.queue.link(now), noLink, (await d.queue.filledCount?.(profile.id)) ?? 0);
+    const digest = buildQueueDigest(first, rows, await d.queue.link(now), noLink, (await d.queue.filledIds?.(profile.id)) ?? new Set());
     return [...boardMsgs, ...(digest ? [digest] : [])];
   }
   const { rows, noLink } = dropNoEmployerLink(await d.waiting(profile.id, now));

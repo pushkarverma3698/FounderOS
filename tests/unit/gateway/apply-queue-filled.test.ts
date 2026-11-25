@@ -46,9 +46,19 @@ describe("apply queue: Claude-filled rows", () => {
   it("the digest says 'F filled tabs wait for your yes', and sends even when only filled tabs wait", () => {
     const link = { url: "https://apply.example.test/apply/queue", inTelegram: true, macOnline: true };
     const row = { apply_lane: "auto", apply_lane_reason: "all filled" } as unknown as JobApplication;
-    expect(buildQueueDigest("P", [row], link, 0, 3)!.text).toContain("3 filled tabs wait for your yes");
-    expect(buildQueueDigest("P", [row], link, 0, 1)!.text).toContain("1 filled tab waits for your yes");
-    expect(buildQueueDigest("P", [], link, 0, 2)).not.toBeNull();
+    const ids = (...n: string[]) => new Set(n);
+    expect(buildQueueDigest("P", [row], link, 0, ids("a", "b", "c"))!.text).toContain("3 filled tabs wait for your yes");
+    expect(buildQueueDigest("P", [row], link, 0, ids("a"))!.text).toContain("1 filled tab waits for your yes");
+    expect(buildQueueDigest("P", [], link, 0, ids("a", "b"))).not.toBeNull();
     expect(buildQueueDigest("P", [row], link)!.text).not.toContain("filled tab");
+  });
+
+  it("a filled tab is a hand_off row too: counted once, as filled, not again as 'on the site'", () => {
+    const link = { url: "https://apply.example.test/apply/queue", inTelegram: true, macOnline: true };
+    const row = { id: "r1", apply_lane: "hand_off", apply_lane_reason: "Workday: needs an account" };
+    const text = buildQueueDigest("P", [row], link, 0, new Set(["r1"]))!.text;
+    expect(text).toContain("1 role waiting");
+    expect(text).toContain("1 filled tab waits for your yes");
+    expect(text).not.toContain("on the site");
   });
 });

@@ -21,8 +21,10 @@ export interface QueueLink {
 }
 
 /** `noLinkCount` adds ONE line for Himalayas/Jobicy rows left out because they have no employer link. */
-export function buildQueueDigest(name: string, rows: readonly QueueLaneFields[], link: QueueLink, noLinkCount = 0, filledCount = 0): EveningMessage | null {
-  const c = countQueue(rows);
+export function buildQueueDigest(name: string, rows: readonly (QueueLaneFields & { readonly id?: string })[], link: QueueLink, noLinkCount = 0, filledIds: ReadonlySet<string> = new Set()): EveningMessage | null {
+  // A filled tab is also a hand_off row; it counts once, as filled.
+  const filledCount = filledIds.size;
+  const c = countQueue(rows.filter((r) => !r.id || !filledIds.has(r.id)));
   const total = queueTotal(c);
   if (total === 0 && filledCount === 0) return null;
   const lines = [`🌙 <b>${esc(name)}</b>: ${total + filledCount} role${total + filledCount === 1 ? "" : "s"} waiting`];
