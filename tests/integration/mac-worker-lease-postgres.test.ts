@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { closeDatabaseConnections, getDb } from "../../src/db/client.js";
 import { jobApplications } from "../../src/db/schema.js";
 import { TENANT } from "../../src/core/config.js";

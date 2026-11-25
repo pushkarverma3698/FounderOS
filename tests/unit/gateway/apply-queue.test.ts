@@ -169,6 +169,27 @@ describe("apply queue Mini App", () => {
     expect(wife.items.map((i) => i.company)).toEqual(["ING"]);
   });
 
+  it("a Mac row with an open required question waits under 'answer' with the one-question field, and the counts match", async () => {
+    const mac = (n: number, company: string, unanswered: unknown[]) => {
+      ROWS.push(lane(n, "pushkar-nl-tech", company, "hand_off", "CAPTCHA or reCAPTCHA widget on the form; a person has to solve it"));
+      saveApplySnapshot({ ...snap(n, company), summary: { ...snap(n, company).summary, unanswered } } as never, root);
+    };
+    mac(9, "MacAskCo", [{ label: "Notice period?", required: true, fieldType: "text" }]);
+    mac(10, "MacOptCo", [{ label: "Anything else?", required: false, fieldType: "text" }]);
+    try {
+      const q = await queue();
+      const byName = Object.fromEntries(q.items.map((i) => [i.company, i]));
+      expect(byName["MacAskCo"]).toMatchObject({ group: "answer", question: { label: "Notice period?" } });
+      expect(byName["MacAskCo"]?.macNote).toBeUndefined();
+      expect(byName["MacOptCo"]).toMatchObject({ group: "mac" });
+      expect(byName["MacCo"]).toMatchObject({ group: "mac" });
+      expect(q.counts).toEqual({ ready: 2, answer: 2, mac: 2, site: 1 });
+      for (const g of ["ready", "answer", "mac", "site"]) expect(q.items.filter((i) => i.group === g).length).toBe(q.counts[g]);
+    } finally {
+      ROWS.length -= 2;
+    }
+  });
+
   it("gives the signed link and Send only to a ready row that has a snapshot", async () => {
     const byName = Object.fromEntries((await queue()).items.map((i) => [i.company, i]));
     expect(byName["ReadyCo"]).toMatchObject({ group: "ready", canSend: true, createdAt: 4243 });
