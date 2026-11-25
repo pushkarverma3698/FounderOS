@@ -252,10 +252,10 @@ export const APPLY_QUEUE_SCRIPT = String.raw`(function () {
 
   function render(data) {
     bodyEl.textContent = "";
-    var items = data.items || [];
-    statusEl.textContent = items.length ? "" : "Nothing waiting in your queue.";
+    var items = data.items || [], filled = data.filled || [];
+    statusEl.textContent = items.length || filled.length ? "" : "Nothing waiting in your queue.";
     var c = data.counts || {};
-    subEl.textContent = items.length ? (c.ready || 0) + " ready to send, " + (c.answer || 0) + " need one answer, " + (c.mac || 0) + " need a click on your Mac, " + (c.site || 0) + " need you on the site." : "";
+    subEl.textContent = items.length || filled.length ? (c.ready || 0) + " ready to send, " + (c.answer || 0) + " need one answer, " + (c.mac || 0) + " need a click on your Mac, " + (c.site || 0) + " need you on the site" + (filled.length ? ", " + filled.length + " filled tabs wait for your yes." : ".") : "";
     if (c.mac && !data.macOnline) bodyEl.appendChild(el("p", "warn", "Mac offline: the Mac rows wait until it checks in."));
     (data.groups || []).forEach(function (g) {
       var rows = items.filter(function (i) { return i.group === g.id; });
@@ -263,6 +263,20 @@ export const APPLY_QUEUE_SCRIPT = String.raw`(function () {
       bodyEl.appendChild(el("h2", "", g.title + " (" + rows.length + ")"));
       if (g.id === "ready") { bodyEl.appendChild(deck(rows)); return; }
       rows.forEach(function (item) { bodyEl.appendChild((g.id === "answer" ? answerCard(item) : plainCard(item, data.macOnline)).node); });
+    });
+    filledList(filled);
+  }
+
+  function filledList(filled) {
+    if (!filled.length) return;
+    bodyEl.appendChild(el("h2", "", "Claude filled, waiting for your yes (" + filled.length + ")"));
+    bodyEl.appendChild(el("p", "hint", "Approve in your Remote Control chat: write the numbers, like \"submit 1, 3 and 5\"."));
+    filled.forEach(function (f) {
+      var c = el("div", "q");
+      c.appendChild(el("span", "t big", f.n + ". " + f.company + " - " + f.title));
+      if (f.link) { var a = el("a", "go", "Open the filled tab"); a.href = f.link; a.target = "_blank"; a.rel = "noopener noreferrer"; c.appendChild(a); }
+      c.appendChild(el("p", "note", f.blanks.length ? "Blanks left: " + f.blanks.join(", ") : "No blanks left."));
+      bodyEl.appendChild(c);
     });
   }
 
