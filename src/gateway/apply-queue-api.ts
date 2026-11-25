@@ -7,6 +7,7 @@
  * page's actions call the existing answer, hand-off and submit endpoints.
  */
 
+import type { ClaudeFilledRow } from "../tools/jobhunt/claude-lane-rules.js";
 import type { JobApplication } from "../db/schema.js";
 import { dropNoEmployerLink } from "../tools/jobhunt/aggregator-apply-url.js";
 import { buildApplyUrl, loadApplySnapshot, readApplyLinkConfig, type ApplySnapshot } from "../tools/jobhunt/apply-link.js";
@@ -45,9 +46,21 @@ export interface QueueQuestion {
   readonly draft?: string;
 }
 
+/** One filled tab Claude left open, numbered as the chat reply ("submit 1, 3 and 5") counts them. */
+export interface FilledItem {
+  readonly n: number;
+  readonly id: string;
+  readonly company: string;
+  readonly title: string;
+  readonly link: string;
+  readonly blanks: readonly string[];
+}
+
 export interface QueueDeps {
   readonly rows: (profile: JobSearchProfile, now: Date) => Promise<readonly JobApplication[]>;
   readonly macBeat: () => Promise<Date | null>;
+  /** Tabs Claude filled and he has not yet approved (#1330). Absent: none. */
+  readonly filled?: (profileId: string) => Promise<readonly ClaudeFilledRow[]>;
 }
 
 // jobUrl is a scraped URL that lands in an href, so only http(s) passes (sanitizeTelegramUrl).
@@ -95,8 +108,13 @@ export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: Qu
   // Same rule as the evening digest: Himalayas/Jobicy hand-offs have no employer link, so they are not listed.
   const open = dropNoEmployerLink((await q.rows(profile, now)).filter((r) => r.profile_id === profile.id)).rows;
   const macOk = macOnline(await q.macBeat(), now);
+  const filledRows = (await q.filled?.(profile.id)) ?? [];
+  const filled: FilledItem[] = filledRows.map((f, i) => ({ n: i + 1, id: f.rowId, company: f.company, title: f.title, link: sanitizeTelegramUrl(f.link) ?? "", blanks: f.blanks }));
+  // A filled tab shows in its own list, not again as a Mac or answer row.
+  const filledIds = new Set(filledRows.map((f) => f.rowId));
   const items: QueueItem[] = [];
   for (const r of open) {
+    if (filledIds.has(r.id)) continue;
     const lane = queueGroupOf(r);
     if (!lane) continue;
     const snap = loadApplySnapshot(r.id, deps.root);
@@ -115,6 +133,7 @@ export async function buildQueue(profile: JobSearchProfile, deps: ApiDeps, q: Qu
     counts: countItems(items),
     groups: QUEUE_GROUPS.map((id) => ({ id, title: QUEUE_GROUP_TITLE[id] })),
     items: orderQueue(items),
+    filled,
     macOnline: macOk,
   };
 }
