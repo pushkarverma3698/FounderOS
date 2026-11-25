@@ -18,7 +18,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { TENANT } from "../../core/config.js";
 import { recordIngestRun } from "../../db/job-run-queries.js";
-import { estimateQueryCost, toLedgerAmount, type ApifyPlan, type FeedPricing } from "./cost.js";
+import { estimateQueryCost, isApifyAuthRefusal, toLedgerAmount, type ApifyPlan, type FeedPricing } from "./cost.js";
 import type { IngestLine } from "./ingest.js";
 
 const log = childLogger({ module: "jobhunt:ingest-ledger" });
@@ -155,7 +155,11 @@ export async function recordQueryCost(entry: LedgerEntry): Promise<void> {
             bodyless: entry.funnel.bodyless,
           }
         : {}),
-      estimated_cost_usd: toLedgerAmount(estimateQueryCost(entry.pricing, entry.returned)),
+      // A 401/403 is refused before any run starts, so Apify bills nothing. Every
+      // other failure still costs the start.
+      estimated_cost_usd: isApifyAuthRefusal(entry.error)
+        ? toLedgerAmount(0)
+        : toLedgerAmount(estimateQueryCost(entry.pricing, entry.returned)),
       ...(screenError ? { screen_error: screenError } : {}),
       ...(entry.error ? { error: entry.error } : {}),
     });
