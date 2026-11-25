@@ -211,7 +211,8 @@ export async function runPooledIngest(opts: {
       if (!result.ok) {
         failures.push(`ATS pool "${pool}" / ${track}: ${result.error}`);
         // Billed a start regardless of what came back — recorded, or the cost of
-        // a broken day would read as cheaper than a working one.
+        // a broken day would read as cheaper than a working one. Exception: a
+        // 401/403 starts no run, and recordQueryCost records that as $0.
         await recordQueryCost({
           sweepId,
           feed: "ats",
