@@ -31,6 +31,7 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, NotJsonError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
+import { paced, attemptsFor } from "./workday-pacing.js";
 import { DEAD_BOARD_STREAK, planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
 import { describeFailedBoards, retiredBoards, type BoardReason } from "./board-failure.js";
 import { getAdapter } from "./adapters/index.js";
@@ -230,10 +231,10 @@ export async function fetchBoard(
       let payload: unknown;
       for (let attempt = 1; ; attempt++) {
         try {
-          payload = await fetchPayload(url, BOARD_TIMEOUT_MS, format, boardCache, request);
+          payload = await paced(board.ats, () => fetchPayload(url, BOARD_TIMEOUT_MS, format, boardCache, request));
           break;
         } catch (err) {
-          if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) throw err;
+          if (attempt >= attemptsFor(board.ats, BOARD_ATTEMPTS) || !isRetryable(err)) throw err;
           
           let delay = retryDelayMs(attempt, Math.random());
           if (err instanceof HttpStatusError && err.retryAfterMs) {
