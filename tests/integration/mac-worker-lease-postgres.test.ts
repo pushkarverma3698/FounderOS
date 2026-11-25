@@ -165,6 +165,16 @@ describe.skipIf(!up)("Mac worker lease (real Postgres)", () => {
     await clean();
   });
 
+  it("skip: a row the caller rejects (open required question) is never leased and spends no attempt", async () => {
+    const [open, fine] = await seed(2);
+    const got = await leaseNextRow([PROFILE], NOW, "lease-s1", TTL, (id) => id === open);
+    expect(got?.id).toBe(fine);
+    expect(await leaseNextRow([PROFILE], NOW, "lease-s2", TTL, (id) => id === open)).toBeNull();
+    const rows = await getDb().select({ attempts: jobApplications.mac_attempts }).from(jobApplications).where(eq(jobApplications.id, open!));
+    expect(rows[0]?.attempts).toBe(0);
+    await clean();
+  });
+
   it("records and reads the Mac heartbeat", async () => {
     const at = new Date(NOW.getTime() - 5000);
     await recordMacBeat(at);

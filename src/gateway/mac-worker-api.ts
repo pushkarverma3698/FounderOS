@@ -33,7 +33,9 @@ import { logger } from "../infra/logger.js";
 import { jobsChatId, sendMessageTo, sendPhoto } from "../infra/telegram-send.js";
 import { CLAUDE_FILLED_HOLD_MS, CLAUDE_MAX_PER_LEASE, claudeLaneOf, claudeStateOf, formatFilledMessages, transitionAllowed } from "../tools/jobhunt/claude-lane-rules.js";
 import { bearerOf, MAC_LEASE_TTL_MS, MAC_MAX_PROOF_CHARS, parseResultBody, tokenMatches, type MacResultBody } from "../tools/jobhunt/mac-worker-rules.js";
+import { loadApplySnapshot } from "../tools/jobhunt/apply-link.js";
 import { listProfiles } from "../tools/jobhunt/profile-config.js";
+import { hasOpenRequiredQuestion } from "./apply-queue-api.js";
 import { readBody, TOO_LARGE } from "./apply-api.js";
 import { appliedOn } from "./apply-material.js";
 import { tryLockApply } from "./apply-session.js";
@@ -51,6 +53,8 @@ export interface MacWorkerDeps {
   readonly token: () => string | undefined;
   readonly profileIds: () => readonly string[];
   readonly lease: typeof leaseNextRow;
+  /** True when the row's apply snapshot has an open required question: the lease must not hand it to the Mac worker. */
+  readonly hasOpenQuestion: (rowId: string) => boolean;
   readonly getLeased: typeof getLeasedRow;
   readonly extend: typeof extendLease;
   readonly release: typeof releaseLease;
@@ -71,7 +75,7 @@ export interface MacWorkerDeps {
 export function defaultMacWorkerDeps(): MacWorkerDeps {
   return {
     now: () => new Date(), token: macWorkerToken, profileIds: () => listProfiles().map((p) => p.id),
-    lease: leaseNextRow, getLeased: getLeasedRow, extend: extendLease, release: releaseLease, unconfirmed: markUnconfirmed, releaseDry: releaseWithoutAttempt, beat: recordMacBeat,
+    lease: leaseNextRow, hasOpenQuestion: (rowId) => hasOpenRequiredQuestion(loadApplySnapshot(rowId)), getLeased: getLeasedRow, extend: extendLease, release: releaseLease, unconfirmed: markUnconfirmed, releaseDry: releaseWithoutAttempt, beat: recordMacBeat,
     leaseClaude: leaseClaudeRows, markFilled, filledForLease: listFilledForLease, claudeWorkday: claudeLaneWorkdayEnabled,
     packet: buildMacPacket, cv: resolveCv, settle: settleConfirmed,
     notify: (html) => sendMessageTo(jobsChatId(), html, { parse_mode: "HTML" }),
@@ -237,7 +241,7 @@ async function route(req: IncomingMessage, res: ServerResponse, action: string, 
   if (action === "lease") {
     if (!want("POST")) return;
     const leaseId = randomUUID();
-    const row = await deps.lease(deps.profileIds(), deps.now(), leaseId, MAC_LEASE_TTL_MS);
+    const row = await deps.lease(deps.profileIds(), deps.now(), leaseId, MAC_LEASE_TTL_MS, deps.hasOpenQuestion);
     if (!row) return reply(res, 204);
     return reply(res, 200, { leaseId, rowId: row.id, leaseUntil: row.mac_lease_until?.toISOString() ?? null });
   }

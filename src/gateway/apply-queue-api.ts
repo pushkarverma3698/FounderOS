@@ -55,6 +55,9 @@ const clip = (t: string): string => (t.length > MAX_REASON_CHARS ? `${t.slice(0,
 
 export const macNoteFor = (online: boolean): string => (online ? "Click the check on your Mac." : "Mac offline. This waits until it is back on.");
 
+/** True when the snapshot still has a required question nobody answered. No snapshot means nothing known to be open. */
+export const hasOpenRequiredQuestion = (snap: ApplySnapshot | null): boolean => (snap?.summary.unanswered ?? []).some((q) => q.required);
+
 /** The one open required question of a snapshot, when there is exactly one and the page can take an answer to it. */
 export function oneQuestionOf(snap: ApplySnapshot | null): QueueQuestion | undefined {
   const open = snap?.summary.unanswered.filter((q) => q.required) ?? [];

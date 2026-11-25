@@ -62,7 +62,7 @@ describe("Mac worker API", () => {
     m.releaseDry.mockResolvedValue(true);
     m.settle.mockResolvedValue({ kind: "confirmed" });
     deps = {
-      now: () => NOW, token: () => token, profileIds: () => ["pushkar-nl-tech"], claudeWorkday: () => false, lease: m.lease, getLeased: m.getLeased, extend: m.extend,
+      now: () => NOW, token: () => token, profileIds: () => ["pushkar-nl-tech"], claudeWorkday: () => false, hasOpenQuestion: (id: string) => id === "open-row", lease: m.lease, getLeased: m.getLeased, extend: m.extend,
       release: m.release, unconfirmed: m.unconfirmed, releaseDry: m.releaseDry, beat: m.beat, packet: m.packet, cv: m.cv, settle: m.settle, notify: m.notify, photo: m.photo,
     } as unknown as Deps;
     server = createServer((req, res) => void handleMacWorkerRequest(req, res, deps));
@@ -103,8 +103,16 @@ describe("Mac worker API", () => {
     const body = (await first.json()) as { leaseId: string; rowId: string; leaseUntil: string };
     expect(body.rowId).toBe(ROW_ID);
     expect(body.leaseId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(m.lease).toHaveBeenCalledWith(["pushkar-nl-tech"], NOW, body.leaseId, 30 * 60 * 1000);
+    expect(m.lease).toHaveBeenCalledWith(["pushkar-nl-tech"], NOW, body.leaseId, 30 * 60 * 1000, expect.any(Function));
     expect((await call("POST", "lease")).status).toBe(204);
+  });
+
+  it("lease: hands the DB lease the open-question check, so a row with an open required question is skipped", async () => {
+    m.lease.mockResolvedValueOnce(null);
+    await call("POST", "lease");
+    const skip = m.lease.mock.calls[0]![4] as (id: string) => boolean;
+    expect(skip("open-row")).toBe(true);
+    expect(skip("other-row")).toBe(false);
   });
 
   it("rejects the wrong method", async () => {
