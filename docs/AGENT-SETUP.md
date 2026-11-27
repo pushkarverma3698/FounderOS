@@ -1,5 +1,7 @@
 # How the agent setup works
 
+**Status:** Partly superseded on 2026-11-27. The `agent-dispatch` cron and the `agent:ready` issue intake below no longer run. FounderOS work now comes from the tracker (`tracker next --project founderos-jobs`), and the founderos-jobs routine builds it with the `founderos-run` and `founderos-task` skills.
+
 Written 2026-09-28, after the unified-setup work (#746, #747, #749, #751). Where this and the code
 disagree, the code wins. Check the live state anytime with `~/Projects/scripts/ai-tools/verify-agent-setup`
 on the laptop, which runs 36 PASS/FAIL checks and spends nothing.

@@ -31,7 +31,7 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, NotJsonError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
-import { paced, attemptsFor, workdayGate, PacingBudgetError } from "./workday-pacing.js";
+import { paced, attemptsFor, workdayGate, PacingBudgetError, WorkdayPausedError, WORKDAY_PAUSED_MSG, selectWorkdayBoards, finishWorkdaySweep } from "./workday-pacing.js";
 import { DEAD_BOARD_STREAK, planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
 import { describeFailedBoards, retiredBoards, type BoardReason } from "./board-failure.js";
 import { getAdapter } from "./adapters/index.js";
@@ -195,7 +195,7 @@ export type BoardFetch =
  * is taken as final.
  */
 function isRetryable(err: unknown): boolean {
-  if (err instanceof PacingBudgetError) return false;
+  if (err instanceof PacingBudgetError || err instanceof WorkdayPausedError) return false;
   if (err instanceof NotJsonError) return false; // the same page comes back; three asks is three times the traffic
   return err instanceof HttpStatusError ? RETRYABLE_STATUSES.has(err.status) : true;
 }
@@ -236,6 +236,7 @@ export async function fetchBoard(
           break;
         } catch (err) {
           if (attempt >= attemptsFor(board.ats, BOARD_ATTEMPTS) || !isRetryable(err)) throw err;
+          if (board.ats === "workday" && err instanceof HttpStatusError && err.status === 429) throw err; // #1387: no in-sweep retry
           
           let delay = retryDelayMs(attempt, Math.random());
           if (err instanceof HttpStatusError && err.retryAfterMs) {
@@ -297,17 +298,18 @@ export async function sweepBoards(
 ): Promise<BoardSweep> {
   workdayGate.reset();
   const plan = health ? await planBoardPolls(boards, health) : { poll: boards, skipped: [] };
+  const poll = selectWorkdayBoards(plan.poll);
 
   // Grouped by platform so each is bounded at its own rate (PLATFORM_CONCURRENCY).
   // Groups run concurrently, so a slow platform never serialises behind another.
   const byPlatform = new Map<FreeAts, FreeBoard[]>();
-  for (const board of plan.poll) {
+  for (const board of poll) {
     const group = byPlatform.get(board.ats);
     if (group) group.push(board);
     else byPlatform.set(board.ats, [board]);
   }
 
-  const results = (
+  let results = (
     await Promise.all(
       [...byPlatform].map(([ats, group]) =>
         mapWithConcurrencyLimit(
@@ -318,7 +320,12 @@ export async function sweepBoards(
         )
       ),
     )
-  ).flat();
+  )
+    .flat();
+  // Boards a 429 kept Workday from asking are deferred to a later sweep, not failures (#1387).
+  const deferred = results.filter((r) => !r.ok && r.error === WORKDAY_PAUSED_MSG).length;
+  if (deferred > 0) results = results.filter((r) => r.ok || r.error !== WORKDAY_PAUSED_MSG);
+  finishWorkdaySweep(poll.filter((b) => b.ats === "workday").length - deferred, workdayGate.tripped());
 
   const recorded = health ? await recordBoardOutcomes(results, health) : undefined;
 
@@ -348,7 +355,8 @@ export async function sweepBoards(
   // Each failure NAMED, because "5 failed" is not something anyone can fix: board id + reason, and the retired ids.
   log.info(
     {
-      boards: plan.poll.length,
+      boards: poll.length - deferred,
+      workdayDeferred: deferred,
       failed: failures.length,
       failedBoards: describeFailedBoards(results),
       skippedDead: plan.skipped.length,
@@ -365,7 +373,7 @@ export async function sweepBoards(
     failures,
     skippedDead: plan.skipped.map((b) => `${b.ats}/${b.token}`),
     ...(retired === undefined ? {} : { retired }),
-    boardsPolled: plan.poll.length,
+    boardsPolled: poll.length - deferred,
   };
 }
 
