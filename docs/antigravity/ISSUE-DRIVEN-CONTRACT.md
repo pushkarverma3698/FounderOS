@@ -1,4 +1,6 @@
-# Issue-driven autonomous loop — BINDING
+# Issue-driven autonomous loop
+
+**Status:** Superseded on 2026-11-27 by the tracker (`tracker next --project founderos-jobs`, rows `T-<n>`) and the `founderos-run` / `founderos-task` skills. `agent-dispatch` and `pr-brain` no longer run; nothing reads the `agent:*` labels.
 
 **How a GitHub Issue becomes a PR without a human relaying messages between Antigravity and
 Claude.** Read this together with [STANDARDS.md](STANDARDS.md) (how code is written — referenced,
