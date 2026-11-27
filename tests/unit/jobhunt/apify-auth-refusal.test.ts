@@ -42,6 +42,22 @@ describe("summariseSweepFailures", () => {
     expect(out[0]).not.toContain("user-or-token-not-found");
   });
 
+  it("names both codes with counts on a mixed 401/403 sweep", () => {
+    const out = summariseSweepFailures(["a: returned HTTP 401: x", "b: returned HTTP 403: y"]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("Apify refused 2 call(s) (401 ×1, 403 ×1)");
+    expect(out[0]).toContain("Nothing was billed.");
+  });
+
+  it("says a 403-only sweep was a plan or permission limit, not a bad token", () => {
+    const out = summariseSweepFailures(["a: returned HTTP 403: x", "b: returned HTTP 403: y"]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("403");
+    expect(out[0]).toContain("on 2 call(s)");
+    expect(out[0]).toMatch(/plan or permission/);
+    expect(out[0]).not.toMatch(/replace it/);
+  });
+
   it("keeps non-auth failures as they were", () => {
     const out = summariseSweepFailures(["x: returned HTTP 401: a", "y: timeout"]);
     expect(out).toHaveLength(2);

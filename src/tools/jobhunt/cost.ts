@@ -115,7 +115,15 @@ export function isApifyAuthRefusal(error: string | null | undefined): boolean {
 export function summariseSweepFailures(failures: readonly string[]): string[] {
   const auth = failures.filter((f) => isApifyAuthRefusal(f));
   if (auth.length === 0) return [...failures];
-  const code = /returned HTTP (401|403)\b/.exec(auth[0]!)![1];
-  const line = `Apify token rejected (${code}) on ${auth.length} call(s) — replace it. Nothing was billed.`;
+  const n = (code: string) => auth.filter((f) => new RegExp(`returned HTTP ${code}\\b`).test(f)).length;
+  const [n401, n403] = [n("401"), n("403")];
+  let line: string;
+  if (n403 === 0) {
+    line = `Apify token rejected (401) on ${n401} call(s) — replace it. Nothing was billed.`;
+  } else if (n401 === 0) {
+    line = `Apify accepted the token but refused (403) on ${n403} call(s) — a plan or permission limit, not a bad token. Nothing was billed.`;
+  } else {
+    line = `Apify refused ${auth.length} call(s) (401 ×${n401}, 403 ×${n403}). Nothing was billed.`;
+  }
   return [line, ...failures.filter((f) => !isApifyAuthRefusal(f))];
 }
