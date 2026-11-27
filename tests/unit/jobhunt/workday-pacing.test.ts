@@ -8,7 +8,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 const { sweepBoards } = await import("../../../src/tools/jobhunt/free-ats-source.js");
-const { createRequestGate, attemptsFor, workdayGate } = await import("../../../src/tools/jobhunt/workday-pacing.js");
+const { createRequestGate, attemptsFor, resetWorkdayRotation } = await import("../../../src/tools/jobhunt/workday-pacing.js");
 import { HttpStatusError } from "../../../src/tools/jobhunt/free-ats-transport.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -50,30 +50,60 @@ describe("workday pacing", () => {
   });
 });
 
-describe("sweep budget and reset", () => {
-  it("persistent 429s finish 390 boards inside 20 min, and the next sweep starts at the base gap", async () => {
-    mockFetch.mockImplementation(async () => ({
-      ok: false, status: 429, json: async () => ({}), headers: new Headers(), body: { cancel: async () => {} },
-    }));
+describe("#1387 cross-sweep rotation and backoff", () => {
+  const T_MS = 60 * 60_000; // stub limiter: 429 while >= N starts landed in the last hour
+  const N = 100;
+  const SLOT_MS = 30 * 60_000;
+  const reply429 = () => ({ ok: false, status: 429, json: async () => ({}), headers: new Headers(), body: { cancel: async () => {} } });
+  const reply200 = () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ total: 0, jobPostings: [] }) });
+
+  it("a simulated day of 48 sweeps fetches every board, never overruns the slot, and fails < 40 boards a sweep", async () => {
+    const starts: number[] = [];
+    const fetched = new Set<string>();
+    mockFetch.mockImplementation(async (url: string) => {
+      const t = Date.now();
+      while (starts.length && starts[0]! <= t - T_MS) starts.shift();
+      const hot = starts.length >= N;
+      starts.push(t); // a refused request still keeps the limiter hot
+      if (hot) return reply429();
+      fetched.add(String(url));
+      return reply200();
+    });
+    resetWorkdayRotation();
     const boards = Array.from({ length: 390 }, (_, i) => wdBoard(i));
-    const t0 = Date.now();
+    let worst = 0;
+    let slowest = 0;
+    for (let s = 0; s < 48; s++) {
+      const t0 = Date.now();
+      const run = sweepBoards(boards);
+      await vi.runAllTimersAsync();
+      const sweep = await run;
+      slowest = Math.max(slowest, Date.now() - t0);
+      worst = Math.max(worst, sweep.failures.length);
+      vi.setSystemTime(t0 + SLOT_MS);
+    }
+    expect(worst).toBeLessThan(40);
+    expect(slowest).toBeLessThan(SLOT_MS);
+    expect(fetched.size).toBe(390);
+  });
+
+  it("the first 429 ends Workday for the sweep: no retries, the rest are deferred not failed, and the next sweep backs off", async () => {
+    resetWorkdayRotation();
+    mockFetch.mockImplementation(async () => reply429());
+    const boards = Array.from({ length: 200 }, (_, i) => wdBoard(i));
     const first = sweepBoards(boards);
     await vi.runAllTimersAsync();
     const sweep = await first;
-    expect(Date.now() - t0).toBeLessThan(20 * 60_000);
-    expect(sweep.failures).toHaveLength(390);
-    expect(sweep.failures.some((f) => f.includes("Workday pacing budget spent"))).toBe(true);
+    expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(4); // one 429 per in-flight worker, no retries
+    expect(sweep.failures.length).toBeLessThanOrEqual(4);
+    expect(sweep.failures.join()).not.toContain("budget spent");
 
-    let gapAtStart = -1;
-    mockFetch.mockReset();
-    mockFetch.mockImplementation(async () => {
-      gapAtStart = workdayGate.gapMs();
-      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ total: 0, jobPostings: [] }) };
-    });
-    const second = sweepBoards([wdBoard(1000)]);
+    mockFetch.mockClear();
+    vi.setSystemTime(Date.now() + 30 * 60_000); // next slot, still inside the 1 h backoff
+    const second = sweepBoards(boards);
     await vi.runAllTimersAsync();
     expect((await second).failures).toEqual([]);
-    expect(gapAtStart).toBe(300);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -92,18 +122,18 @@ describe("createRequestGate", () => {
     expect(starts[2]! - starts[1]!).toBeGreaterThanOrEqual(100);
   });
 
-  it("a 429 with Retry-After holds every later request and widens the gap, once per burst", async () => {
+  it("a 429 trips the gate: later requests fail fast, and reset() reopens it at the base gap", async () => {
     const g = gate();
-    const t0 = Date.now();
     const p = g.run(async () => { throw new HttpStatusError(429, 3000); }).catch(() => "429");
     await vi.runAllTimersAsync();
     await p;
-    expect(g.gapMs()).toBe(200);
-    let startedAt = 0;
-    const next = g.run(async () => void (startedAt = Date.now()));
-    await vi.runAllTimersAsync();
-    await next;
-    expect(startedAt - t0).toBeGreaterThanOrEqual(3000);
+    expect(g.tripped()).toBe(true);
+    const fn = vi.fn(async () => 1);
+    await expect(g.run(fn)).rejects.toThrow(/paused/);
+    expect(fn).not.toHaveBeenCalled();
+    g.reset();
+    expect(g.tripped()).toBe(false);
+    expect(g.gapMs()).toBe(100);
   });
 
   it("gives Workday extra attempts and nobody else", () => {
